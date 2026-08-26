@@ -1,0 +1,67 @@
+# ==========================================
+# Root & General Exclusions
+# ==========================================
+# Environment & Secrets (Never commit credentials!)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+
+# IDEs & Editors
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/
+*.swp
+*.swo
+
+# ==========================================
+# Backend Rules
+# ==========================================
+# Node.js / Express / Python / Java
+backend/node_modules/
+backend/vendor/
+backend/venv/
+backend/.venv/
+backend/dist/
+backend/build/
+backend/out/
+backend/coverage/
+backend/target/
+
+# Backend Local Storage / Databases
+backend/uploads/
+backend/storage/
+backend/*.db
+backend/*.sqlite
+
+# ==========================================
+# Frontend Rules
+# ==========================================
+# Node Modules & Package Managers
+frontend/node_modules/
+frontend/.pnpm-store/
+
+# Framework Build Outputs (React, Next.js, Vue, Vite)
+frontend/dist/
+frontend/build/
+frontend/out/
+frontend/.next/
+frontend/.nuxt/
+
+# Cache & Testing
+frontend/.cache/
+frontend/coverage/

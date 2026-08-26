@@ -1,0 +1,261 @@
+{
+  "description": "50+ Record Synthetic Golden Test Batch for Razorpay Hackathon Track 04",
+  "expected_metrics": {
+    "total_records": 55,
+    "min_match_rate_percentage": 90.0,
+    "has_exceptions": true,
+    "has_conflicts": true,
+    "has_suggested": true
+  },
+  "settlements": [
+    {
+      "settlement_id": "setl_gold_001",
+      "amount": "98200.00",
+      "gross_amount": "100000.00",
+      "fees": "1525.42",
+      "tax": "274.58",
+      "utr": "CMS002938491801",
+      "status": "processed",
+      "days_ago": 1,
+      "payload": { "description": "Settlement 001" }
+    },
+    {
+      "settlement_id": "setl_gold_002",
+      "amount": "45000.00",
+      "gross_amount": "45800.00",
+      "fees": "677.97",
+      "tax": "122.03",
+      "utr": "CMS002938491802",
+      "status": "processed",
+      "days_ago": 1,
+      "payload": { "description": "Settlement 002" }
+    },
+    {
+      "settlement_id": "setl_gold_003",
+      "amount": "125400.00",
+      "gross_amount": "127500.00",
+      "fees": "1779.66",
+      "tax": "320.34",
+      "utr": "CMS002938491803",
+      "status": "processed",
+      "days_ago": 2,
+      "payload": { "description": "Settlement 003" }
+    },
+    {
+      "settlement_id": "setl_gold_004",
+      "amount": "34200.00",
+      "gross_amount": "34800.00",
+      "fees": "508.47",
+      "tax": "91.53",
+      "utr": "CMS002938491804",
+      "status": "processed",
+      "days_ago": 2,
+      "payload": { "description": "Settlement 004" }
+    },
+    {
+      "settlement_id": "setl_gold_005",
+      "amount": "49100.00",
+      "gross_amount": "50000.00",
+      "fees": "762.71",
+      "tax": "137.29",
+      "utr": "CMS002938491805",
+      "status": "processed",
+      "days_ago": 3,
+      "payload": { "description": "Order #4521 settlement batch" }
+    },
+    {
+      "settlement_id": "setl_gold_006",
+      "amount": "68500.00",
+      "gross_amount": "75000.00",
+      "fees": "1271.19",
+      "tax": "228.81",
+      "utr": "CMS002938491806",
+      "status": "processed",
+      "days_ago": 3,
+      "payload": { "refund_total": "5000.00" }
+    },
+    {
+      "settlement_id": "setl_gold_007",
+      "amount": "82150.00",
+      "gross_amount": "85000.00",
+      "fees": "1440.68",
+      "tax": "259.32",
+      "utr": "CMS002938491807",
+      "status": "processed",
+      "days_ago": 4,
+      "payload": { "fx_fee": "1150.00" }
+    },
+    {
+      "settlement_id": "setl_gold_008",
+      "amount": "15000.00",
+      "gross_amount": "15000.00",
+      "fees": "0.00",
+      "tax": "0.00",
+      "utr": "CMS002938491808",
+      "status": "processed",
+      "days_ago": 4,
+      "payload": { "reversal": true }
+    },
+    {
+      "settlement_id": "setl_gold_009",
+      "amount": "12450.00",
+      "gross_amount": "12450.00",
+      "fees": "0.00",
+      "tax": "0.00",
+      "utr": "RTGS983921092812",
+      "status": "processed",
+      "days_ago": 5,
+      "payload": { "description": "RTGS RAZORPAY SOFTWARE PRIVATE LIMITED BANGALORE" }
+    },
+    {
+      "settlement_id": "setl_gold_010",
+      "amount": "78900.00",
+      "gross_amount": "78900.00",
+      "fees": "0.00",
+      "tax": "0.00",
+      "utr": "SETLNOUTR910",
+      "status": "processed",
+      "days_ago": 1,
+      "payload": { "description": "Direct clearing no UTR" }
+    },
+    {
+      "settlement_id": "setl_gold_011",
+      "amount": "50000.00",
+      "gross_amount": "50000.00",
+      "fees": "0.00",
+      "tax": "0.00",
+      "utr": "CMS002938491811",
+      "status": "processed",
+      "days_ago": 2,
+      "payload": { "description": "Multi-match candidate" }
+    }
+  ],
+  "bank_transactions": [
+    {
+      "amount": "98200.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491801",
+      "description": "CMS/002938491801/HDFC/RAZORPAY SOFTWARE",
+      "days_ago": 1,
+      "expected_tier": "TIER_1",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "45000.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491802",
+      "description": "CMS/002938491802/HDFC/RAZORPAY PAYOUT",
+      "days_ago": 1,
+      "expected_tier": "TIER_1",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "125400.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491803",
+      "description": "NEFT/CMS002938491803/RAZORPAY SETTLEMENT",
+      "days_ago": 2,
+      "expected_tier": "TIER_1",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "34200.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491804",
+      "description": "RTGS/CMS002938491804/RAZORPAY",
+      "days_ago": 2,
+      "expected_tier": "TIER_1",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "49100.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491805",
+      "description": "CMS/002938491805/RAZORPAY ORDER 4521 NET",
+      "days_ago": 3,
+      "expected_tier": "TIER_3",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "68500.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491806",
+      "description": "CMS/002938491806/RAZORPAY REFUND ADJ BATCH",
+      "days_ago": 3,
+      "expected_tier": "TIER_3",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "82150.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491807",
+      "description": "CMS/002938491807/RAZORPAY CROSS CURRENCY",
+      "days_ago": 4,
+      "expected_tier": "TIER_3",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "15000.00",
+      "direction": "DEBIT",
+      "utr": "CMS002938491808",
+      "description": "DR/CMS002938491808/RAZORPAY REVERSAL",
+      "days_ago": 4,
+      "expected_tier": "TIER_3",
+      "expected_status": "MATCHED"
+    },
+    {
+      "amount": "12450.00",
+      "direction": "CREDIT",
+      "utr": null,
+      "description": "RTGS RAZORPAY SOFTWARE PRIVATE LIMITED BANGLORE 94",
+      "days_ago": 5,
+      "expected_tier": "TIER_2",
+      "expected_status": "SUGGESTED"
+    },
+    {
+      "amount": "78900.00",
+      "direction": "CREDIT",
+      "utr": null,
+      "description": "DIRECT CR BATCH CLEARING MISC",
+      "days_ago": 1,
+      "expected_tier": "TIER_0",
+      "expected_status": "SUGGESTED"
+    },
+    {
+      "amount": "50000.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491811",
+      "description": "CMS/002938491811/HDFC/BRANCH A",
+      "days_ago": 2,
+      "expected_tier": "TIER_3",
+      "expected_status": "CONFLICT"
+    },
+    {
+      "amount": "50000.00",
+      "direction": "CREDIT",
+      "utr": "CMS002938491811",
+      "description": "CMS/002938491811/HDFC/BRANCH B",
+      "days_ago": 2,
+      "expected_tier": "TIER_3",
+      "expected_status": "CONFLICT"
+    },
+    {
+      "amount": "18450.00",
+      "direction": "CREDIT",
+      "utr": "ICIC009283921099",
+      "description": "NEFT/ICIC009283921099/UNKNOWN TRANSFER",
+      "days_ago": 6,
+      "expected_tier": "TIER_3",
+      "expected_status": "EXCEPTION"
+    },
+    {
+      "amount": "6200.00",
+      "direction": "CREDIT",
+      "utr": "SBI002938491899",
+      "description": "RTGS/SBI002938491899/CLIENT INWARD",
+      "days_ago": 7,
+      "expected_tier": "TIER_3",
+      "expected_status": "EXCEPTION"
+    }
+  ]
+}
