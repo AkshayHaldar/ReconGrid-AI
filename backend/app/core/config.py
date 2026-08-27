@@ -30,11 +30,13 @@ class Settings(BaseSettings):
     RECONCILIATION_TOLERANCE_INR: Decimal = Decimal("1.00")
     FUZZY_MATCH_CONFIDENCE_THRESHOLD: float = 0.90
     RAZORPAY_FETCH_MAX_RETRIES: int = 5
+    GST_RATE: Decimal = Decimal("0.18")
 
     # Settlement Q&A Agent
-    LLM_PROVIDER: str = "anthropic"
+    LLM_PROVIDER: str = "nvidia"  # "nvidia", "openai", or "anthropic"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = "claude-sonnet-5"
+    LLM_MODEL: str = "meta/llama-3.3-70b-instruct"
+    LLM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
 
     # Feature Flags
     IS_TEST_MODE: bool = True

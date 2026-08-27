@@ -197,22 +197,41 @@ class SettlementQaAgent:
             f"- Settlement ID: {log.rzp_settlement.settlement_id if log.rzp_settlement else 'N/A'}\n"
             f"- Question: {query}\n"
         )
-        # Call provider via httpx (compatible with standard chat completions / anthropic endpoints)
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": settings.LLM_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": settings.LLM_MODEL,
-                    "max_tokens": 300,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["content"][0]["text"].strip()
-            raise RuntimeError(f"LLM API error: {resp.status_code} {resp.text}")
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            if settings.LLM_PROVIDER in ("nvidia", "openai") or settings.LLM_BASE_URL:
+                url = f"{settings.LLM_BASE_URL.rstrip('/')}/chat/completions"
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {settings.LLM_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": settings.LLM_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 512,
+                        "temperature": 0.2,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                raise RuntimeError(f"LLM API error: {resp.status_code} {resp.text}")
+            else:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": settings.LLM_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": settings.LLM_MODEL,
+                        "max_tokens": 300,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    return data["content"][0]["text"].strip()
+                raise RuntimeError(f"LLM API error: {resp.status_code} {resp.text}")

@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RazorpaySettlementBase(BaseModel):
@@ -17,6 +17,13 @@ class RazorpaySettlementBase(BaseModel):
     settlement_created_at: datetime
     raw_payload: dict[str, Any] = Field(default_factory=dict)
     is_test_mode: bool = True
+
+    @field_validator("amount", "gross_amount", "fees", "tax", mode="before")
+    @classmethod
+    def validate_no_float(cls, v: Any) -> Any:
+        if isinstance(v, float):
+            raise ValueError("Float values are strictly forbidden for monetary fields; use Decimal, str, or int.")
+        return v
 
 
 class RazorpaySettlementCreate(RazorpaySettlementBase):

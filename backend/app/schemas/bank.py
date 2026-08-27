@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BankTransactionBase(BaseModel):
@@ -13,6 +13,13 @@ class BankTransactionBase(BaseModel):
     utr: Optional[str] = None
     description: str = ""
     raw_csv_row: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def validate_no_float(cls, v: Any) -> Any:
+        if isinstance(v, float):
+            raise ValueError("Float values are strictly forbidden for monetary fields; use Decimal, str, or int.")
+        return v
 
 
 class BankTransactionCreate(BankTransactionBase):

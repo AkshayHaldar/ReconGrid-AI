@@ -85,3 +85,18 @@ def test_guardrail_rejects_hallucinated_numbers():
     is_valid, invented = validate_qa_narration(hallucinated_text, log)
     assert is_valid is False
     assert any("99999" in token for token in invented)
+
+
+def test_guardrail_rejects_fabricated_gst_claim():
+    from types import SimpleNamespace
+    fake_log = SimpleNamespace(
+        delta_amount=Decimal('900.00'),
+        confidence_score=0.60,
+        bank_transaction=None,
+        rzp_settlement=None,
+        diagnostic_note='Fee deduction matched within tolerance.',
+    )
+    narration = 'This is explained by an 18% GST-only adjustment, unrelated to the actual fee.'
+    is_valid, invented = validate_qa_narration(narration, fake_log)
+    assert is_valid is False, f"Guardrail still lets fabricated GST claims through: {invented}"
+

@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ReconciliationStatusResponse(BaseModel):
@@ -18,6 +18,13 @@ class ReconciliationStatusResponse(BaseModel):
     total_reconciled_amount: Decimal = Field(..., decimal_places=2)
     total_exception_amount: Decimal = Field(..., decimal_places=2)
     last_reconciled_at: Optional[datetime] = None
+
+    @field_validator("total_ingested_amount", "total_reconciled_amount", "total_exception_amount", mode="before")
+    @classmethod
+    def validate_no_float(cls, v: Any) -> Any:
+        if isinstance(v, float):
+            raise ValueError("Float values are strictly forbidden for monetary fields; use Decimal, str, or int.")
+        return v
 
 
 class ReconciliationRecordItem(BaseModel):
@@ -61,6 +68,21 @@ class ReconciliationRecordItem(BaseModel):
     human_action: Optional[str] = None
     raw_csv_row: Optional[dict[str, Any]] = None
     raw_rzp_payload: Optional[dict[str, Any]] = None
+
+    @field_validator(
+        "bank_amount",
+        "rzp_amount",
+        "rzp_gross_amount",
+        "rzp_fees",
+        "rzp_tax",
+        "delta_amount",
+        mode="before",
+    )
+    @classmethod
+    def validate_no_float(cls, v: Any) -> Any:
+        if isinstance(v, float):
+            raise ValueError("Float values are strictly forbidden for monetary fields; use Decimal, str, or int.")
+        return v
 
 
 class ReconciliationRecordListResponse(BaseModel):

@@ -9,11 +9,12 @@ Evaluates monetary deltas deterministically against:
 
 from decimal import Decimal, ROUND_HALF_UP
 from typing import NamedTuple, Optional
+from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.utils.money import format_inr, is_amount_matching, to_decimal
 
-GST_RATE = Decimal("0.18")  # 18% GST standard for payment gateway processing fees
+GST_RATE = settings.GST_RATE  # GST standard for payment gateway processing fees
 
 
 class DiagnosticResult(NamedTuple):

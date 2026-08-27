@@ -38,15 +38,16 @@ def test_diagnostics_fee_gst_deduction():
     )
     setl = RazorpaySettlement(
         settlement_id="setl_2",
-        amount=Decimal("49100.00"),
+        amount=Decimal("0.00"),
         gross_amount=Decimal("50000.00"),
         fees=Decimal("762.71"),
         tax=Decimal("137.29"),
     )
-    # Bank shows 49,100 (net) against 50,000 gross with 762.71 fee + 137.29 GST = 900
+    # Bank shows 49,100 against 50,000 gross with 762.71 fee + 137.29 GST = 900
     result = DiagnosticsService.evaluate_delta(bank, setl)
-    assert result.diagnostic_type in {"FEE_DEDUCTION", "EXACT_MATCH"}
+    assert result.diagnostic_type == "FEE_DEDUCTION"
     assert result.match_status == "MATCHED"
+    assert result.delta_amount == Decimal("900.00")
 
 
 def test_diagnostics_refund_adjustment():
@@ -59,7 +60,7 @@ def test_diagnostics_refund_adjustment():
     )
     setl = RazorpaySettlement(
         settlement_id="setl_3",
-        amount=Decimal("68500.00"),
+        amount=Decimal("0.00"),
         gross_amount=Decimal("75000.00"),
         fees=Decimal("1271.19"),
         tax=Decimal("228.81"),
@@ -67,7 +68,8 @@ def test_diagnostics_refund_adjustment():
     )
     result = DiagnosticsService.evaluate_delta(bank, setl)
     assert result.match_status == "MATCHED"
-    assert result.diagnostic_type in {"REFUND_ADJUSTED", "EXACT_MATCH"}
+    assert result.diagnostic_type == "REFUND_ADJUSTED"
+    assert result.delta_amount == Decimal("5000.00")
 
 
 def test_diagnostics_debit_reversal():
@@ -98,7 +100,7 @@ def test_diagnostics_fx_adjustment():
     )
     setl = RazorpaySettlement(
         settlement_id="setl_fx",
-        amount=Decimal("82150.00"),
+        amount=Decimal("0.00"),
         gross_amount=Decimal("85000.00"),
         fees=Decimal("1440.68"),
         tax=Decimal("259.32"),
@@ -106,7 +108,8 @@ def test_diagnostics_fx_adjustment():
     )
     result = DiagnosticsService.evaluate_delta(bank, setl)
     assert result.match_status == "MATCHED"
-    assert result.diagnostic_type in {"FX_ADJUSTED", "EXACT_MATCH"}
+    assert result.diagnostic_type == "FX_ADJUSTED"
+    assert result.delta_amount == Decimal("1150.00")
 
 
 def test_diagnostics_unresolved_delta():
@@ -161,10 +164,31 @@ def test_diagnostics_tds_194o_deduction():
     )
     setl = RazorpaySettlement(
         settlement_id="setl_tds",
-        amount=Decimal("97200.00"),
+        amount=Decimal("0.00"),
         gross_amount=Decimal("100000.00"),
         fees=Decimal("1525.42"),
         tax=Decimal("274.58"),
+    )
+    result = DiagnosticsService.evaluate_delta(bank, setl)
+    assert result.match_status == "MATCHED"
+    assert result.diagnostic_type == "TDS_194O_DEDUCTION"
+    assert "1% TDS u/s 194-O" in result.diagnostic_note
+
+
+def test_diagnostics_tds_194o_estimated_fee():
+    bank = BankTransaction(
+        date=datetime.now(timezone.utc),
+        amount=Decimal("96640.00"),  # 100000 - 1000 TDS - 2000 (2% fee) - 360 (18% GST) = 96640
+        direction="CREDIT",
+        description="CMS/RAZORPAY/194O_EST",
+        row_hash="h_tds_est",
+    )
+    setl = RazorpaySettlement(
+        settlement_id="setl_tds_est",
+        amount=Decimal("0.00"),
+        gross_amount=Decimal("100000.00"),
+        fees=Decimal("0.00"),
+        tax=Decimal("0.00"),
     )
     result = DiagnosticsService.evaluate_delta(bank, setl)
     assert result.match_status == "MATCHED"
