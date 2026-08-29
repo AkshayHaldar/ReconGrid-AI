@@ -1,84 +1,98 @@
-# ReconGrid AI — Project Overview
+# 🎯 Project Overview — ReconGrid AI
 
-## 1. Executive Summary
-**ReconGrid AI** is a settlement reconciliation and discrepancy-diagnostic engine for B2B SaaS and high-volume D2C finance teams using Razorpay. It ingests bank statement CSVs, pulls live Razorpay settlement and refund data, runs a deterministic multi-tier matching pipeline, and produces three verifiable outputs on every run:
+## 1. What Is ReconGrid AI?
 
-1. An **automated match rate %** (matched + suggested-and-approved ÷ total records).
-2. A **total ₹ reconciled** figure with full audit trail back to source rows.
-3. An **honest, unedited exception list** — everything the engine could not resolve, with a reason.
+**ReconGrid AI** is a settlement reconciliation and discrepancy-diagnostic engine built for finance teams using Razorpay — especially B2B SaaS companies and high-volume D2C brands.
 
-This is a verification and audit tool first. LLM/AI components (if any) are used only where deterministic code demonstrably cannot resolve a case — never for arithmetic, matching, or money decisions.
+Every time you run it, it gives you three clear, verifiable things:
 
----
+1. **Automated Match Rate %** — how much was resolved automatically (`(matched + approved suggested) ÷ total records`)
+2. **Total ₹ Reconciled** — the exact amount reconciled, with an audit trail back to every source row
+3. **An Honest Exception List** — every single row that couldn't be resolved, verbatim, with a reason code
 
-## 2. The Problem
-For SMEs, scale-ups, and Chartered Accountants, settlement reconciliation is a recurring high-friction, error-prone workflow:
-
-* **Manual Excel Gridlock** — finance managers spend 15–30 hours/month cross-referencing bank UTRs against Razorpay payout reports across hundreds or thousands of rows.
-* **Non-trivial discrepancy math** — settlement amounts rarely match gross transaction amounts due to platform fees, 18% GST, chargebacks, and mid-cycle refund clawbacks.
-* **High human error, delayed closes** — manual matching produces reconciliation gaps, unlocated funds, and audit risk.
-* **Disparate data silos** — bank statements (varying formats) are disconnected from gateway API logs, with no automated source of truth.
+This is a **verification and audit tool first**. AI is used only for plain-English explanations of already-computed facts — never for math, matching, or financial decisions.
 
 ---
 
-## 3. The Solution
-A four-stage deterministic pipeline, with narrow, explicitly-bounded AI assistance:
+## 2. Why This Problem Matters
 
-1. **Intelligent Ingestion** — parse bank statement CSVs (HDFC, ICICI, SBI, Axis, Kotak, etc.) into canonical records (date, amount, UTR/reference, description), with a documented fallback path for statements that lack a clean UTR field entirely.
-2. **Automated Razorpay Pipeline** — pull settlements and refunds via the REST API with cursor pagination, exponential backoff, and a hard retry ceiling; ingest real-time `settlement.processed` webhooks idempotently.
-3. **Multi-Tier Matching Engine**:
-   * **Tier 0 (Fallback Match)** — date-window + exact-amount match, used when UTR is missing or non-standard.
-   * **Tier 1 (Exact Match)** — UTR + exact net settlement amount.
-   * **Tier 2 (Fuzzy Match)** — string similarity (≥90% confidence) on descriptor text for malformed/truncated UTRs.
-   * **Tier 3 (Diagnostics)** — deterministic delta analysis: fees + GST, refund clawbacks, FX adjustment, settlement reversal.
-4. **Audit & Exception Reporting** — every match, suggestion, and diagnostic decision is written to an append-only log with the inputs that produced it. Every run ends in one of three states per record: `MATCHED`, `SUGGESTED (pending human approval)`, or `EXCEPTION (reason code + raw data attached)` — never a silent drop.
-5. **Settlement Q&A Agent** — a natural-language layer on top of the audit trail. A finance user can ask *"why didn't order #4521 settle correctly?"* and get a plain-language answer sourced strictly from the already-computed `ReconciliationLog` entry — the LLM narrates an existing fact, it never calculates one. Any generated answer containing a number not present in the underlying record is rejected in favor of a template fallback.
+Talk to any SME founder, finance lead, or Chartered Accountant handling Razorpay, and they'll tell you the same things:
+
+* **Excel Gridlock:** They spend 15–30 hours every month manually comparing bank UTRs against Razorpay payout reports across hundreds or thousands of rows.
+* **The Math Is Never Simple:** Settlement amounts rarely match gross transaction amounts. Platform fees, 18% GST, mid-cycle refunds, chargebacks, and gateway reserves all create deltas that have to be figured out one by one.
+* **Human Error & Delayed Closes:** Doing this manually leads to missed discrepancies, unlocated funds, and delayed month-end closes.
+* **Data Silos:** Bank statement formats vary wildly (HDFC, ICICI, SBI, Axis all format differently), and they don't talk to payment gateway logs.
 
 ---
 
-## 4. Explicit Stopping Conditions
-The engine **must** stop attempting automated resolution and escalate to a human when:
-* A delta cannot be explained by fees + GST, refund batching, or FX adjustment within a configured tolerance (default ±₹1.00).
-* A fuzzy match confidence falls below the approval threshold (default 90%) — it is surfaced for review, never auto-applied.
-* The same settlement ID is a candidate match for more than one bank row (conflict — locked until a human resolves it).
-* A webhook payload fails signature verification — rejected outright, logged, never processed.
-* Razorpay API failures exceed the configured retry ceiling (default 5 attempts) — job halts and raises an operator alert rather than looping indefinitely.
+## 3. How ReconGrid AI Solves It
+
+A four-stage deterministic pipeline with bounded AI assistance:
+
+```
+[ Bank CSV ] ──► [ 1. Ingest & Normalize ] ──┐
+                                             ├──► [ 3. Multi-Tier Matcher ] ──► [ 4. Audit & Exceptions ]
+[ Razorpay ] ──► [ 2. Sync Settlements ]  ──┘                                      │
+                                                                                   ▼
+                                                                           [ 5. Q&A Agent ]
+```
+
+1. **Ingest & Normalize:** Parses bank CSVs into standard records (`date`, `amount`, `utr`, `direction`), with a fallback for statements lacking a clean UTR.
+2. **Sync Settlements:** Pulls settlements and refunds via Razorpay's REST API (paginated, with backoff) and listens for real-time webhooks (HMAC-verified, idempotent).
+3. **Multi-Tier Matching Engine:**
+   - **Tier 1 (Exact):** UTR match + exact amount match → `MATCHED`
+   - **Tier 0 (Fallback):** Date window (±2 days) + exact amount → `SUGGESTED` (human approves)
+   - **Tier 2 (Fuzzy):** Descriptor string similarity (≥90%) → `SUGGESTED` (human reviews)
+   - **Tier 3 (Diagnostics):** Explains deltas: fees + GST, refunds, FX adjustments → diagnostic logged or `EXCEPTION`
+4. **Audit & Exception Reporting:** Every decision is written to an append-only log. Every record ends in a clear state (`MATCHED`, `SUGGESTED`, `CONFLICT`, or `EXCEPTION`).
+5. **Settlement Q&A Agent:** Finance users can ask questions in plain English (*"Why didn't order #4521 settle correctly?"*). The system retrieves the exact audit record, has the LLM explain it in plain language, and runs a guardrail to make sure the LLM didn't invent any numbers.
 
 ---
 
-## 5. Success Metrics (What We Will Show Judges)
-* **Match rate %** on a 50+ record synthetic test batch (Track 04 requirement).
-* **Total ₹ reconciled** vs. total ₹ ingested.
-* **Unedited exception list** — every unresolved row, verbatim, with reason code.
-* **Audit trail sample** — one record traced end-to-end: raw CSV row → matched settlement → diagnostic decision → log entry.
+## 4. When the System Stops & Asks a Human
+
+The engine **never guesses**. It stops and asks for human review whenever:
+
+- A discrepancy can't be explained by fees + GST, refund batching, or FX within the ±₹1.00 tolerance
+- A fuzzy match confidence is below 90%
+- One settlement matches more than one bank row (conflict — locked until resolved)
+- A webhook fails signature verification (rejected immediately, logged)
+- Razorpay API retries exceed 5 attempts (halts and alerts rather than looping forever)
 
 ---
 
-## 6. Target Audience
-* **SME Founders & Finance Ops** — need payout/fee visibility without dedicated reconciliation headcount.
-* **Chartered Accountants & Accounting Firms** — multi-client month-end closes, GST input-tax-credit verification.
-* **D2C & E-Commerce Brands** — high-volume daily payouts, chargebacks, instant refunds.
+## 5. What We'll Show the Judges
+
+| Output | What It Proves |
+|---|---|
+| **Match rate %** on 50+ record synthetic batch | Meets the Track 04 hackathon requirement |
+| **Total ₹ reconciled vs. ingested** | Shows the financial scale handled |
+| **Unedited exception list** | Proves the tool is honest and doesn't sweep errors under the rug |
+| **End-to-end audit trail** | Shows one record traced: raw CSV row → matched settlement → diagnostic → log entry |
+| **Q&A Agent demo** | Shows the plain-English explanation layer working with guardrails |
 
 ---
 
-## 7. Razorpay Ecosystem Alignment
-* **Settlements API (`/v1/settlements`)** — full settlement history via cursor/offset pagination (gross, net, fees, tax, UTR).
-* **Refunds API (`/v1/refunds`)** — cross-referenced against settlement deduction cycles.
-* **Webhooks (`settlement.processed`)** — real-time ingestion, idempotent by event ID, signature-verified before any processing.
-* **Cryptographic Security** — HMAC SHA-256 verification (`X-Razorpay-Signature`) on every webhook, constant-time comparison, raw-body verification before JSON parsing.
+## 6. Who This Is For
+
+- **SME Founders & Finance Ops:** Need payout and fee visibility without hiring a dedicated reconciliation team
+- **Chartered Accountants & Accounting Firms:** Manage multi-client month-end closes and need GST input-tax-credit verification
+- **D2C & E-Commerce Brands:** High daily transaction volumes, frequent chargebacks, instant refunds
 
 ---
 
-## 8. Explicit Out-of-Scope (v1)
-To keep scope honest for a 14-day build:
-* Multi-bank-account netting/consolidation across accounts.
-* Non-INR settlement currencies beyond basic FX-delta detection.
-* Real-time GST filing/e-invoicing integration (diagnostics only — no filing).
-* Multi-gateway support (Razorpay only in v1).
+## 7. Out of Scope for v1 (Keeping It Honest)
+
+To keep the scope realistic for a 14-day buildathon:
+- ❌ Multi-bank-account netting/consolidation across different accounts
+- ❌ Non-INR settlement currencies beyond basic FX-delta detection
+- ❌ Direct GST filing/e-invoicing (we do diagnostics, not filing)
+- ❌ Multi-gateway support (Razorpay only for v1)
 
 ---
 
-## 9. Known Real-World Edge Cases This Design Accounts For
-1. **Split/batched settlements** — one bank credit may correspond to multiple Razorpay settlement IDs batched by the bank, or a large settlement may be split across two credit dates. Matching logic groups candidate settlements by date-window + summed amount before declaring `UNRESOLVED`.
-2. **Settlement reversals** — Razorpay can debit a merchant's account days after a settlement (chargeback, hold reversal). Bank statement shows a debit, not a credit. Ingestion classifies transaction direction explicitly (`CREDIT`/`DEBIT`) rather than assuming all rows are credits.
-3. **Cross-currency settlements** — an FX component sits on top of fees + GST. Tier 3 diagnostics include an FX-adjustment check before falling back to `UNRESOLVED`.
+## 8. Real-World Edge Cases Handled
+
+1. **Split / Batched Settlements:** A bank credit might bundle multiple Razorpay settlements, or a large settlement might be split across two days. The engine groups candidate settlements by date-window + summed amount before declaring an exception.
+2. **Settlement Reversals:** Razorpay sometimes debits an account days after settlement (chargeback, hold reversal). The bank statement shows a debit, not a credit. Ingestion explicitly tracks `CREDIT` vs `DEBIT` rather than assuming everything is a credit.
+3. **Cross-Currency Settlements:** Foreign transactions have an FX component on top of fees + GST. Tier 3 includes an FX-adjustment check before falling back to unresolved.

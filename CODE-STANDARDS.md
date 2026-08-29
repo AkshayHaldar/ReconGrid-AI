@@ -1,108 +1,141 @@
-# ReconGrid AI — Code Standards & Engineering Guidelines
+# 📋 Code Standards — ReconGrid AI
 
-> **Stack note**: Backend standards below are for **Python 3.11+ / FastAPI**. Frontend (Next.js/TypeScript) standards are unchanged from the original spec and retained in Section 6.
+> **Backend:** Python 3.11+ / FastAPI  
+> **Frontend:** Next.js 14 / TypeScript / Tailwind CSS
 
-## 1. Backend Folder Structure
+---
 
-```text
+## 1. Backend Project Layout
+
+```
 recongrid-ai-backend/
 ├── .env.example
 ├── .gitignore
-├── pyproject.toml              # ruff, black, mypy, pytest config
-├── alembic/                    # DB migrations
-│   └── versions/
+├── pyproject.toml              # ruff, black, mypy, pytest configs
 ├── app/
-│   ├── main.py                 # FastAPI app entrypoint
-│   ├── api/
-│   │   └── v1/
-│   │       ├── bank.py         # /bank/upload
-│   │       ├── razorpay.py     # /razorpay/sync
-│   │       ├── reconciliation.py
-│   │       ├── qa.py           # /qa/ask, /qa/history
-│   │       └── webhooks.py     # /webhooks/razorpay
+│   ├── main.py                 # FastAPI application entrypoint
+│   ├── api/v1/                 # route handlers
+│   │   ├── bank.py             # CSV upload
+│   │   ├── razorpay.py         # manual settlement sync
+│   │   ├── reconciliation.py   # status, records, approve/deny, export
+│   │   ├── qa.py               # Q&A agent endpoints
+│   │   ├── webhooks.py         # Razorpay webhook receiver
+│   │   └── demo.py             # seed / demo helpers
 │   ├── core/
 │   │   ├── config.py           # Pydantic Settings (env vars)
 │   │   ├── security.py         # HMAC verification, auth deps
-│   │   └── logging.py          # structlog config
-│   ├── models/                 # SQLAlchemy/SQLModel ORM models
-│   │   ├── bank_transaction.py
-│   │   ├── razorpay_settlement.py
-│   │   ├── reconciliation_log.py
-│   │   ├── qa_interaction_log.py
-│   │   └── webhook_event.py
-│   ├── schemas/                # Pydantic request/response schemas
-│   ├── services/
-│   │   ├── ingestion.py
-│   │   ├── razorpay_client.py
-│   │   ├── reconciliation.py
-│   │   ├── diagnostics.py
-│   │   └── settlement_qa.py    # retrieval (deterministic) + LLM narration + guardrail
-│   ├── repositories/           # DB query layer, isolated from services
+│   │   ├── database.py         # SQLAlchemy engine & session maker
+│   │   └── logging.py          # structlog configuration
+│   ├── models/                 # SQLAlchemy ORM models
+│   ├── schemas/                # Pydantic request & response models
+│   ├── repositories/           # DB query layer (isolated from services)
+│   ├── services/               # core business logic
+│   │   ├── ingestion.py        # CSV parsing & normalization
+│   │   ├── razorpay_client.py  # Razorpay API client
+│   │   ├── reconciliation.py   # the 4-tier matching engine
+│   │   ├── diagnostics.py      # delta analysis (fees, GST, refunds, FX)
+│   │   ├── settlement_qa.py    # retrieval + LLM narration
+│   │   └── guardrail.py        # numeric guardrail for LLM output
 │   └── utils/
-│       ├── fuzzy.py            # string similarity
+│       ├── fuzzy.py            # string similarity algorithms
 │       ├── csv_parser.py       # streaming CSV parser
-│       └── money.py            # Decimal helpers, banned float coercion
+│       └── money.py            # Decimal helpers (no float coercion!)
 └── tests/
-    ├── unit/
-    ├── integration/
-    └── fixtures/                # synthetic bank + settlement test batches
+    ├── unit/                   # money, CSV, fuzzy, diagnostics, guardrail tests
+    ├── integration/            # full pipeline, webhook, API route tests
+    └── fixtures/               # 50+ record synthetic test batch
 ```
 
 ---
 
-## 2. Linting, Formatting & Type Safety
-* **Formatter**: `black` (line length 100).
-* **Linter**: `ruff` (replaces flake8 + isort), zero warnings before merge.
-* **Type checking**: `mypy --strict` on `app/services` and `app/models` at minimum — the reconciliation engine is not allowed untyped code paths.
-* **Pre-commit hooks**: `black`, `ruff`, `mypy` must all pass before a commit is accepted locally.
+## 2. Code Quality & Tooling
+
+| Tool | Purpose | Standard |
+|---|---|---|
+| **Black** | Code formatting | Line length 100 |
+| **Ruff** | Linting & import sorting | Zero warnings before merge |
+| **Mypy** | Static type checking | Strict mode on `app/services` and `app/models` |
+| **Pytest** | Testing | ≥90% coverage on reconciliation & diagnostics |
 
 ---
 
-## 3. Testing Requirements
-* **Framework**: `pytest` + `pytest-cov`.
-* **Minimum coverage**: 90% on `app/services/reconciliation.py` and `app/services/diagnostics.py` specifically — these are the money-correctness modules and carry a higher bar than the rest of the codebase (70% overall minimum).
-* **Golden test batch**: a fixed 50+ record synthetic dataset (`tests/fixtures/synthetic_batch.json`) covering exact matches, fuzzy matches, fee deductions, refund adjustments, missing UTRs, split settlements, and reversed settlements — run on every PR, with the resulting match rate % asserted against a known-good baseline so a regression is caught immediately, not at demo time.
-* **Webhook tests** must include: valid signature, invalid signature, missing header, duplicate `event.id`, and malformed JSON body.
-* **Q&A guardrail tests** must include: a query with no matching record (must return the deterministic "not found" response, never a guess), and at least one adversarial case where the LLM is mocked to return a fabricated number — the test asserts the guardrail rejects it and falls back to the template response.
+## 3. Financial Correctness Rules (Non-Negotiable ⚠️)
+
+These are hard rules — not suggestions. A violation will block a PR.
+
+### 1. No `float` for Money — Ever
+All monetary fields must use Python's `Decimal` type from end to end:
+- Pydantic schemas use `Decimal` (or `condecimal`)
+- Database columns use `Numeric(18, 2)`
+- All math is done with `Decimal` arithmetic
+- Any `float` touching a money field in a PR diff is an immediate rejection
+
+### 2. LLMs Narrate — They Never Calculate
+The Settlement Q&A Agent is the **only** LLM-touching component. It is strictly a narration layer:
+- The reconciliation engine computes everything first
+- The LLM only explains the already-computed row in plain language
+- `guardrail.py` extracts all numbers from the LLM's response and verifies them against the source row
+- If the LLM invents a number → response is rejected, template fallback is shown, and the rejection is logged
+
+### 3. Streamed Ingestion Only
+Bank statement CSVs must be parsed row-by-row:
+- Never `.read()` an entire file into memory
+- File size and row count limits are enforced before parsing starts
+- Bad files fail fast with structured errors
+
+### 4. Wrapped External Calls
+Every outbound API call (Razorpay, LLM providers) must be wrapped in explicit `try/except`:
+- Use typed custom exceptions (`RazorpayFetchError`, `RazorpayFetchExhausted`)
+- Use structured logging via `structlog`
+- No bare `except:` or swallowed exceptions
 
 ---
 
-## 4. Financial Correctness Rules (Non-Negotiable)
-* **No `float` for money.** All monetary fields use Python `Decimal` end-to-end — Pydantic schemas, ORM columns (`Numeric(18,2)`), and all arithmetic. `float` in a diff touching money fields is a blocking review comment, not a style note.
-* **No LLM-generated numbers.** The Settlement Q&A Agent (`app/services/settlement_qa.py`) is the only LLM-touching component in this codebase. It may only *narrate* a value that was already computed deterministically by the reconciliation engine — it may never compute or alter the number itself. Concretely: after the LLM generates a narration, `guardrail.py` extracts every numeric token from the response and checks it against the numeric fields on the source `ReconciliationLog` row; any number not present in the source row causes the response to be discarded in favor of a template-based fallback, and the rejection is logged to `QaInteractionLog.guardrail_rejected`.
-* **Streaming ingestion only.** CSV files are processed row-by-row (`csv.reader` over a stream, or chunked `pandas.read_csv(chunksize=...)`) — never `.read()`'d fully into memory. A configured max file size and max row count are enforced before parsing begins.
-* **All external API calls wrapped** in explicit `try/except` with typed exceptions (`RazorpayFetchError`, `RazorpayFetchExhausted`) and structured logging — no bare `except:`.
+## 4. Testing Bar
+
+- **Reconciliation Engine:** ≥90% coverage on `reconciliation.py` and `diagnostics.py`
+- **Rest of Codebase:** ≥70% coverage minimum
+- **Golden Test Batch:** A committed 50+ record synthetic dataset (`tests/fixtures/synthetic_batch.json`) runs on every test pass. It asserts the match rate % against a known-good baseline.
+- **Webhook Tests:** Must cover valid signature, invalid signature, missing header, duplicate `event_id`, and malformed JSON.
+- **Q&A Guardrail Tests:** Must cover non-existent record lookups and adversarial cases where the LLM tries to invent numbers.
 
 ---
 
-## 5. Naming Conventions (Backend)
-* **Variables & functions**: `snake_case` (`fetch_settlement_batch`, `is_amount_matching`).
-* **Pydantic schemas & SQLAlchemy models**: `PascalCase` (`BankTransaction`, `SettlementRecord`).
-* **Database tables/columns**: `snake_case` (`bank_transactions`, `razorpay_settlements`).
-* **Constants & env vars**: `UPPER_SNAKE_CASE` (`RAZORPAY_KEY_ID`, `DEFAULT_PAGE_SIZE`).
-* **Files**: `snake_case.py`.
+## 5. Naming Conventions
+
+| Thing | Convention | Example |
+|---|---|---|
+| Functions & variables | `snake_case` | `fetch_settlement_batch()`, `is_amount_matching` |
+| Pydantic schemas & ORM models | `PascalCase` | `BankTransaction`, `SettlementRecord` |
+| Database tables & columns | `snake_case` | `bank_transactions`, `settlement_id` |
+| Constants & env vars | `UPPER_SNAKE_CASE` | `RAZORPAY_KEY_ID`, `DEFAULT_PAGE_SIZE` |
+| Python files | `snake_case.py` | `settlement_qa.py`, `csv_parser.py` |
 
 ---
 
-## 6. Frontend Standards (Next.js/TypeScript — unchanged)
-* **ESLint**: `next/core-web-vitals`, `@typescript-eslint/recommended`.
-* **Prettier**: `singleQuote: true`, `trailingComma: "all"`, `tabWidth: 2`, `semi: true`, `printWidth: 100`.
-* **Pre-commit**: ESLint + Prettier must pass with 0 errors/warnings.
-* **Zero hardcoded secrets** — all secrets in `.env.local`, `.env.example` kept blank, both gitignored.
+## 6. Frontend Standards (Next.js / TypeScript)
+
+- **Linter:** `next/core-web-vitals` + `@typescript-eslint/recommended`
+- **Formatter:** Prettier (`singleQuote: true`, `tabWidth: 2`, `semi: true`, `printWidth: 100`)
+- **Type Checking:** `npx tsc --noEmit` must pass with zero errors
+- **Secrets:** Never reference secrets in client-side code — `.env.local` only, both gitignored
 
 ---
 
-## 7. Error Handling Paradigm (Backend)
-* **Resilience first**: Razorpay timeouts, `429`s, or outages must never crash the API process or kill a background job silently.
-* **Standardized JSON error structure**:
-  ```json
-  {
-    "success": false,
-    "error": {
-      "code": "RAZORPAY_API_RATE_LIMIT",
-      "message": "Razorpay rate limit reached. Retrying with backoff.",
-      "details": null
-    }
+## 7. Error Handling
+
+Every API error returns a standard envelope:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RAZORPAY_API_RATE_LIMIT",
+    "message": "Razorpay rate limit reached. Retrying with backoff.",
+    "details": null
   }
-  ```
-* **No swallowed exceptions**: every `except` block either re-raises a typed exception, logs with full context via `structlog`, or both — never a silent `pass`.
+}
+```
+
+- Razorpay timeouts and `429`s retry with exponential backoff
+- Hard failures halt the job loudly — no silent failures, no swallowed exceptions

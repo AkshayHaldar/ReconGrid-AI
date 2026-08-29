@@ -1,63 +1,95 @@
-# ReconGrid AI — Workflow Rules & Contribution Guidelines
+# 🔄 Workflow Rules & Guidelines — ReconGrid AI
+
+---
 
 ## 1. Git Branching Strategy
-* `main`: production-ready, fully verified, deployable.
-* `dev`: primary integration branch.
-* `feature/<feature-name>`: branched off `dev` (e.g., `feature/csv-ingestion`, `feature/razorpay-fetcher`, `feature/fuzzy-match-engine`).
-* `fix/<bug-name>`: dedicated bug fix branches (e.g., `fix/webhook-signature-verification`).
 
----
-
-## 2. Commit Conventions (Conventional Commits)
-* `feat:` new feature — e.g. `feat(reconciliation): implement tier-2 fuzzy matching`
-* `fix:` bug/regression patch — e.g. `fix(razorpay): correct pagination cursor offset`
-* `docs:` documentation-only — e.g. `docs(architecture): add sequence diagram for diagnostics`
-* `refactor:` restructuring, no behavior change — e.g. `refactor(csv): extract streaming parser utility`
-* `chore:` tooling/build/deps — e.g. `chore(deps): add tenacity and httpx`
-* `test:` test additions/updates — e.g. `test(diagnostics): add fee-deduction unit tests`
-
----
-
-## 3. Pull Request Rules
-* All feature branches target `dev` (never `main` directly).
-* PRs with failing tests, build errors, or unresolved conflicts are not merged.
-* Diff must be checked for `.env`, `.env.local`, and any private key material before merge — not assumed clean because `.gitignore` exists.
-* Every PR requires self-review against the Definition of Done below.
-
----
-
-## 4. Definition of Done (Backend — Python/FastAPI)
-- [ ] **Linting/Formatting**: `ruff check .` and `black --check .` pass with zero errors.
-- [ ] **Type Safety**: `mypy --strict app/services app/models` passes without errors.
-- [ ] **Tests**: `pytest --cov` passes; coverage on `reconciliation.py`/`diagnostics.py` stays ≥90%.
-- [ ] **Financial correctness**: no new `float` usage on monetary fields (grep-checked in review).
-- [ ] **Error handling**: every external API/DB call wrapped in typed try/except with structured logging.
-- [ ] **Security**: webhook routes verified against the HMAC dependency; no secrets committed.
-- [ ] **Migrations**: schema changes tracked via `alembic revision --autogenerate` and tested locally, including a working `alembic downgrade`.
-- [ ] **Documentation**: `README.md`/architecture docs updated if reconciliation rules or schemas changed.
-
-## 4b. Definition of Done (Frontend — Next.js/TypeScript, unchanged)
-- [ ] `npm run lint` and `npm run format:check` pass with zero errors/warnings.
-- [ ] `npx tsc --noEmit` passes.
-- [ ] No API secrets referenced client-side.
-
----
-
-## 5. Incident & Rollback Procedure
-* **Bad migration on shared dev DB**: run `alembic downgrade -1` immediately, notify the team in the shared channel before anyone else migrates further, then fix and re-submit as a new migration (never edit an already-applied migration file).
-* **Leaked/rotated secret**: rotate the key in the Razorpay dashboard (or LLM provider console for `LLM_API_KEY`) immediately, update `.env` locally and in the deploy target, force-restart affected services, and confirm the old key is rejected — do not consider it resolved until verified against a live test call.
-* **Bad deploy on `main`**: revert via `git revert` (not force-push/rewrite of shared history), redeploy, then root-cause before reapplying.
-
----
-
-## 6. Test-Data & Environment Hygiene
-* All synthetic/test-mode Razorpay data (test webhooks, seeded fixtures) is tagged `is_test_mode: true` at the row level and never mixed into a demo dataset presented as production-realistic without that flag visible.
-* Local/dev/demo databases are kept separate; no demo run reads from a database that also received arbitrary manual testing that day.
-
----
-
-## 7. Hackathon-Specific Rule: Document Every Real Bug
-Every non-trivial bug and its fix gets one line in `BUGLOG.md` the day it happens — not reconstructed from memory before submission. This directly feeds Question 12 ("What broke, and how you got out") and is worth more to the final writeup than polishing UI copy. Log format:
 ```
-[date] [component] what broke -> root cause -> fix -> time lost
+main  ───────●──────────────────●────── (production-ready, verified)
+             \                 /
+dev   ────────●───────●───────●──────── (primary integration branch)
+               \     / \     /
+feature/*       ●───●   ●───●           (e.g., feature/csv-ingestion)
+fix/*                    ●              (e.g., fix/webhook-signature)
+```
+
+- **`main`**: Production-ready, fully tested, deployable code
+- **`dev`**: Daily integration branch where features merge first
+- **`feature/<name>`**: Feature branches branched from `dev`
+- **`fix/<name>`**: Bug fix branches
+
+---
+
+## 2. Commit Message Format (Conventional Commits)
+
+Use standard prefixes so history stays readable:
+
+| Type | When to Use | Example |
+|---|---|---|
+| `feat:` | A new feature | `feat(reconciliation): implement tier-2 fuzzy matching` |
+| `fix:` | A bug fix | `fix(razorpay): correct pagination cursor offset` |
+| `docs:` | Documentation changes only | `docs(readme): update setup instructions` |
+| `refactor:` | Code change that doesn't fix a bug or add a feature | `refactor(csv): extract streaming parser utility` |
+| `chore:` | Tooling, dependencies, config | `chore(deps): add tenacity and httpx` |
+| `test:` | Adding or updating tests | `test(diagnostics): add fee-deduction test cases` |
+
+---
+
+## 3. Pull Request Checklist
+
+Before merging any PR into `dev`:
+
+- [ ] All tests pass (`pytest` in backend, `npm run build` in frontend)
+- [ ] No `.env` or secret files are included in the diff
+- [ ] Code is formatted and linted (`black`, `ruff`, `prettier`)
+- [ ] No `float` used on money fields in Python code
+- [ ] Any new edge cases have test coverage
+
+---
+
+## 4. Definition of Done
+
+### Backend (Python / FastAPI)
+- [ ] **Formatting:** `black --check .` passes
+- [ ] **Linting:** `ruff check .` has zero warnings
+- [ ] **Types:** `mypy --strict` passes on `app/services` and `app/models`
+- [ ] **Tests:** `pytest --cov` passes; coverage on `reconciliation.py` and `diagnostics.py` ≥ 90%
+- [ ] **Money Safety:** Zero `float` types in monetary math (use `Decimal` everywhere)
+- [ ] **Security:** Webhook routes verify HMAC signatures; no secrets committed
+- [ ] **Error Handling:** All external calls wrapped in typed try/except with structured logging
+
+### Frontend (Next.js / TypeScript)
+- [ ] `npm run lint` passes with zero errors
+- [ ] `npx tsc --noEmit` passes with zero type errors
+- [ ] No secrets or private API keys in client-side code
+
+---
+
+## 5. What to Do When Something Goes Wrong
+
+### Leaked or Compromised Secret
+1. Rotate the key in the Razorpay / LLM dashboard **immediately**
+2. Update `.env` locally and on the server
+3. Restart all services
+4. Test with a live API call to confirm the old key is dead and the new one works
+
+### Broken Deploy on `main`
+1. Revert via `git revert` (never force-push or rewrite shared history)
+2. Redeploy the previous working commit
+3. Debug the issue in a `fix/` branch, test thoroughly, then re-merge
+
+---
+
+## 6. Real Bug Logging (Hackathon Rule 📝)
+
+Every real bug hit during development gets logged in [`BUGLOG.md`](./BUGLOG.md) the day it happens.
+
+This directly feeds the hackathon submission's *"What broke and how you fixed it"* section:
+
+```markdown
+## [YYYY-MM-DD] [component] Short title
+- **Broke**: what actually happened
+- **Root cause**: why it happened (not just the symptom)
+- **Fix**: what was changed
+- **Time lost**: rough estimate (e.g., ~30 mins)
 ```
