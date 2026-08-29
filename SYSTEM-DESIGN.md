@@ -145,7 +145,7 @@ sequenceDiagram
 | **Invalid webhook signature** | HMAC check fails | Returns `400`, logs the attempt, makes no database changes |
 | **Duplicate webhook** | `event_id` already in DB | Returns `200` immediately without re-processing |
 | **Worker crashes mid-batch** | Job stuck in `PROCESSING` | Reaper task detects timed-out jobs and re-queues them |
-| **Two bank rows match one settlement** | Engine finds >1 candidate | Both marked `CONFLICT`, locked until human picks one |
+| **Two bank rows match one settlement** | Engine finds >1 candidate | Both marked `CONFLICT` (confidence 0.50). Allocating to one bank row automatically displaces competing rows to `EXCEPTION` (`AUTO_DISPLACED`) |
 | **Malformed row in CSV** | Row-level parse exception | That row gets an `EXCEPTION` with raw text preserved; rest of file continues |
 | **DB write fails on log insert** | Transaction error | Entire record decision is rolled back — never a match without its audit row |
 

@@ -47,6 +47,31 @@ class ReconciliationRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_competing_conflict_logs(
+        self,
+        batch_id: str,
+        settlement_db_id: str,
+        exclude_log_id: Optional[str] = None,
+    ) -> Sequence[ReconciliationLog]:
+        """Finds all active conflict logs in the batch that were competing for the same settlement."""
+        stmt = (
+            select(ReconciliationLog)
+            .options(
+                selectinload(ReconciliationLog.bank_transaction),
+                selectinload(ReconciliationLog.rzp_settlement),
+            )
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.rzp_settlement_id == settlement_db_id,
+                ReconciliationLog.match_status == "CONFLICT",
+                ReconciliationLog.superseded == False,  # noqa: E712
+            )
+        )
+        if exclude_log_id:
+            stmt = stmt.where(ReconciliationLog.id != exclude_log_id)
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
     async def get_active_logs(
         self,
         batch_id: str = "default",

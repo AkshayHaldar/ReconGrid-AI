@@ -75,7 +75,7 @@ The matching runs in tiers, from strongest to weakest evidence:
 | **Tier 2** (Fuzzy) | Levenshtein/Jaro-Winkler similarity ≥ 90% on descriptor text | `SUGGESTED` — needs human review |
 | **Tier 3** (Diagnostics) | Delta explained by: fees + 18% GST? Refund batch? FX adjustment? | Explained → diagnostic logged • Unexplained → `EXCEPTION` ❌ |
 
-**Conflict rule:** If one settlement matches multiple bank rows → both locked as `CONFLICT` until a human picks one. No "first match wins" — that's a bug, not a feature.
+**Conflict rule:** If one settlement matches multiple bank rows → both are locked as `CONFLICT` (confidence score 0.50) until a human reviews and resolves them. Resolving a conflict on Bank Row A automatically unlocks and transitions competing Bank Rows B...N to `EXCEPTION` (`human_action = "AUTO_DISPLACED"`), preventing double-credit and maintaining a clean audit trail.
 
 All money uses `Decimal`. All comparisons at `Decimal` precision. No floats anywhere.
 
@@ -154,8 +154,9 @@ erDiagram
         string match_tier "TIER_0 | TIER_1 | TIER_2 | TIER_3"
         numeric confidence_score "nullable"
         numeric delta_amount "Decimal(18,2)"
-        string diagnostic_type "EXACT_MATCH | FEE_DEDUCTION | REFUND_ADJUSTED | FX_ADJUSTED | REVERSAL | UNRESOLVED"
+        string diagnostic_type "EXACT_MATCH | FEE_DEDUCTION | REFUND_ADJUSTED | FX_ADJUSTED | REVERSAL | TDS_194O | BATCHED_SETTLEMENT | DATE_AMOUNT_FALLBACK | UNRESOLVED"
         text diagnostic_note
+        string human_action "nullable: APPROVED | DENIED | RESOLVED | DISMISSED | AUTO_DISPLACED"
         timestamp matched_at
         boolean superseded "default false"
     }
@@ -202,6 +203,8 @@ All routes under `/api/v1` — see the [full API reference in the README](./READ
 
 ## 7. Edge Cases Explicitly Handled
 
-1. **Split/batched settlements** — Tier 3 groups settlements by date window and compares summed amounts before declaring `EXCEPTION`
-2. **Missing/non-standard UTR** — Tier 0 fallback engages automatically; result is always `SUGGESTED`, never auto-`MATCHED` (weaker evidence)
-3. **Duplicate/out-of-order webhooks** — Deduped by `event_id`; matching logic handles settlements arriving before bank data (creates `PENDING_BANK_DATA` state, not a false exception)
+1. **Split/batched settlements** — Tier 3 groups settlements by date window and compares summed amounts before declaring `EXCEPTION`.
+2. **Missing/non-standard UTR** — Tier 0 fallback engages automatically with timezone-normalized comparisons; result is always `SUGGESTED`, never auto-`MATCHED` (weaker evidence).
+3. **Duplicate/out-of-order webhooks** — Deduped by `event_id`; matching logic handles settlements arriving before bank data (creates `PENDING_BANK_DATA` state, not a false exception).
+4. **Multi-Candidate Conflict Locking & Displacement** — If multiple bank statement lines share a settlement reference or UTR, all entries are locked as `CONFLICT`. Assigning the settlement to one row automatically displaces and unlinks competing rows to `EXCEPTION` (`AUTO_DISPLACED`), preventing double-credit.
+5. **Section 194-O E-Commerce TDS & 2% MDR + 18% GST** — Evaluates standard statutory withholding and payment aggregator fee deductions before marking records unresolved.

@@ -10,43 +10,78 @@
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular numbers for financial and numerical precision */
+.font-tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
 }
 
 /* Custom Financial High-Density Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #090e18;
+  background: #080c14;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 3px;
+  background: #1c2b42;
+  border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #2a3d5e;
 }
 
-/* Animation Utilities */
-@keyframes pulseGlow {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.02); }
+/* Touch-friendly smooth scroll and hidden scrollbar utility */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
-.animate-pulse-glow {
-  animation: pulseGlow 3s ease-in-out infinite;
+.touch-scroll {
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Glassmorphic Panel */
-.glass-panel {
-  background: rgba(16, 23, 38, 0.75);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(31, 44, 66, 0.8);
+/* Muted animation for Q&A citation jump */
+@keyframes citationPulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.25);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.12);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.citation-highlight {
+  animation: citationPulse 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* High-density financial card surface */
+.financial-surface {
+  background-color: #0f1624;
+  border: 1px solid #1c2b42;
+}
+
+.financial-surface-hover:hover {
+  border-color: #2a3d5e;
+  background-color: #131b2c;
 }

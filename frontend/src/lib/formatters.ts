@@ -1,5 +1,5 @@
 /**
- * Formats numbers into Indian Rupee currency format (e.g. ₹ 1,42,85,900.00)
+ * Formats numbers into standard Indian Rupee currency format (e.g. ₹ 1,42,85,900.00)
  */
 export function formatINR(val: string | number | null | undefined): string {
   if (val === null || val === undefined || val === "") return "₹ 0.00";
@@ -31,6 +31,21 @@ export function formatINR(val: string | number | null | undefined): string {
   return isNegative ? `(${result})` : result;
 }
 
+/**
+ * Formats amount with accounting CR / DR indicators
+ */
+export function formatDirectionINR(
+  val: string | number | null | undefined,
+  direction?: "CREDIT" | "DEBIT"
+): string {
+  const formatted = formatINR(val);
+  if (!direction) return formatted;
+  return direction === "DEBIT" ? `${formatted} DR` : `${formatted} CR`;
+}
+
+/**
+ * Formats standard date into compact CA format: '24 Aug 2026'
+ */
 export function formatDate(isoStr: string | null | undefined): string {
   if (!isoStr) return "--";
   try {
@@ -45,6 +60,25 @@ export function formatDate(isoStr: string | null | undefined): string {
   }
 }
 
+/**
+ * Formats standard date into short format: '24 Aug'
+ */
+export function formatShortDate(isoStr: string | null | undefined): string {
+  if (!isoStr) return "--";
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleDateString("en-IN", {
+      month: "short",
+      day: "2-digit",
+    });
+  } catch {
+    return isoStr;
+  }
+}
+
+/**
+ * Formats time in IST format: '02:30 PM'
+ */
 export function formatTime(isoStr: string | null | undefined): string {
   if (!isoStr) return "--";
   try {
@@ -56,4 +90,16 @@ export function formatTime(isoStr: string | null | undefined): string {
   } catch {
     return isoStr;
   }
+}
+
+/**
+ * Formats a delta math equation for audit drawers and popovers
+ */
+export function formatFeeEquation(
+  gross: string | number | null | undefined,
+  fee: string | number | null | undefined,
+  tax: string | number | null | undefined,
+  net: string | number | null | undefined
+): string {
+  return `Gross ${formatINR(gross)} - Fee ${formatINR(fee)} - GST (18%) ${formatINR(tax)} = Net ${formatINR(net)}`;
 }

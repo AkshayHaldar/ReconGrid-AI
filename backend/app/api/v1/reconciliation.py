@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
 from app.schemas.reconciliation import (
     ActionRequest,
@@ -143,18 +144,81 @@ async def resolve_conflict(
     resolve_req: ConflictResolveRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Resolves a CONFLICT by binding to the chosen settlement ID."""
+    """Resolves a CONFLICT by binding to the chosen settlement ID or dismissing the match."""
     repo = ReconciliationRepository(db)
+    setl_repo = SettlementRepository(db)
+
     log = await repo.get_by_id(record_id)
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
+    chosen_setl_id = resolve_req.chosen_settlement_id.strip() if resolve_req.chosen_settlement_id else ""
+
+    # Case A: User chose to dismiss / unlink this conflict without matching
+    if chosen_setl_id.upper() in {"NONE", "DISMISS", "UNLINK", "EXCEPTION"}:
+        log.match_status = "EXCEPTION"
+        log.human_action = "DISMISSED"
+        log.diagnostic_type = "UNRESOLVED"
+        log.rzp_settlement_id = None
+        log.confidence_score = None
+        bank_amt = to_decimal(log.bank_transaction.amount) if log.bank_transaction else to_decimal(0)
+        log.delta_amount = bank_amt
+        log.diagnostic_note = f"Conflict dismissed by CA: unlinked from settlement.{': ' + resolve_req.note if resolve_req.note else ''}"
+        await db.flush()
+        return ApiResponse.ok(_map_log_to_item(log))
+
+    # Case B: Resolve by linking to chosen settlement
+    target_setl = await setl_repo.get_by_settlement_id(chosen_setl_id)
+    if not target_setl:
+        target_setl = await setl_repo.get_by_id(chosen_setl_id)
+
+    if not target_setl and log.rzp_settlement:
+        if log.rzp_settlement.settlement_id == chosen_setl_id or log.rzp_settlement.id == chosen_setl_id:
+            target_setl = log.rzp_settlement
+
+    if not target_setl:
+        # Fallback if synthetic identifier passed directly
+        log.match_status = "MATCHED"
+        log.human_action = "RESOLVED"
+        log.diagnostic_note = f"Conflict manually resolved to {chosen_setl_id}.{': ' + resolve_req.note if resolve_req.note else ''}"
+        await db.flush()
+        return ApiResponse.ok(_map_log_to_item(log))
+
+    # Link the chosen settlement to this log
+    log.rzp_settlement_id = target_setl.id
     log.match_status = "MATCHED"
     log.human_action = "RESOLVED"
-    log.diagnostic_note = f"Conflict manually resolved to {resolve_req.chosen_settlement_id}."
-    await db.flush()
+    log.confidence_score = 1.00
+    bank_amt = to_decimal(log.bank_transaction.amount) if log.bank_transaction else to_decimal(0)
+    log.delta_amount = abs(bank_amt - to_decimal(target_setl.amount))
+    log.diagnostic_note = f"Conflict manually resolved to {target_setl.settlement_id}.{': ' + resolve_req.note if resolve_req.note else ''}"
 
-    return ApiResponse.ok(_map_log_to_item(log))
+    # Unlock and transition competing CONFLICT records in the same batch
+    competing_logs = await repo.get_competing_conflict_logs(
+        batch_id=log.batch_id,
+        settlement_db_id=target_setl.id,
+        exclude_log_id=log.id,
+    )
+    for comp in competing_logs:
+        comp.match_status = "EXCEPTION"
+        comp.human_action = "AUTO_DISPLACED"
+        comp.diagnostic_type = "UNRESOLVED"
+        comp.rzp_settlement_id = None
+        comp.confidence_score = None
+        comp_amt = to_decimal(comp.bank_transaction.amount) if comp.bank_transaction else to_decimal(0)
+        comp.delta_amount = comp_amt
+        bank_ref = (
+            log.bank_transaction.utr
+            or (f"ID:{log.bank_tx_id[:8]}" if log.bank_tx_id else "another row")
+        ) if log.bank_transaction else log.id
+        comp.diagnostic_note = (
+            f"Settlement {target_setl.settlement_id} was manually allocated to bank row ({bank_ref}). "
+            f"Transferred to EXCEPTION for separate audit."
+        )
+
+    await db.flush()
+    refreshed_log = await repo.get_by_id(log.id)
+    return ApiResponse.ok(_map_log_to_item(refreshed_log or log))
 
 
 @router.get("/{batch_id}/export")

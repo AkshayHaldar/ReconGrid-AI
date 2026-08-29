@@ -17,6 +17,17 @@ from app.utils.fuzzy import is_fuzzy_match
 from app.utils.money import format_inr, is_amount_matching, to_decimal
 
 
+def _diff_seconds(dt1: datetime | None, dt2: datetime | None) -> float:
+    """Safely calculates absolute difference in seconds between two datetimes handling tz-awareness."""
+    if not dt1 or not dt2:
+        return float("inf")
+    if dt1.tzinfo is None:
+        dt1 = dt1.replace(tzinfo=timezone.utc)
+    if dt2.tzinfo is None:
+        dt2 = dt2.replace(tzinfo=timezone.utc)
+    return abs((dt1 - dt2).total_seconds())
+
+
 class ReconciliationEngine:
     def __init__(self, recon_repo: ReconciliationRepository):
         self.recon_repo = recon_repo
@@ -89,6 +100,8 @@ class ReconciliationEngine:
                 best_score = 0.0
 
                 for s in settlements:
+                    if s.settlement_id in matched_settlement_ids:
+                        continue
                     matched, score = is_fuzzy_match(
                         bank_tx.description,
                         s.raw_payload.get("description", "") or s.settlement_id or s.utr,
@@ -117,7 +130,7 @@ class ReconciliationEngine:
                     if s.settlement_id in matched_settlement_ids:
                         continue
                     # Check date window
-                    time_diff = abs((bank_tx.date - s.settlement_created_at).total_seconds())
+                    time_diff = _diff_seconds(bank_tx.date, s.settlement_created_at)
                     if time_diff <= 2 * 86400:  # ±2 days window
                         if is_amount_matching(bank_amount, to_decimal(s.amount), tolerance):
                             date_candidates.append(s)
@@ -139,7 +152,7 @@ class ReconciliationEngine:
                 window_setls = [
                     s for s in settlements
                     if s.settlement_id not in matched_settlement_ids
-                    and abs((bank_tx.date - s.settlement_created_at).total_seconds()) <= 3 * 86400
+                    and _diff_seconds(bank_tx.date, s.settlement_created_at) <= 3 * 86400
                 ]
                 for i in range(len(window_setls)):
                     for j in range(i + 1, len(window_setls)):

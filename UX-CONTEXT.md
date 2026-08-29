@@ -66,9 +66,14 @@
 ### 4.3 Upload Error State
 - If a CSV is corrupted or wrong type → an inline error banner names the **exact problem** (e.g., *"Row 42: amount column is missing or not a number"*), never a generic *"Upload failed"*
 
-### 4.4 Conflict State
-- When two bank rows fuzzy-match the same Razorpay settlement, both get a **[⚠ CONFLICT]** badge
-- The Approve button is disabled; clicking opens a side drawer forcing the user to pick which bank row is the real match
+### 4.4 Conflict State & Resolution Drawer
+- When multiple bank rows contest the same Razorpay settlement, all claimants receive a distinct **[⚠ CONFLICT]** badge and a deterministic lock (0.50 score).
+- Clicking the badge opens the **Conflict Resolution Drawer**, presenting:
+  - The contested Razorpay settlement (net payout, gross amount, fees, GST).
+  - The selected bank transaction row.
+  - Competing bank rows locked by the same settlement.
+  - **"Assign & Resolve"** button: Allocates the settlement to the chosen bank row and automatically displaces competing rows to `EXCEPTION` (`AUTO_DISPLACED`) for separate audit.
+  - **"Dismiss / Mark Exception"** button: Unlinks the candidate immediately without assigning, safely moving it to `EXCEPTION`.
 
 ### 4.5 Negative Amount / Debit Rows
 - Chargebacks, TDS deductions, and settlement reversals are shown with a distinct **DEBIT** indicator and red-tinted styling so they're never confused with standard payout credits

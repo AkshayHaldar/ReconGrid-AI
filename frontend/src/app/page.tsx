@@ -15,6 +15,7 @@ import {
   ReconciliationStatus,
 } from "@/lib/types";
 import {
+  API_BASE,
   fetchStatus,
   fetchRecords,
   approveRecord,
@@ -27,8 +28,10 @@ export default function DashboardPage() {
   const [records, setRecords] = useState<ReconciliationRecordItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("ALL");
+  const [selectedDiagnostic, setSelectedDiagnostic] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBank, setSelectedBank] = useState("ALL");
+  const [batchApproveLoading, setBatchApproveLoading] = useState(false);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -60,12 +63,47 @@ export default function DashboardPage() {
     loadData();
   }, [loadData]);
 
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        if (e.key === "Escape") {
+          target.blur();
+        }
+        return;
+      }
+
+      if (e.key === "/") {
+        e.preventDefault();
+        const searchInput = document.getElementById("ledger-search-input");
+        searchInput?.focus();
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setIsQaOpen((prev) => !prev);
+      } else if (e.key === "1") {
+        setActiveTab("ALL");
+      } else if (e.key === "2") {
+        setActiveTab("MATCHED");
+      } else if (e.key === "3") {
+        setActiveTab("SUGGESTED");
+      } else if (e.key === "4") {
+        setActiveTab("CONFLICT");
+      } else if (e.key === "5") {
+        setActiveTab("EXCEPTION");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   // Handle single-click Approve
   const handleApprove = async (recordId: string) => {
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      // Refresh status totals
       const newStatus = await fetchStatus("default");
       setStatus(newStatus);
     } catch (err) {
@@ -78,11 +116,30 @@ export default function DashboardPage() {
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      // Refresh status totals
       const newStatus = await fetchStatus("default");
       setStatus(newStatus);
     } catch (err) {
       console.error("Deny failed:", err);
+    }
+  };
+
+  // Handle Batch Approve High-Confidence (≥90%)
+  const handleBatchApprove = async () => {
+    const candidates = records.filter(
+      (r) => r.match_status === "SUGGESTED" && (r.confidence_score || 0) >= 0.9
+    );
+    if (candidates.length === 0) return;
+
+    try {
+      setBatchApproveLoading(true);
+      for (const rec of candidates) {
+        await approveRecord(rec.id);
+      }
+      await loadData();
+    } catch (err) {
+      console.error("Batch approve failed:", err);
+    } finally {
+      setBatchApproveLoading(false);
     }
   };
 
@@ -93,10 +150,8 @@ export default function DashboardPage() {
     note?: string
   ) => {
     try {
-      const updated = await resolveConflict(recordId, chosenSettlementId, note);
-      setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      const newStatus = await fetchStatus("default");
-      setStatus(newStatus);
+      await resolveConflict(recordId, chosenSettlementId, note);
+      await loadData();
     } catch (err) {
       console.error("Resolve conflict failed:", err);
     }
@@ -106,6 +161,7 @@ export default function DashboardPage() {
   const handleSelectRecordFromQa = (recordId: string) => {
     setHighlightedId(recordId);
     setActiveTab("ALL"); // Reset filter so record is visible
+    setSelectedDiagnostic("ALL");
     setTimeout(() => {
       const el = document.getElementById(`record-${recordId}`);
       if (el) {
@@ -115,8 +171,14 @@ export default function DashboardPage() {
   };
 
   const handleExportCsv = () => {
-    window.open("http://127.0.0.1:8000/api/v1/reconciliation/default/export", "_blank");
+    window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
+
+  // Filter records by diagnostic sub-type if selected
+  const displayedRecords = records.filter((r) => {
+    if (selectedDiagnostic === "ALL") return true;
+    return r.diagnostic_type === selectedDiagnostic;
+  });
 
   return (
     <div className="min-h-screen bg-[#080c14] text-slate-100 flex flex-col font-sans">
@@ -131,27 +193,37 @@ export default function DashboardPage() {
       />
 
       {/* Main Financial Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4 sm:py-6">
-        {/* Executive Summary Metric Cards */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-4 py-2.5 sm:py-4">
+        {/* Executive Summary Metric Cards & Trial Balance Control */}
         <SummaryCards
           status={status}
           onOpenUpload={() => setIsUploadOpen(true)}
-          onFilterTab={(tab) => setActiveTab(tab)}
+          onFilterTab={(tab) => {
+            setActiveTab(tab);
+            setSelectedDiagnostic("ALL");
+          }}
         />
 
         {/* Filter and Action Bar */}
         <FilterBar
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            setSelectedDiagnostic("ALL");
+          }}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           status={status}
           onExportCsv={handleExportCsv}
+          selectedDiagnostic={selectedDiagnostic}
+          onDiagnosticChange={setSelectedDiagnostic}
+          onBatchApprove={handleBatchApprove}
+          batchApproveLoading={batchApproveLoading}
         />
 
         {/* High-Density Reconciliation Ledger Table */}
         <ReconciliationTable
-          records={records}
+          records={displayedRecords}
           highlightedRecordId={highlightedId}
           onApprove={handleApprove}
           onDeny={handleDeny}
@@ -185,6 +257,7 @@ export default function DashboardPage() {
       {/* Conflict Resolution Drawer */}
       <ConflictDrawer
         record={conflictTarget}
+        allRecords={records}
         onClose={() => setConflictTarget(null)}
         onResolve={handleResolveConflict}
       />
