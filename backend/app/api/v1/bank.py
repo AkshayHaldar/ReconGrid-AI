@@ -8,6 +8,9 @@ from app.schemas.bank import BankTransactionResponse, BankUploadResponse
 from app.schemas.common import ApiResponse
 from app.services.ingestion import IngestionService
 
+from typing import Optional
+from app.utils.pdf_parser import BANK_PASSWORD_FORMATS
+
 router = APIRouter(prefix="/bank", tags=["Bank Transactions"])
 
 
@@ -15,12 +18,19 @@ router = APIRouter(prefix="/bank", tags=["Bank Transactions"])
 async def upload_bank_statement(
     file: UploadFile = File(...),
     batch_id: str = Form(default="default"),
+    password: Optional[str] = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    """Uploads and streams a bank statement CSV (HDFC, ICICI, SBI, Axis, or Generic format)."""
+    """Uploads and parses a bank statement (CSV or password-protected PDF)."""
     service = IngestionService(db)
-    result = await service.ingest_csv(file, batch_id=batch_id)
+    result = await service.ingest_statement(file, batch_id=batch_id, password=password)
     return ApiResponse.ok(result)
+
+
+@router.get("/password-hints", response_model=ApiResponse[list[dict]])
+async def get_bank_password_hints():
+    """Returns password generation patterns/logic for major Indian banks."""
+    return ApiResponse.ok(BANK_PASSWORD_FORMATS)
 
 
 @router.get("/transactions", response_model=ApiResponse[list[BankTransactionResponse]])

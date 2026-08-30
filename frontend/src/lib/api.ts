@@ -67,21 +67,44 @@ export async function resolveConflict(
   return json.data;
 }
 
-export async function uploadBankCsv(file: File, batchId: string = "default"): Promise<any> {
+export async function uploadBankStatement(
+  file: File,
+  batchId: string = "default",
+  password?: string
+): Promise<any> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("batch_id", batchId);
+  if (password && password.trim()) {
+    formData.append("password", password.trim());
+  }
 
   const res = await fetch(`${API_BASE}/bank/upload`, {
     method: "POST",
     body: formData,
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error?.message || "Failed to upload CSV");
+    const err = await res.json().catch(() => ({}));
+    const errorObj = new Error(err.error?.message || "Failed to upload and parse bank statement");
+    (errorObj as any).code = err.error?.code;
+    (errorObj as any).hints = err.error?.details;
+    throw errorObj;
   }
   const json = await res.json();
   return json.data;
+}
+
+export const uploadBankCsv = uploadBankStatement;
+
+export async function fetchBankPasswordHints(): Promise<Array<{ bank: string; pattern: string; example: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/bank/password-hints`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data || [];
+  } catch {
+    return [];
+  }
 }
 
 export async function triggerRazorpaySync(count: number = 100, batchId: string = "default"): Promise<any> {

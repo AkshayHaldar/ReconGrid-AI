@@ -32,11 +32,16 @@ class Settings(BaseSettings):
     RAZORPAY_FETCH_MAX_RETRIES: int = 5
     GST_RATE: Decimal = Decimal("0.18")
 
-    # Settlement Q&A Agent
+    # Settlement Q&A Agent & OCR
     LLM_PROVIDER: str = "nvidia"  # "nvidia", "openai", or "anthropic"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "meta/llama-3.3-70b-instruct"
     LLM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
+
+    # OCR / Vision Configuration (Optional for scanned PDFs)
+    OCR_API_KEY: str = ""
+    OCR_PROVIDER: str = "gemini"  # "gemini", "openai", "ocr_space"
+    GEMINI_API_KEY: str = ""
 
     # Feature Flags
     IS_TEST_MODE: bool = True

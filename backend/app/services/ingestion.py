@@ -1,8 +1,10 @@
-"""Bank statement CSV ingestion service."""
+"""Bank statement CSV and PDF ingestion service with password decryption and OCR support."""
 
 import io
+from typing import Optional
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.core.logging import logger
 from app.repositories.bank_repo import BankRepository
@@ -11,6 +13,12 @@ from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.bank import BankUploadResponse
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.csv_parser import BankCsvParser
+from app.utils.pdf_parser import (
+    BANK_PASSWORD_FORMATS,
+    BankPdfParser,
+    PdfInvalidPasswordError,
+    PdfPasswordRequiredError,
+)
 
 
 class IngestionService:
@@ -21,22 +29,27 @@ class IngestionService:
         self.recon_repo = ReconciliationRepository(session)
         self.engine = ReconciliationEngine(self.recon_repo)
 
-    async def ingest_csv(
+    async def ingest_statement(
         self,
         file: UploadFile,
         batch_id: str = "default",
+        password: Optional[str] = None,
     ) -> BankUploadResponse:
-        """Streams and parses bank statement CSV, records transactions, and runs reconciliation."""
+        """Parses bank statement (CSV or PDF), records transactions, and runs reconciliation."""
         filename = file.filename or "statement.csv"
+        ext = filename.lower().split(".")[-1] if "." in filename else ""
 
         # Validate file type
-        if not (filename.lower().endswith(".csv") or file.content_type in {"text/csv", "application/vnd.ms-excel", "text/plain"}):
+        valid_csv = ext == "csv" or file.content_type in {"text/csv", "application/vnd.ms-excel", "text/plain"}
+        valid_pdf = ext == "pdf" or file.content_type in {"application/pdf", "application/x-pdf"}
+
+        if not (valid_csv or valid_pdf):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid file type for {filename}. Only CSV bank statements are supported.",
+                detail=f"Invalid file type for '{filename}'. Only CSV and PDF bank statements are supported.",
             )
 
-        # Read contents with streaming safeguard
+        # Read contents with streaming size safeguard
         max_bytes = settings.MAX_CSV_UPLOAD_MB * 1024 * 1024
         contents = await file.read(max_bytes + 1)
         if len(contents) > max_bytes:
@@ -45,18 +58,48 @@ class IngestionService:
                 detail=f"File exceeds maximum allowed size of {settings.MAX_CSV_UPLOAD_MB} MB.",
             )
 
-        try:
-            text_data = contents.decode("utf-8-sig", errors="replace")
-        except Exception:
-            text_data = contents.decode("latin-1", errors="replace")
+        parsed_rows = []
 
-        lines = text_data.splitlines()
-        parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines)))
+        if valid_pdf:
+            try:
+                parsed_rows = BankPdfParser.parse_pdf(contents, password=password)
+            except PdfPasswordRequiredError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "PASSWORD_REQUIRED",
+                        "message": "This bank statement PDF is password-protected. Please enter your PDF password.",
+                        "hints": BANK_PASSWORD_FORMATS,
+                    },
+                )
+            except PdfInvalidPasswordError as ex:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "INVALID_PASSWORD",
+                        "message": str(ex),
+                        "hints": BANK_PASSWORD_FORMATS,
+                    },
+                )
+            except Exception as ex:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to parse bank statement PDF: {str(ex)}",
+                )
+        else:
+            # Parse CSV
+            try:
+                text_data = contents.decode("utf-8-sig", errors="replace")
+            except Exception:
+                text_data = contents.decode("latin-1", errors="replace")
+
+            lines = text_data.splitlines()
+            parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines)))
 
         if not parsed_rows:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No valid bank transaction rows could be parsed from the uploaded CSV.",
+                detail="No valid bank transaction rows could be parsed from the uploaded file.",
             )
 
         inserted_count = 0
@@ -83,8 +126,9 @@ class IngestionService:
         )
 
         logger.info(
-            "bank_csv_ingestion_completed",
+            "bank_statement_ingestion_completed",
             filename=filename,
+            file_type="pdf" if valid_pdf else "csv",
             parsed_rows=len(parsed_rows),
             inserted=inserted_count,
             duplicates=duplicate_count,
@@ -99,3 +143,7 @@ class IngestionService:
             duplicate_count=duplicate_count,
             reconciled_immediately=len(reconciled_logs),
         )
+
+    # Maintain backward compatibility for any direct call
+    async def ingest_csv(self, file: UploadFile, batch_id: str = "default") -> BankUploadResponse:
+        return await self.ingest_statement(file, batch_id=batch_id)

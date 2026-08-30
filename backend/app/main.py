@@ -44,15 +44,24 @@ app.add_middleware(
 # Global Exception Handlers for Standardized Envelopes (CODE-STANDARDS.md §7)
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict):
+        error_code = exc.detail.get("code", f"HTTP_{exc.status_code}")
+        error_msg = exc.detail.get("message", "An error occurred.")
+        error_details = exc.detail.get("hints") or exc.detail.get("details")
+    else:
+        error_code = f"HTTP_{exc.status_code}"
+        error_msg = str(exc.detail)
+        error_details = None
+
     return JSONResponse(
         status_code=exc.status_code,
         content={
             "success": False,
             "data": None,
             "error": {
-                "code": f"HTTP_{exc.status_code}",
-                "message": exc.detail,
-                "details": None,
+                "code": error_code,
+                "message": error_msg,
+                "details": error_details,
             },
         },
     )
