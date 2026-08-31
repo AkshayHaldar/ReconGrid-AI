@@ -35,7 +35,7 @@ app = FastAPI(
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For hackathon/development convenience
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,7 +47,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     if isinstance(exc.detail, dict):
         error_code = exc.detail.get("code", f"HTTP_{exc.status_code}")
         error_msg = exc.detail.get("message", "An error occurred.")
-        error_details = exc.detail.get("hints") or exc.detail.get("details")
+        error_details = exc.detail.get("hints") or exc.detail.get("details") or exc.detail.get("errors")
     else:
         error_code = f"HTTP_{exc.status_code}"
         error_msg = str(exc.detail)
@@ -94,7 +94,7 @@ async def general_exception_handler(request: Request, exc: Exception):
             "error": {
                 "code": "INTERNAL_SERVER_ERROR",
                 "message": "An unexpected error occurred during reconciliation processing.",
-                "details": str(exc) if settings.ENV == "development" else None,
+                "details": str(exc) if (settings.ENV == "development" and settings.DEBUG_ERRORS) else None,
             },
         },
     )

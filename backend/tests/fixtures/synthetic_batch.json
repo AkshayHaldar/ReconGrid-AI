@@ -10,10 +10,10 @@
   "settlements": [
     {
       "settlement_id": "setl_gold_001",
-      "amount": "98200.00",
+      "amount": "97640.00",
       "gross_amount": "100000.00",
-      "fees": "1525.42",
-      "tax": "274.58",
+      "fees": "2000.00",
+      "tax": "360.00",
       "utr": "CMS002938491801",
       "status": "processed",
       "days_ago": 1,
@@ -21,10 +21,10 @@
     },
     {
       "settlement_id": "setl_gold_002",
-      "amount": "45000.00",
+      "amount": "44719.12",
       "gross_amount": "45800.00",
-      "fees": "677.97",
-      "tax": "122.03",
+      "fees": "916.00",
+      "tax": "164.88",
       "utr": "CMS002938491802",
       "status": "processed",
       "days_ago": 1,
@@ -32,10 +32,10 @@
     },
     {
       "settlement_id": "setl_gold_003",
-      "amount": "125400.00",
+      "amount": "124491.00",
       "gross_amount": "127500.00",
-      "fees": "1779.66",
-      "tax": "320.34",
+      "fees": "2550.00",
+      "tax": "459.00",
       "utr": "CMS002938491803",
       "status": "processed",
       "days_ago": 2,
@@ -43,10 +43,10 @@
     },
     {
       "settlement_id": "setl_gold_004",
-      "amount": "34200.00",
+      "amount": "33978.72",
       "gross_amount": "34800.00",
-      "fees": "508.47",
-      "tax": "91.53",
+      "fees": "696.00",
+      "tax": "125.28",
       "utr": "CMS002938491804",
       "status": "processed",
       "days_ago": 2,
@@ -54,10 +54,10 @@
     },
     {
       "settlement_id": "setl_gold_005",
-      "amount": "49100.00",
+      "amount": "50000.00",
       "gross_amount": "50000.00",
-      "fees": "762.71",
-      "tax": "137.29",
+      "fees": "1000.00",
+      "tax": "180.00",
       "utr": "CMS002938491805",
       "status": "processed",
       "days_ago": 3,
@@ -65,10 +65,10 @@
     },
     {
       "settlement_id": "setl_gold_006",
-      "amount": "68500.00",
+      "amount": "73230.00",
       "gross_amount": "75000.00",
-      "fees": "1271.19",
-      "tax": "228.81",
+      "fees": "1500.00",
+      "tax": "270.00",
       "utr": "CMS002938491806",
       "status": "processed",
       "days_ago": 3,
@@ -76,10 +76,10 @@
     },
     {
       "settlement_id": "setl_gold_007",
-      "amount": "82150.00",
+      "amount": "82994.00",
       "gross_amount": "85000.00",
-      "fees": "1440.68",
-      "tax": "259.32",
+      "fees": "1700.00",
+      "tax": "306.00",
       "utr": "CMS002938491807",
       "status": "processed",
       "days_ago": 4,
@@ -132,7 +132,7 @@
   ],
   "bank_transactions": [
     {
-      "amount": "98200.00",
+      "amount": "97640.00",
       "direction": "CREDIT",
       "utr": "CMS002938491801",
       "description": "CMS/002938491801/HDFC/RAZORPAY SOFTWARE",
@@ -141,7 +141,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "45000.00",
+      "amount": "44719.12",
       "direction": "CREDIT",
       "utr": "CMS002938491802",
       "description": "CMS/002938491802/HDFC/RAZORPAY PAYOUT",
@@ -150,7 +150,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "125400.00",
+      "amount": "124491.00",
       "direction": "CREDIT",
       "utr": "CMS002938491803",
       "description": "NEFT/CMS002938491803/RAZORPAY SETTLEMENT",
@@ -159,7 +159,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "34200.00",
+      "amount": "33978.72",
       "direction": "CREDIT",
       "utr": "CMS002938491804",
       "description": "RTGS/CMS002938491804/RAZORPAY",
@@ -168,7 +168,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "49100.00",
+      "amount": "48820.00",
       "direction": "CREDIT",
       "utr": "CMS002938491805",
       "description": "CMS/002938491805/RAZORPAY ORDER 4521 NET",
@@ -177,7 +177,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "68500.00",
+      "amount": "68230.00",
       "direction": "CREDIT",
       "utr": "CMS002938491806",
       "description": "CMS/002938491806/RAZORPAY REFUND ADJ BATCH",
@@ -186,7 +186,7 @@
       "expected_status": "MATCHED"
     },
     {
-      "amount": "82150.00",
+      "amount": "81844.00",
       "direction": "CREDIT",
       "utr": "CMS002938491807",
       "description": "CMS/002938491807/RAZORPAY CROSS CURRENCY",

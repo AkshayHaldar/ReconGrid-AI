@@ -19,7 +19,11 @@ async def ask_settlement_question(
     """Answers natural-language settlement questions backed strictly by computed audit facts."""
     qa_repo = QaRepository(db)
     agent = SettlementQaAgent(qa_repo)
-    result = await agent.answer_query(req.query)
+    result = await agent.answer_query(
+        query=req.query,
+        context_record_id=req.context_record_id,
+        history=req.history,
+    )
     return ApiResponse.ok(result)
 
 

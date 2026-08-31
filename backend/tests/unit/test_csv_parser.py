@@ -26,9 +26,10 @@ def test_parse_flexible_dates():
     assert parse_flexible_date("24-Aug-2026").strftime("%Y-%m-%d") == "2026-08-24"
     assert parse_flexible_date("2026-08-24 14:30:00").strftime("%Y-%m-%d") == "2026-08-24"
 
-    # Fallback to current date on completely invalid string
-    invalid_dt = parse_flexible_date("INVALID_DATE_STRING")
-    assert isinstance(invalid_dt, datetime)
+    # Raises ValueError on completely invalid string
+    import pytest
+    with pytest.raises(ValueError, match="Unable to parse date string"):
+        parse_flexible_date("INVALID_DATE_STRING")
 
 
 def test_compute_row_hash_deterministic():

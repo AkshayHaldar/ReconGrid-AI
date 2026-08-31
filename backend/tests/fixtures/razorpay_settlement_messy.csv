@@ -1,0 +1,11 @@
+settlement_id,amount,gross_amount,fees,tax,utr,created_at,description
+setl_messy_001,"₹ 48,657.00","₹ 50,000.00","₹ 1,138.14","₹ 204.86",N296250485376,01-08-2026 10:30:00,Razorpay Payout Batch 1
+setl_messy_002,"1,23,456.78","1,26,456.78","2,542.37","457.63",CMS918273645012,03-08-2026 14:15:00,Razorpay Payout Batch 2
+setl_messy_003,"97,640.00","1,00,000.00","2,000.00","360.00",R260812345678,05-08-2026 09:00:00,Razorpay Payout Batch 3
+setl_messy_004,"19,528.00","20,000.00","400.00","72.00",623456789012,08-08-2026 16:45:00,Razorpay Payout Batch 4
+setl_messy_005,"4,882.00","5,000.00","100.00","18.00",UTR2608M4N5O6,12-08-2026 11:20:00,Razorpay Payout Batch 5
+setl_messy_006,"29,292.00","30,000.00","600.00","108.00",624918273645,15-08-2026 13:10:00,Razorpay Payout Batch 6
+setl_messy_007,"-5000.00","0.00","0.00","0.00",REV2608REV001,18-08-2026 08:30:00,Negative adjustment refund clawback
+setl_messy_008,"39,056.00","40,000.00","800.00","144.00",AX260876543210,20-08-2026 17:00:00,Razorpay Payout Batch 8
+setl_messy_009,"INVALID_AMOUNT","50,000.00","1,000.00","180.00",BAD_UTR_001,22-08-2026 12:00:00,Corrupted Settlement Row
+

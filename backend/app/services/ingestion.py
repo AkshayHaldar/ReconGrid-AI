@@ -39,9 +39,31 @@ class IngestionService:
         filename = file.filename or "statement.csv"
         ext = filename.lower().split(".")[-1] if "." in filename else ""
 
-        # Validate file type
-        valid_csv = ext == "csv" or file.content_type in {"text/csv", "application/vnd.ms-excel", "text/plain"}
-        valid_pdf = ext == "pdf" or file.content_type in {"application/pdf", "application/x-pdf"}
+        # Validate file type with generous browser & OS MIME type fallback
+        content_type = (file.content_type or "").lower().strip()
+        valid_csv = (
+            ext in {"csv", "txt"}
+            or content_type in {
+                "text/csv",
+                "application/vnd.ms-excel",
+                "text/plain",
+                "application/octet-stream",
+                "text/comma-separated-values",
+                "application/csv",
+                "text/x-csv",
+            }
+        )
+        valid_pdf = (
+            ext == "pdf"
+            or content_type in {
+                "application/pdf",
+                "application/x-pdf",
+                "application/acrobat",
+                "applications/vnd.pdf",
+                "text/pdf",
+                "text/x-pdf",
+            }
+        )
 
         if not (valid_csv or valid_pdf):
             raise HTTPException(
@@ -105,8 +127,14 @@ class IngestionService:
         inserted_count = 0
         duplicate_count = 0
         all_batch_txs = []
+        validation_errors: list[str] = []
+        valid_rows_count = 0
 
         for row in parsed_rows:
+            if "validation_error" in row:
+                validation_errors.append(row["validation_error"])
+                continue
+            valid_rows_count += 1
             row["batch_id"] = batch_id
             tx, created = await self.bank_repo.upsert_transaction(row)
             all_batch_txs.append(tx)
@@ -114,6 +142,16 @@ class IngestionService:
                 inserted_count += 1
             else:
                 duplicate_count += 1
+
+        if valid_rows_count == 0 and validation_errors:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "STATEMENT_VALIDATION_ERROR",
+                    "message": "All transaction rows in uploaded statement failed validation.",
+                    "errors": validation_errors,
+                },
+            )
 
         # Fetch available settlements to run deterministic reconciliation
         settlements = await self.settlement_repo.get_all()
@@ -132,6 +170,7 @@ class IngestionService:
             parsed_rows=len(parsed_rows),
             inserted=inserted_count,
             duplicates=duplicate_count,
+            validation_errors=len(validation_errors),
             reconciled=len(reconciled_logs),
         )
 
@@ -142,6 +181,7 @@ class IngestionService:
             inserted_count=inserted_count,
             duplicate_count=duplicate_count,
             reconciled_immediately=len(reconciled_logs),
+            validation_errors=validation_errors,
         )
 
     # Maintain backward compatibility for any direct call

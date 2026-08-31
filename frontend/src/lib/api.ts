@@ -88,6 +88,8 @@ export async function uploadBankStatement(
     const errorObj = new Error(err.error?.message || "Failed to upload and parse bank statement");
     (errorObj as any).code = err.error?.code;
     (errorObj as any).hints = err.error?.details;
+    (errorObj as any).details = err.error?.details;
+    (errorObj as any).validationErrors = Array.isArray(err.error?.details) ? err.error.details : [];
     throw errorObj;
   }
   const json = await res.json();
@@ -127,11 +129,19 @@ export async function seedDemoData(count: number = 60, batchId: string = "defaul
   return json.data;
 }
 
-export async function askQaAgent(query: string): Promise<QaAskResponse> {
+export async function askQaAgent(
+  query: string,
+  contextRecordId?: string | null,
+  history?: Array<{ role: string; content: string }>
+): Promise<QaAskResponse> {
   const res = await fetch(`${API_BASE}/qa/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({
+      query,
+      context_record_id: contextRecordId,
+      history: history || [],
+    }),
   });
   if (!res.ok) throw new Error("Failed to consult Settlement Q&A Agent");
   const json: ApiResponse<QaAskResponse> = await res.json();

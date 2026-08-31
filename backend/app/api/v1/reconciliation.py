@@ -15,6 +15,7 @@ from app.schemas.reconciliation import (
     ReconciliationRecordItem,
     ReconciliationRecordListResponse,
     ReconciliationStatusResponse,
+    ScorecardResponse,
 )
 from app.utils.money import to_decimal
 
@@ -66,10 +67,24 @@ async def get_batch_status(
     return ApiResponse.ok(ReconciliationStatusResponse(**summary))
 
 
+@router.get("/{batch_id}/scorecard", response_model=ApiResponse[ScorecardResponse])
+async def get_batch_scorecard(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns audit-grade scorecard metrics with separate Tier 0/1/2/3 breakdown,
+
+    measured throughput (rows/sec), zero-float Decimal math, and complete unfiltered exception list.
+    """
+    repo = ReconciliationRepository(db)
+    scorecard = await repo.get_scorecard_metrics(batch_id)
+    return ApiResponse.ok(ScorecardResponse(**scorecard))
+
+
 @router.get("/{batch_id}/records", response_model=ApiResponse[ReconciliationRecordListResponse])
 async def get_reconciliation_records(
     batch_id: str = "default",
-    status: str = Query(default="ALL", description="Filter by MATCHED, SUGGESTED, CONFLICT, EXCEPTION, or ALL"),
+    status: str = Query(default="ALL", description="Filter by MATCHED, SUGGESTED, CONFLICT, EXCEPTION, PENDING_SETTLEMENT_DATA, or ALL"),
     q: str = Query(default="", description="Search query across UTR, descriptor, or settlement ID"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -267,7 +282,7 @@ async def export_reconciliation_csv(
             f"{to_decimal(rzp.tax):.2f}" if rzp else "",
             log.match_status,
             log.match_tier,
-            f"{log.confidence_score * 100:.1f}%" if log.confidence_score else "100%",
+            f"{log.confidence_score * 100:.1f}%" if log.confidence_score is not None else ("100.0%" if log.match_status == "MATCHED" else "N/A"),
             log.diagnostic_type,
             log.diagnostic_note,
             log.human_action or "AUTO",

@@ -397,7 +397,7 @@ class BankPdfParser:
                 # If Gemini API key is available
                 if settings.GEMINI_API_KEY or (settings.LLM_PROVIDER == "gemini" and api_key):
                     gemini_key = settings.GEMINI_API_KEY or api_key
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+                    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
                     prompt = (
                         "Extract all bank statement transaction rows from this page image in structured format.\n"
                         "Output ONLY valid JSON array with objects containing:\n"
@@ -418,8 +418,12 @@ class BankPdfParser:
                             }
                         ]
                     }
+                    headers = {
+                        "x-goog-api-key": gemini_key,
+                        "Content-Type": "application/json",
+                    }
                     with httpx.Client(timeout=30.0) as client:
-                        resp = client.post(url, json=payload)
+                        resp = client.post(url, json=payload, headers=headers)
                         if resp.status_code == 200:
                             data = resp.json()
                             text_out = data["candidates"][0]["content"]["parts"][0]["text"]

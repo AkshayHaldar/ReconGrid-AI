@@ -25,17 +25,25 @@ class Settings(BaseSettings):
 
     # App Config
     ENV: Literal["development", "production", "testing"] = "development"
+    DEBUG_ERRORS: bool = False
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
     MAX_CSV_UPLOAD_MB: int = 10
     MAX_CSV_ROWS: int = 50000
     RECONCILIATION_TOLERANCE_INR: Decimal = Decimal("1.00")
     FUZZY_MATCH_CONFIDENCE_THRESHOLD: float = 0.90
     RAZORPAY_FETCH_MAX_RETRIES: int = 5
     GST_RATE: Decimal = Decimal("0.18")
+    SETTLEMENT_PENDING_WINDOW_DAYS: int = 5
 
     # Settlement Q&A Agent & OCR
     LLM_PROVIDER: str = "nvidia"  # "nvidia", "openai", or "anthropic"
     LLM_API_KEY: str = ""
-    LLM_MODEL: str = "meta/llama-3.3-70b-instruct"
+    LLM_MODEL: str = "meta/llama-3.1-70b-instruct"
     LLM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
 
     # OCR / Vision Configuration (Optional for scanned PDFs)

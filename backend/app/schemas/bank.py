@@ -43,3 +43,4 @@ class BankUploadResponse(BaseModel):
     inserted_count: int
     duplicate_count: int
     reconciled_immediately: int
+    validation_errors: list[str] = Field(default_factory=list)

@@ -5,8 +5,15 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict
 
 
+class MessageHistoryItem(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
 class QaAskRequest(BaseModel):
     query: str
+    context_record_id: Optional[str] = None
+    history: Optional[list[MessageHistoryItem]] = None
 
 
 class QaAskResponse(BaseModel):

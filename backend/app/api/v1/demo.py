@@ -12,10 +12,26 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
+from sqlalchemy import delete
+from app.models.bank_transaction import BankTransaction
+from app.models.reconciliation_log import ReconciliationLog
+from app.models.razorpay_settlement import RazorpaySettlement
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 router = APIRouter(prefix="/demo", tags=["Demo & Fixtures"])
+
+
+@router.post("/reset", response_model=ApiResponse[dict])
+async def reset_demo_dataset(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Clears all bank transactions and reconciliation logs for clean testing."""
+    await db.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
+    await db.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
+    await db.commit()
+    return ApiResponse.ok({"status": "reset", "batch_id": batch_id})
 
 
 @router.post("/seed", response_model=ApiResponse[dict])
@@ -32,15 +48,24 @@ async def seed_demo_dataset(
 
     now = datetime.now(timezone.utc)
 
-    # 1. Generate Razorpay settlements
+    # 1. Generate Razorpay settlements using standard 2% MDR + 18% GST fee formula
+    s1_fee, s1_tax, s1_net = calculate_standard_fees(Decimal("100000.00"))
+    s2_fee, s2_tax, s2_net = calculate_standard_fees(Decimal("45800.00"))
+    s3_fee, s3_tax, s3_net = calculate_standard_fees(Decimal("127500.00"))
+    s4_fee, s4_tax, s4_net = calculate_standard_fees(Decimal("34800.00"))
+    s5_fee, s5_tax, s5_net = calculate_standard_fees(Decimal("50000.00"))
+    s6_fee, s6_tax, s6_net = calculate_standard_fees(Decimal("75000.00"))
+    s7_fee, s7_tax, s7_net = calculate_standard_fees(Decimal("85000.00"))
+    s12_fee, s12_tax, s12_net = calculate_standard_fees(Decimal("100000.00"))
+
     settlements_data = [
         # Tier 1 Exact Matches (High volume clean settlements)
         {
             "settlement_id": "setl_Kjs9283jkd901",
-            "amount": Decimal("98200.00"),
+            "amount": s1_net,
             "gross_amount": Decimal("100000.00"),
-            "fees": Decimal("1525.42"),
-            "tax": Decimal("274.58"),
+            "fees": s1_fee,
+            "tax": s1_tax,
             "utr": "CMS002938491801",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=1),
@@ -49,10 +74,10 @@ async def seed_demo_dataset(
         },
         {
             "settlement_id": "setl_Kjs9283jkd902",
-            "amount": Decimal("45000.00"),
+            "amount": s2_net,
             "gross_amount": Decimal("45800.00"),
-            "fees": Decimal("677.97"),
-            "tax": Decimal("122.03"),
+            "fees": s2_fee,
+            "tax": s2_tax,
             "utr": "CMS002938491802",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=1),
@@ -61,10 +86,10 @@ async def seed_demo_dataset(
         },
         {
             "settlement_id": "setl_Kjs9283jkd903",
-            "amount": Decimal("125400.00"),
+            "amount": s3_net,
             "gross_amount": Decimal("127500.00"),
-            "fees": Decimal("1779.66"),
-            "tax": Decimal("320.34"),
+            "fees": s3_fee,
+            "tax": s3_tax,
             "utr": "CMS002938491803",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=2),
@@ -73,10 +98,10 @@ async def seed_demo_dataset(
         },
         {
             "settlement_id": "setl_Kjs9283jkd904",
-            "amount": Decimal("34200.00"),
+            "amount": s4_net,
             "gross_amount": Decimal("34800.00"),
-            "fees": Decimal("508.47"),
-            "tax": Decimal("91.53"),
+            "fees": s4_fee,
+            "tax": s4_tax,
             "utr": "CMS002938491804",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=2),
@@ -86,10 +111,10 @@ async def seed_demo_dataset(
         # Tier 3 Fee Deduction (Bank received net, gross was in UTR record)
         {
             "settlement_id": "setl_Kjs9283jkd905",
-            "amount": Decimal("49100.00"),
+            "amount": Decimal("50000.00"),
             "gross_amount": Decimal("50000.00"),
-            "fees": Decimal("762.71"),
-            "tax": Decimal("137.29"),
+            "fees": s5_fee,
+            "tax": s5_tax,
             "utr": "CMS002938491805",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=3),
@@ -99,10 +124,10 @@ async def seed_demo_dataset(
         # Tier 3 Refund Adjusted (Refund clawback deducted)
         {
             "settlement_id": "setl_Kjs9283jkd906",
-            "amount": Decimal("68500.00"),
+            "amount": s6_net,
             "gross_amount": Decimal("75000.00"),
-            "fees": Decimal("1271.19"),
-            "tax": Decimal("228.81"),
+            "fees": s6_fee,
+            "tax": s6_tax,
             "utr": "CMS002938491806",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=3),
@@ -115,10 +140,10 @@ async def seed_demo_dataset(
         # Tier 3 FX Adjusted
         {
             "settlement_id": "setl_Kjs9283jkd907",
-            "amount": Decimal("82150.00"),
+            "amount": s7_net,
             "gross_amount": Decimal("85000.00"),
-            "fees": Decimal("1440.68"),
-            "tax": Decimal("259.32"),
+            "fees": s7_fee,
+            "tax": s7_tax,
             "utr": "CMS002938491807",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=4),
@@ -183,10 +208,10 @@ async def seed_demo_dataset(
         # Section 194-O E-Commerce 1% TDS Target
         {
             "settlement_id": "setl_Kjs9283jkd912",
-            "amount": Decimal("97200.00"),
+            "amount": s12_net,
             "gross_amount": Decimal("100000.00"),
-            "fees": Decimal("1525.42"),
-            "tax": Decimal("274.58"),
+            "fees": s12_fee,
+            "tax": s12_tax,
             "utr": "CMS002938491812",
             "status": "processed",
             "settlement_created_at": now - timedelta(days=3),
@@ -221,14 +246,13 @@ async def seed_demo_dataset(
         },
     ]
 
-    # Additional standard settlements to scale up to count
+    # Additional standard settlements to scale up to count using standard 2% MDR + 18% GST formula
     for i in range(12, count + 1):
         amt = Decimal(f"{(i * 3750) % 85000 + 10000}.00")
-        fees = (amt * Decimal("0.015")).quantize(Decimal("0.01"))
-        tax = (fees * Decimal("0.18")).quantize(Decimal("0.01"))
+        fees, tax, net_amt = calculate_standard_fees(amt)
         settlements_data.append({
             "settlement_id": f"setl_Kjs9283jkd{i:03d}",
-            "amount": amt - fees - tax,
+            "amount": net_amt,
             "gross_amount": amt,
             "fees": fees,
             "tax": tax,
@@ -244,12 +268,12 @@ async def seed_demo_dataset(
         setl, _ = await setl_repo.upsert_settlement(s)
         saved_settlements.append(setl)
 
-    # 2. Generate Bank statement transactions
+    # 2. Generate Bank statement transactions matching standard calculations
     bank_txs_data = [
         # Exact Matches
         {
             "date": now - timedelta(days=1),
-            "amount": Decimal("98200.00"),
+            "amount": s1_net,
             "direction": "CREDIT",
             "utr": "CMS002938491801",
             "description": "CMS/002938491801/HDFC/RAZORPAY SOFTWARE PVT",
@@ -257,7 +281,7 @@ async def seed_demo_dataset(
         },
         {
             "date": now - timedelta(days=1),
-            "amount": Decimal("45000.00"),
+            "amount": s2_net,
             "direction": "CREDIT",
             "utr": "CMS002938491802",
             "description": "CMS/002938491802/HDFC/RAZORPAY PAYOUT",
@@ -265,7 +289,7 @@ async def seed_demo_dataset(
         },
         {
             "date": now - timedelta(days=2),
-            "amount": Decimal("125400.00"),
+            "amount": s3_net,
             "direction": "CREDIT",
             "utr": "CMS002938491803",
             "description": "NEFT/CMS002938491803/RAZORPAY SETTLEMENT",
@@ -273,34 +297,34 @@ async def seed_demo_dataset(
         },
         {
             "date": now - timedelta(days=2),
-            "amount": Decimal("34200.00"),
+            "amount": s4_net,
             "direction": "CREDIT",
             "utr": "CMS002938491804",
             "description": "RTGS/CMS002938491804/RAZORPAY",
             "row_hash": "hash_demo_004",
         },
-        # Fee deduction (Bank shows 49,100.00 against 50,000.00 gross)
+        # Fee deduction (Bank shows net against gross)
         {
             "date": now - timedelta(days=3),
-            "amount": Decimal("49100.00"),
+            "amount": s5_net,
             "direction": "CREDIT",
             "utr": "CMS002938491805",
             "description": "CMS/002938491805/RAZORPAY ORDER 4521 NET",
             "row_hash": "hash_demo_005",
         },
-        # Refund adjustment (Bank shows 68,500.00)
+        # Refund adjustment (Bank shows 68,230.00 = 73,230.00 - 5,000.00)
         {
             "date": now - timedelta(days=3),
-            "amount": Decimal("68500.00"),
+            "amount": s6_net - Decimal("5000.00"),
             "direction": "CREDIT",
             "utr": "CMS002938491806",
             "description": "CMS/002938491806/RAZORPAY REFUND ADJ BATCH",
             "row_hash": "hash_demo_006",
         },
-        # FX adjusted (Bank shows 82,150.00)
+        # FX adjusted (Bank shows 81,844.00 = 82,994.00 - 1,150.00)
         {
             "date": now - timedelta(days=4),
-            "amount": Decimal("82150.00"),
+            "amount": s7_net - Decimal("1150.00"),
             "direction": "CREDIT",
             "utr": "CMS002938491807",
             "description": "CMS/002938491807/RAZORPAY CROSS CURRENCY",
@@ -351,10 +375,10 @@ async def seed_demo_dataset(
             "description": "CMS/002938491811/HDFC/BRANCH B",
             "row_hash": "hash_demo_011_b",
         },
-        # Section 194-O E-Commerce 1% TDS Bank Credit
+        # Section 194-O E-Commerce 1% TDS Bank Credit (100000 - 2000 fee - 360 tax - 1000 TDS = 96640.00)
         {
             "date": now - timedelta(days=3),
-            "amount": Decimal("97200.00"),
+            "amount": s12_net - Decimal("1000.00"),
             "direction": "CREDIT",
             "utr": "CMS002938491812",
             "description": "CMS/002938491812/HDFC/ECOM SALES NET 194O",
@@ -443,23 +467,23 @@ async def download_sample_csv(
 
     if bank.upper() == "ICICI":
         writer.writerow(["Transaction Date", "Transaction Reference Number", "Transaction Remarks", "Deposit Amount (INR )", "Withdrawal Amount (INR )"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/RAZORPAY", "98200.00", "0.00"])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "49100.00", "0.00"])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/REFUND BATCH", "68500.00", "0.00"])
+        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/RAZORPAY", "97640.00", "0.00"])
+        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "48820.00", "0.00"])
+        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/REFUND BATCH", "68230.00", "0.00"])
         writer.writerow([(now - timedelta(days=4)).strftime("%d/%m/%Y"), "CMS002938491808", "CMS/002938491808/CHARGEBACK", "0.00", "15000.00"])
         writer.writerow([(now - timedelta(days=5)).strftime("%d/%m/%Y"), "", "RTGS RAZORPAY SOFTWARE PRIVATE LIMITED", "12450.00", "0.00"])
     elif bank.upper() == "SBI":
         writer.writerow(["Txn Date", "Ref No./Cheque No.", "Description", "Credit", "Debit"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d-%m-%Y"), "CMS002938491801", "RAZORPAY PAYOUT 901", "98200.00", ""])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d-%m-%Y"), "CMS002938491805", "RAZORPAY ORDER 4521", "49100.00", ""])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d-%m-%Y"), "CMS002938491806", "RAZORPAY SETTLEMENT", "68500.00", ""])
+        writer.writerow([(now - timedelta(days=1)).strftime("%d-%m-%Y"), "CMS002938491801", "RAZORPAY PAYOUT 901", "97640.00", ""])
+        writer.writerow([(now - timedelta(days=2)).strftime("%d-%m-%Y"), "CMS002938491805", "RAZORPAY ORDER 4521", "48820.00", ""])
+        writer.writerow([(now - timedelta(days=3)).strftime("%d-%m-%Y"), "CMS002938491806", "RAZORPAY SETTLEMENT", "68230.00", ""])
         writer.writerow([(now - timedelta(days=4)).strftime("%d-%m-%Y"), "", "DIRECT TRANSFER NO UTR", "78900.00", ""])
     else:  # HDFC format
         writer.writerow(["Date", "Chq/Ref No.", "Narration", "Deposit Amt.", "Withdrawal Amt."])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/HDFC/RAZORPAY", "98200.00", "0.00"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491802", "CMS/002938491802/HDFC/RAZORPAY", "45000.00", "0.00"])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "49100.00", "0.00"])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/RAZORPAY REFUND", "68500.00", "0.00"])
+        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/HDFC/RAZORPAY", "97640.00", "0.00"])
+        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491802", "CMS/002938491802/HDFC/RAZORPAY", "44719.12", "0.00"])
+        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "48820.00", "0.00"])
+        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/RAZORPAY REFUND", "68230.00", "0.00"])
         writer.writerow([(now - timedelta(days=4)).strftime("%d/%m/%Y"), "CMS002938491808", "CMS/002938491808/REVERSAL", "0.00", "15000.00"])
         writer.writerow([(now - timedelta(days=5)).strftime("%d/%m/%Y"), "", "RTGS RAZORPAY SOFTWARE BANGLORE", "12450.00", "0.00"])
         writer.writerow([(now - timedelta(days=6)).strftime("%d/%m/%Y"), "ICIC009283921099", "UNKNOWN DIRECT CREDIT", "18450.00", "0.00"])

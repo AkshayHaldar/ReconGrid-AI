@@ -7,8 +7,20 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Union
 
 
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from typing import Any, Optional, Tuple, Union
+
+
+# Regex to strip non-numeric currency noise while preserving negative signs and decimals
+CURRENCY_CLEAN_REGEX = re.compile(r"[^\d.\-()+]", re.IGNORECASE)
+
+
 def to_decimal(val: Union[str, int, float, Decimal, None]) -> Decimal:
-    """Converts a value safely to Decimal without intermediate float precision loss."""
+    """Converts a value safely to Decimal without intermediate float precision loss.
+
+    Handles Indian currency notation (₹, INR, Rs., Cr/Dr suffixes, commas, parentheses).
+    """
     if val is None:
         return Decimal("0.00")
     if isinstance(val, Decimal):
@@ -16,12 +28,74 @@ def to_decimal(val: Union[str, int, float, Decimal, None]) -> Decimal:
     if isinstance(val, float):
         # Enforce stringification to prevent binary float representation noise
         return Decimal(str(val)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    if isinstance(val, (int, str)):
-        clean_str = str(val).replace(",", "").strip()
+    if isinstance(val, int):
+        return Decimal(val).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if isinstance(val, str):
+        clean_str = val.strip()
         if not clean_str:
             return Decimal("0.00")
-        return Decimal(clean_str).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # Check for accounting parentheses negative format e.g. (1,234.50)
+        is_parentheses_neg = clean_str.startswith("(") and clean_str.endswith(")")
+        if is_parentheses_neg:
+            clean_str = clean_str[1:-1].strip()
+
+        # Remove currency symbols, INR, Rs., Cr, Dr, commas, spaces, NBSP
+        clean_str = (
+            clean_str
+            .replace("₹", "")
+            .replace("INR", "")
+            .replace("inr", "")
+            .replace("Rs.", "")
+            .replace("Rs", "")
+            .replace("rs.", "")
+            .replace("rs", "")
+            .replace("CR", "")
+            .replace("Cr", "")
+            .replace("cr", "")
+            .replace("DR", "")
+            .replace("Dr", "")
+            .replace("dr", "")
+            .replace(",", "")
+            .replace(" ", "")  # NBSP
+            .replace("​", "")  # Zero-width space
+            .strip()
+        )
+
+        if not clean_str:
+            return Decimal("0.00")
+
+        if is_parentheses_neg and not clean_str.startswith("-"):
+            clean_str = f"-{clean_str}"
+
+        try:
+            return Decimal(clean_str).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            raise ValueError(f"Invalid monetary numeric format: '{val}'")
+
     raise TypeError(f"Cannot convert type {type(val)} to Decimal")
+
+
+def parse_amount_and_direction(raw_val: Any) -> Tuple[Decimal, str]:
+    """Parses raw amount string and extracts absolute Decimal amount and direction (CREDIT/DEBIT)."""
+    if raw_val is None:
+        return Decimal("0.00"), "CREDIT"
+
+    raw_str = str(raw_val).strip().upper()
+    if not raw_str:
+        return Decimal("0.00"), "CREDIT"
+
+    is_debit = (
+        raw_str.endswith(" DR")
+        or raw_str.endswith("DR")
+        or raw_str.startswith("DR ")
+        or raw_str.startswith("-")
+        or (raw_str.startswith("(") and raw_str.endswith(")"))
+    )
+
+    amount = abs(to_decimal(raw_val))
+    direction = "DEBIT" if is_debit else "CREDIT"
+    return amount, direction
 
 
 def paise_to_rupees(paise: Union[int, str, Decimal]) -> Decimal:
@@ -69,3 +143,73 @@ def format_inr(amount: Decimal) -> str:
 
     res = f"₹ {formatted_int}.{dec_part}"
     return f"({res})" if is_negative else res
+
+
+class UnscaledPaiseAmountError(ValueError):
+    """Raised when an amount string appears to be unscaled paise instead of INR rupees."""
+    pass
+
+
+def validate_raw_amount_format(raw_val: Any, col_name: str = "", row_idx: int = 1) -> None:
+    """Validates that a raw amount string is not an unscaled integer paise amount.
+    
+    Heuristic:
+    - If raw value is an unscaled integer (no decimal point) AND >= 100,000 OR column name indicates paise,
+      it is rejected as unscaled paise.
+    - Legitimate large rupee transactions with decimal formatting (e.g. 500000.00) pass safely.
+    """
+    if raw_val is None:
+        return
+    raw_str = str(raw_val).strip()
+    if not raw_str:
+        return
+
+    clean_val = (
+        raw_str
+        .replace(",", "")
+        .replace("₹", "")
+        .replace("INR", "")
+        .replace("inr", "")
+        .replace("Rs.", "")
+        .replace("Rs", "")
+        .replace("CR", "")
+        .replace("Cr", "")
+        .replace("cr", "")
+        .replace("DR", "")
+        .replace("Dr", "")
+        .replace("dr", "")
+        .strip()
+    )
+
+    # Check if column explicitly indicates paise formatting
+    col_lower = col_name.lower()
+    is_paise_col = "paise" in col_lower or "paisa" in col_lower
+
+    has_decimal_point = "." in clean_val
+    is_integer_format = clean_val.isdigit() or (clean_val.startswith("-") and clean_val[1:].isdigit())
+
+    if is_paise_col or (is_integer_format and not has_decimal_point and abs(int(clean_val)) >= 100000):
+        raise UnscaledPaiseAmountError(
+            f"Row {row_idx}: amount {raw_str} appears to be unscaled paise, expected rupees with 2 decimal places — please verify your export format"
+        )
+
+
+def calculate_standard_fees(
+    gross_amount: Union[str, int, float, Decimal],
+    mdr_rate: Decimal = Decimal("0.02"),
+    gst_rate: Decimal = Decimal("0.18"),
+) -> tuple[Decimal, Decimal, Decimal]:
+    """Calculates standard Razorpay fees (2% MDR + 18% GST on MDR) and net settlement payout.
+    
+    Formula:
+        fee = (gross * 0.02) rounded to 2 decimal places (ROUND_HALF_UP)
+        gst = (fee * 0.18) rounded to 2 decimal places (ROUND_HALF_UP)
+        net = gross - fee - gst
+    
+    Returns: (fees, gst_tax, net_amount) as quantized Decimals.
+    """
+    gross = to_decimal(gross_amount)
+    fee = (gross * mdr_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    gst = (fee * gst_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    net = (gross - fee - gst).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return fee, gst, net

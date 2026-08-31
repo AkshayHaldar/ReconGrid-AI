@@ -12,7 +12,7 @@ from typing import NamedTuple, Optional
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.utils.money import format_inr, is_amount_matching, to_decimal
+from app.utils.money import calculate_standard_fees, format_inr, is_amount_matching, to_decimal
 
 GST_RATE = settings.GST_RATE  # GST standard for payment gateway processing fees
 
@@ -54,26 +54,6 @@ class DiagnosticsService:
                 ),
             )
 
-        # Case 2: Section 194-O E-Commerce 1% TDS + Gateway Fee + 18% GST Deduction
-        estimated_fee = (rzp_gross * Decimal("0.02")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if rzp_gross > Decimal("0.00") else Decimal("0.00")
-        estimated_tax = (estimated_fee * GST_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        tds_rate = Decimal("0.01")  # 1% TDS u/s 194-O
-        tds_194o = (rzp_gross * tds_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if rzp_gross > Decimal("0.00") else Decimal("0.00")
-        total_tds_deduction = (fees + tax + tds_194o) if fees > Decimal("0.00") else (estimated_fee + estimated_tax + tds_194o)
-
-        if tds_194o > Decimal("0.00") and is_amount_matching(rzp_gross - bank_amount, total_tds_deduction, tolerance):
-            fee_part = fees if fees > Decimal("0.00") else estimated_fee
-            tax_part = tax if tax > Decimal("0.00") else estimated_tax
-            return DiagnosticResult(
-                diagnostic_type="TDS_194O_DEDUCTION",
-                match_status="MATCHED",
-                delta_amount=total_tds_deduction,
-                diagnostic_note=(
-                    f"Difference of {format_inr(total_tds_deduction)} matches 1% TDS u/s 194-O ({format_inr(tds_194o)}) "
-                    f"+ Gateway Fee ({format_inr(fee_part)}) + 18% GST ({format_inr(tax_part)})."
-                ),
-            )
-
         # Case 0: Exact match with zero delta on net payout
         if is_amount_matching(bank_amount, rzp_net, tolerance):
             return DiagnosticResult(
@@ -83,7 +63,7 @@ class DiagnosticsService:
                 diagnostic_note=f"Exact match on net payout amount {format_inr(bank_amount)}.",
             )
 
-        # Case 2: Gateway Fees + 18% GST Deduction
+        # Case 2: Gateway Fees + 18% GST Deduction (Actual values from settlement)
         expected_deduction = fees + tax
         if expected_deduction > Decimal("0.00") and is_amount_matching(
             rzp_gross - bank_amount, expected_deduction, tolerance
@@ -99,9 +79,14 @@ class DiagnosticsService:
             )
 
         # Case 2b: Standard 2% MDR Fee + 18% GST estimation
-        estimated_fee = (rzp_gross * Decimal("0.02")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        estimated_tax = (estimated_fee * GST_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        if is_amount_matching(rzp_gross - bank_amount, estimated_fee + estimated_tax, tolerance):
+        estimated_fee, estimated_tax, _ = (
+            calculate_standard_fees(rzp_gross, mdr_rate=Decimal("0.02"), gst_rate=GST_RATE)
+            if rzp_gross > Decimal("0.00")
+            else (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+        )
+        if (estimated_fee + estimated_tax > Decimal("0.00")) and is_amount_matching(
+            rzp_gross - bank_amount, estimated_fee + estimated_tax, tolerance
+        ):
             return DiagnosticResult(
                 diagnostic_type="FEE_DEDUCTION",
                 match_status="MATCHED",
@@ -114,10 +99,20 @@ class DiagnosticsService:
 
         # Case 2c: Section 194-O E-Commerce 1% TDS + Gateway Fee + 18% GST
         tds_rate = Decimal("0.01")  # 1% TDS u/s 194-O
-        tds_194o = (rzp_gross * tds_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if rzp_gross > Decimal("0.00") else Decimal("0.00")
-        total_tds_deduction = (fees + tax + tds_194o) if fees > Decimal("0.00") else (estimated_fee + estimated_tax + tds_194o)
-        
-        if tds_194o > Decimal("0.00") and is_amount_matching(rzp_gross - bank_amount, total_tds_deduction, tolerance):
+        tds_194o = (
+            (rzp_gross * tds_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if rzp_gross > Decimal("0.00")
+            else Decimal("0.00")
+        )
+        total_tds_deduction = (
+            (fees + tax + tds_194o)
+            if fees > Decimal("0.00")
+            else (estimated_fee + estimated_tax + tds_194o)
+        )
+
+        if tds_194o > Decimal("0.00") and is_amount_matching(
+            rzp_gross - bank_amount, total_tds_deduction, tolerance
+        ):
             fee_part = fees if fees > Decimal("0.00") else estimated_fee
             tax_part = tax if tax > Decimal("0.00") else estimated_tax
             return DiagnosticResult(

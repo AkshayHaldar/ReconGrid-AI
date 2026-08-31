@@ -27,7 +27,7 @@ class ReconciliationLog(Base, UUIDMixin, TimestampMixin):
     )
 
     # Match classification
-    # MATCHED | SUGGESTED | CONFLICT | EXCEPTION
+    # MATCHED | SUGGESTED | CONFLICT | EXCEPTION | PENDING_SETTLEMENT_DATA
     match_status: Mapped[str] = mapped_column(String(32), index=True, nullable=False)
     # TIER_0 | TIER_1 | TIER_2 | TIER_3 | MANUAL
     match_tier: Mapped[str] = mapped_column(String(32), nullable=False)

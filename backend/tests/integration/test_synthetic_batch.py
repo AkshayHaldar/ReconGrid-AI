@@ -10,7 +10,7 @@ from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import format_inr, to_decimal
+from app.utils.money import calculate_standard_fees, format_inr, to_decimal
 
 
 @pytest.mark.asyncio
@@ -44,14 +44,13 @@ async def test_golden_synthetic_batch(db_session: AsyncSession):
         db_session.add(setl)
         saved_settlements.append(setl)
 
-    # Add extra settlements to ensure scale >= 50
+    # Add extra settlements to ensure scale >= 50 using standard fee calculations
     for i in range(12, 55):
         amt = Decimal(f"{(i * 3500) % 80000 + 10000}.00")
-        fees = (amt * Decimal("0.015")).quantize(Decimal("0.01"))
-        tax = (fees * Decimal("0.18")).quantize(Decimal("0.01"))
+        fees, tax, net_amt = calculate_standard_fees(amt)
         setl = RazorpaySettlement(
             settlement_id=f"setl_gold_{i:03d}",
-            amount=amt - fees - tax,
+            amount=net_amt,
             gross_amount=amt,
             fees=fees,
             tax=tax,

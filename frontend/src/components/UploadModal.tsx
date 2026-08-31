@@ -79,6 +79,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [hints, setHints] = useState(DEFAULT_BANK_HINTS);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [isPasswordError, setIsPasswordError] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +109,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const selected = e.target.files[0];
       setFile(selected);
       setError(null);
+      setValidationErrors([]);
       setIsPasswordError(false);
       if (selected.name.toLowerCase().endsWith(".pdf")) {
         // Automatically give focus to password field if it's a PDF
@@ -122,6 +124,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const selected = e.dataTransfer.files[0];
       setFile(selected);
       setError(null);
+      setValidationErrors([]);
       setIsPasswordError(false);
       if (selected.name.toLowerCase().endsWith(".pdf")) {
         setTimeout(() => passwordInputRef.current?.focus(), 100);
@@ -137,6 +140,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
     setUploading(true);
     setError(null);
+    setValidationErrors([]);
     setIsPasswordError(false);
 
     try {
@@ -150,8 +154,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         setShowHints(true);
         setTimeout(() => passwordInputRef.current?.focus(), 100);
       }
-      if (err.hints && Array.isArray(err.hints) && err.hints.length > 0) {
+      if (err.hints && Array.isArray(err.hints) && err.hints.length > 0 && typeof err.hints[0] === "object") {
         setHints(err.hints);
+      }
+      if (err.validationErrors && Array.isArray(err.validationErrors)) {
+        setValidationErrors(err.validationErrors);
       }
       setError(err.message || "Failed to parse bank statement.");
     } finally {
@@ -199,9 +206,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed ${
-              file ? "border-blue-500/60 bg-blue-950/10" : "border-[#233550] hover:border-blue-500/70 bg-[#0b101b]"
-            } rounded-lg p-4 sm:p-5 text-center cursor-pointer transition group`}
+            className={`border-2 border-dashed ${file ? "border-blue-500/60 bg-blue-950/10" : "border-[#233550] hover:border-blue-500/70 bg-[#0b101b]"
+              } rounded-lg p-4 sm:p-5 text-center cursor-pointer transition group`}
           >
             <input
               type="file"
@@ -241,9 +247,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </div>
 
           {/* Password Protection Section */}
-          <div className={`p-3 rounded-lg border transition ${
-            isPasswordError ? "bg-rose-950/20 border-rose-700/80" : "bg-[#0b101b] border-[#1c2b42]"
-          }`}>
+          <div className={`p-3 rounded-lg border transition ${isPasswordError ? "bg-rose-950/20 border-rose-700/80" : "bg-[#0b101b] border-[#1c2b42]"
+            }`}>
             <div className="flex items-center justify-between mb-2">
               <label className="text-[11px] font-semibold text-slate-200 flex items-center gap-1.5">
                 <KeyRound className="w-3.5 h-3.5 text-amber-400" />
@@ -341,11 +346,18 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {error && (
             <div className="p-2.5 bg-rose-950/50 border border-rose-800/80 rounded-lg text-rose-200 flex items-start gap-2 text-[11px] animate-in fade-in">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
+              <div className="space-y-1 flex-1">
                 <p className="font-semibold text-rose-300">
                   {isPasswordError ? "Password Required / Invalid" : "Upload Failed"}
                 </p>
                 <p className="text-rose-200/90 leading-tight">{error}</p>
+                {validationErrors && validationErrors.length > 0 && (
+                  <ul className="mt-1 list-disc list-inside space-y-0.5 text-[10px] text-rose-300/90 max-h-28 overflow-y-auto bg-rose-950/80 p-1.5 rounded border border-rose-900/60 font-mono">
+                    {validationErrors.map((e, idx) => (
+                      <li key={idx}>{e}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
           )}

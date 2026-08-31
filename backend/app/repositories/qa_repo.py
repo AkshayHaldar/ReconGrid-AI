@@ -77,7 +77,20 @@ class QaRepository:
             if record2:
                 return record2
 
-        return None
+    async def get_record_by_id(self, record_id: str) -> ReconciliationLog | None:
+        """Retrieves a ReconciliationLog directly by its primary key ID."""
+        if not record_id:
+            return None
+        stmt = (
+            select(ReconciliationLog)
+            .options(
+                selectinload(ReconciliationLog.bank_transaction),
+                selectinload(ReconciliationLog.rzp_settlement),
+            )
+            .where(ReconciliationLog.id == record_id)
+        )
+        res = await self.session.execute(stmt)
+        return res.scalars().first()
 
     async def log_interaction(self, log_dict: dict) -> QaInteractionLog:
         """Appends an immutable record of every Q&A interaction to QaInteractionLog."""

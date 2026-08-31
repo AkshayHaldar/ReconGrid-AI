@@ -3,6 +3,7 @@
 No LLM involvement — pure deterministic rules and Decimal arithmetic.
 """
 
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Sequence
@@ -39,6 +40,7 @@ class ReconciliationEngine:
         batch_id: str = "default",
     ) -> list[ReconciliationLog]:
         """Runs the deterministic multi-tier matching pipeline across the dataset."""
+        t_start = time.perf_counter()
         tolerance = settings.RECONCILIATION_TOLERANCE_INR
         fuzzy_threshold = settings.FUZZY_MATCH_CONFIDENCE_THRESHOLD
 
@@ -51,13 +53,28 @@ class ReconciliationEngine:
                 clean_utr = s.utr.strip().upper()
                 settlements_by_utr.setdefault(clean_utr, []).append(s)
 
+        # Retrieve prior active statuses for bank transactions in batch to track state transitions
+        active_logs, _ = await self.recon_repo.get_active_logs(
+            batch_id=batch_id,
+            page_size=max(len(bank_transactions) * 2, 500),
+        )
+        prev_status_map = {l.bank_tx_id: l.match_status for l in active_logs}
+
+        # Prioritize previously pending transactions so they match newly arrived settlements first
+        sorted_bank_txs = sorted(
+            bank_transactions,
+            key=lambda tx: 0 if prev_status_map.get(tx.id) == "PENDING_SETTLEMENT_DATA" else 1,
+        )
+
         # Track settlement candidate matches to detect multi-bank row conflicts
         settlement_match_counts: dict[str, list[str]] = {}  # settlement_id -> [bank_tx_id, ...]
-
         results: list[dict] = []
         matched_settlement_ids: set[str] = set()
 
-        for bank_tx in bank_transactions:
+        now = datetime.now(timezone.utc)
+        pending_window_seconds = float(settings.SETTLEMENT_PENDING_WINDOW_DAYS * 86400)
+
+        for bank_tx in sorted_bank_txs:
             bank_amount = to_decimal(bank_tx.amount)
             bank_utr = bank_tx.utr.strip().upper() if bank_tx.utr else None
             candidate: RazorpaySettlement | None = None
@@ -67,6 +84,7 @@ class ReconciliationEngine:
             confidence: float | None = None
             note: str = ""
             delta = Decimal("0.00")
+            was_pending = prev_status_map.get(bank_tx.id) == "PENDING_SETTLEMENT_DATA"
 
             # --- TIER 1: Exact UTR Match ---
             if bank_utr and bank_utr in settlements_by_utr:
@@ -93,6 +111,32 @@ class ReconciliationEngine:
                         diagnostic_type = diag.diagnostic_type
                         delta = diag.delta_amount
                         note = f"Tier 3 diagnostic on UTR {bank_utr}: {diag.diagnostic_note}"
+
+            # --- TIER 1.5: Substring / Prefix-stripped UTR Match ---
+            if not candidate and bank_utr:
+                for s_utr, candidates in settlements_by_utr.items():
+                    if len(bank_utr) >= 6 and len(s_utr) >= 6:
+                        if bank_utr in s_utr or s_utr in bank_utr:
+                            exact_amt_candidate = next(
+                                (c for c in candidates if is_amount_matching(bank_amount, to_decimal(c.amount), tolerance)),
+                                None,
+                            )
+                            candidate = exact_amt_candidate or candidates[0]
+                            if candidate:
+                                if is_amount_matching(bank_amount, to_decimal(candidate.amount), tolerance):
+                                    tier = "TIER_1"
+                                    status = "MATCHED"
+                                    diagnostic_type = "EXACT_MATCH"
+                                    confidence = 0.98
+                                    note = f"Tier 1 UTR reference match ({bank_utr} ~ {s_utr}) and amount {format_inr(bank_amount)}."
+                                else:
+                                    tier = "TIER_3"
+                                    diag = DiagnosticsService.evaluate_delta(bank_tx, candidate, tolerance)
+                                    status = diag.match_status
+                                    diagnostic_type = diag.diagnostic_type
+                                    delta = diag.delta_amount
+                                    note = f"Tier 3 diagnostic on UTR ({bank_utr} ~ {s_utr}): {diag.diagnostic_note}"
+                                break
 
             # --- TIER 2: Fuzzy Match on Descriptor Text ---
             if not candidate:
@@ -149,11 +193,15 @@ class ReconciliationEngine:
             # --- TIER 3b: Batched Settlements (Many-to-One Subset Sum) ---
             if not candidate and bank_amount > Decimal("0.00"):
                 # Look for pairs of unallocated settlements in same date window whose sum equals bank_amount
-                window_setls = [
-                    s for s in settlements
-                    if s.settlement_id not in matched_settlement_ids
-                    and _diff_seconds(bank_tx.date, s.settlement_created_at) <= 3 * 86400
-                ]
+                # Capped to 50 closest candidates to bound O(n²) pair comparisons at 1,225 per row
+                window_setls = sorted(
+                    [
+                        s for s in settlements
+                        if s.settlement_id not in matched_settlement_ids
+                        and _diff_seconds(bank_tx.date, s.settlement_created_at) <= 3 * 86400
+                    ],
+                    key=lambda s: _diff_seconds(bank_tx.date, s.settlement_created_at),
+                )[:50]
                 for i in range(len(window_setls)):
                     for j in range(i + 1, len(window_setls)):
                         s1, s2 = window_setls[i], window_setls[j]
@@ -175,16 +223,44 @@ class ReconciliationEngine:
                     if candidate:
                         break
 
-            # --- EXCEPTION: Unresolved Row ---
+            # Annotate auto-resolution transition if row was previously pending
+            if candidate and was_pending:
+                note = f"Auto-resolved from PENDING_SETTLEMENT_DATA on settlement sync: {note}"
+
+            # --- UNMATCHED ROW: PENDING_SETTLEMENT_DATA vs EXCEPTION ---
             if not candidate:
-                tier = "TIER_3"
-                status = "EXCEPTION"
-                diagnostic_type = "UNRESOLVED"
+                tx_dt = bank_tx.date
+                if isinstance(tx_dt, datetime):
+                    tx_aware = tx_dt if tx_dt.tzinfo else tx_dt.replace(tzinfo=timezone.utc)
+                    age_seconds = (now - tx_aware).total_seconds()
+                elif hasattr(tx_dt, "year"):
+                    age_seconds = float((now.date() - tx_dt).days * 86400)
+                else:
+                    age_seconds = float("inf")
+
                 delta = bank_amount
-                note = (
-                    f"No matching Razorpay settlement found for bank row "
-                    f"({format_inr(bank_amount)}, ref: {bank_utr or 'N/A'})."
-                )
+                if age_seconds <= pending_window_seconds:
+                    tier = "TIER_3"
+                    status = "PENDING_SETTLEMENT_DATA"
+                    diagnostic_type = "PENDING_SETTLEMENT"
+                    note = (
+                        f"Awaiting settlement data from Razorpay (within {settings.SETTLEMENT_PENDING_WINDOW_DAYS}-day "
+                        f"settlement window). Will auto-reconcile upon next sync."
+                    )
+                else:
+                    tier = "TIER_3"
+                    status = "EXCEPTION"
+                    diagnostic_type = "UNRESOLVED"
+                    if was_pending:
+                        note = (
+                            f"No matching Razorpay settlement found after pending window expired "
+                            f"({format_inr(bank_amount)}, ref: {bank_utr or 'N/A'})."
+                        )
+                    else:
+                        note = (
+                            f"No matching Razorpay settlement found for bank row "
+                            f"({format_inr(bank_amount)}, ref: {bank_utr or 'N/A'})."
+                        )
 
             if candidate:
                 settlement_match_counts.setdefault(candidate.settlement_id, []).append(bank_tx.id)
@@ -227,6 +303,9 @@ class ReconciliationEngine:
             log = await self.recon_repo.add_log(r)
             saved_logs.append(log)
 
+        t_elapsed = max(time.perf_counter() - t_start, 0.0001)
+        measured_rps = len(saved_logs) / t_elapsed
+
         logger.info(
             "reconciliation_batch_completed",
             batch_id=batch_id,
@@ -235,5 +314,8 @@ class ReconciliationEngine:
             suggested=sum(1 for l in saved_logs if l.match_status == "SUGGESTED"),
             conflicts=sum(1 for l in saved_logs if l.match_status == "CONFLICT"),
             exceptions=sum(1 for l in saved_logs if l.match_status == "EXCEPTION"),
+            pending=sum(1 for l in saved_logs if l.match_status == "PENDING_SETTLEMENT_DATA"),
+            elapsed_seconds=round(t_elapsed, 4),
+            rows_per_second=round(measured_rps, 1),
         )
         return saved_logs
