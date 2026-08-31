@@ -38,9 +38,31 @@ class DiagnosticsService:
         rzp_gross = to_decimal(rzp_setl.gross_amount)
         fees = to_decimal(rzp_setl.fees)
         tax = to_decimal(rzp_setl.tax)
+        raw_payload = rzp_setl.raw_payload or {}
+        refund_total = to_decimal(raw_payload.get("refund_total", Decimal("0.00")))
+        fx_component = to_decimal(raw_payload.get("fx_fee", Decimal("0.00")))
 
-        # Delta between bank received amount and gross amount
-        delta = rzp_gross - bank_amount if rzp_gross > Decimal("0.00") else rzp_net - bank_amount
+        # If gross amount is unpopulated but net and fees exist, resolve effective gross
+        if rzp_gross <= Decimal("0.00"):
+            if fees + tax > Decimal("0.00"):
+                rzp_gross = rzp_net + fees + tax
+            else:
+                rzp_gross = rzp_net
+
+        # Standard 2% MDR + 18% GST estimation
+        estimated_fee, estimated_tax, _ = (
+            calculate_standard_fees(rzp_gross, mdr_rate=Decimal("0.02"), gst_rate=GST_RATE)
+            if rzp_gross > Decimal("0.00")
+            else (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+        )
+        actual_or_est_fees = (fees + tax) if (fees + tax) > Decimal("0.00") else (estimated_fee + estimated_tax)
+
+        # Section 194-O 1% TDS calculation
+        tds_194o = (
+            (rzp_gross * Decimal("0.01")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if rzp_gross > Decimal("0.00")
+            else Decimal("0.00")
+        )
 
         # Case 1: Settlement Reversal / Chargeback (Debit Row)
         if bank_tx.direction == "DEBIT":
@@ -63,27 +85,30 @@ class DiagnosticsService:
                 diagnostic_note=f"Exact match on net payout amount {format_inr(bank_amount)}.",
             )
 
+        # Case 0b: Exact match on gross amount
+        if rzp_gross > Decimal("0.00") and is_amount_matching(bank_amount, rzp_gross, tolerance):
+            return DiagnosticResult(
+                diagnostic_type="EXACT_MATCH",
+                match_status="MATCHED",
+                delta_amount=Decimal("0.00"),
+                diagnostic_note=f"Exact match on gross payout amount {format_inr(bank_amount)}.",
+            )
+
         # Case 2: Gateway Fees + 18% GST Deduction (Actual values from settlement)
-        expected_deduction = fees + tax
-        if expected_deduction > Decimal("0.00") and is_amount_matching(
-            rzp_gross - bank_amount, expected_deduction, tolerance
+        if (fees + tax) > Decimal("0.00") and is_amount_matching(
+            rzp_gross - bank_amount, fees + tax, tolerance
         ):
             return DiagnosticResult(
                 diagnostic_type="FEE_DEDUCTION",
                 match_status="MATCHED",
-                delta_amount=expected_deduction,
+                delta_amount=fees + tax,
                 diagnostic_note=(
-                    f"Difference of {format_inr(expected_deduction)} matches Gateway Fee "
+                    f"Difference of {format_inr(fees + tax)} matches Gateway Fee "
                     f"({format_inr(fees)}) + 18% GST ({format_inr(tax)})."
                 ),
             )
 
         # Case 2b: Standard 2% MDR Fee + 18% GST estimation
-        estimated_fee, estimated_tax, _ = (
-            calculate_standard_fees(rzp_gross, mdr_rate=Decimal("0.02"), gst_rate=GST_RATE)
-            if rzp_gross > Decimal("0.00")
-            else (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
-        )
         if (estimated_fee + estimated_tax > Decimal("0.00")) and is_amount_matching(
             rzp_gross - bank_amount, estimated_fee + estimated_tax, tolerance
         ):
@@ -98,18 +123,7 @@ class DiagnosticsService:
             )
 
         # Case 2c: Section 194-O E-Commerce 1% TDS + Gateway Fee + 18% GST
-        tds_rate = Decimal("0.01")  # 1% TDS u/s 194-O
-        tds_194o = (
-            (rzp_gross * tds_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            if rzp_gross > Decimal("0.00")
-            else Decimal("0.00")
-        )
-        total_tds_deduction = (
-            (fees + tax + tds_194o)
-            if fees > Decimal("0.00")
-            else (estimated_fee + estimated_tax + tds_194o)
-        )
-
+        total_tds_deduction = actual_or_est_fees + tds_194o
         if tds_194o > Decimal("0.00") and is_amount_matching(
             rzp_gross - bank_amount, total_tds_deduction, tolerance
         ):
@@ -126,36 +140,47 @@ class DiagnosticsService:
             )
 
         # Case 3: Refund Batch Clawback Deduction
-        # If raw payload has refund info or delta matches refund amount
-        raw_payload = rzp_setl.raw_payload or {}
-        refund_total = to_decimal(raw_payload.get("refund_total", Decimal("0.00")))
-        if refund_total > Decimal("0.00") and is_amount_matching(
-            rzp_gross - bank_amount - (fees + tax), refund_total, tolerance
-        ):
-            return DiagnosticResult(
-                diagnostic_type="REFUND_ADJUSTED",
-                match_status="MATCHED",
-                delta_amount=refund_total,
-                diagnostic_note=(
-                    f"Settlement adjusted for mid-cycle refund clawback of {format_inr(refund_total)} "
-                    f"plus gateway fee ({format_inr(fees + tax)})."
-                ),
-            )
+        if refund_total > Decimal("0.00"):
+            if is_amount_matching(rzp_net - bank_amount, refund_total, tolerance) or is_amount_matching(
+                rzp_gross - bank_amount - actual_or_est_fees, refund_total, tolerance
+            ):
+                return DiagnosticResult(
+                    diagnostic_type="REFUND_ADJUSTED",
+                    match_status="MATCHED",
+                    delta_amount=refund_total,
+                    diagnostic_note=(
+                        f"Settlement adjusted for mid-cycle refund clawback of {format_inr(refund_total)} "
+                        f"plus gateway fee ({format_inr(actual_or_est_fees)})."
+                    ),
+                )
+            # Compound Fee + TDS + Refund
+            if is_amount_matching(
+                rzp_gross - bank_amount, actual_or_est_fees + tds_194o + refund_total, tolerance
+            ):
+                return DiagnosticResult(
+                    diagnostic_type="REFUND_ADJUSTED",
+                    match_status="MATCHED",
+                    delta_amount=refund_total + actual_or_est_fees + tds_194o,
+                    diagnostic_note=(
+                        f"Settlement adjusted for refund clawback ({format_inr(refund_total)}) "
+                        f"+ 1% TDS ({format_inr(tds_194o)}) + gateway fee ({format_inr(actual_or_est_fees)})."
+                    ),
+                )
 
         # Case 4: FX / Currency Conversion Adjustment
-        fx_component = to_decimal(raw_payload.get("fx_fee", Decimal("0.00")))
-        if fx_component > Decimal("0.00") and is_amount_matching(
-            rzp_gross - bank_amount - (fees + tax), fx_component, tolerance
-        ):
-            return DiagnosticResult(
-                diagnostic_type="FX_ADJUSTED",
-                match_status="MATCHED",
-                delta_amount=fx_component,
-                diagnostic_note=(
-                    f"Cross-currency settlement delta of {format_inr(fx_component)} "
-                    f"matches international processing/FX adjustment."
-                ),
-            )
+        if fx_component > Decimal("0.00"):
+            if is_amount_matching(rzp_net - bank_amount, fx_component, tolerance) or is_amount_matching(
+                rzp_gross - bank_amount - actual_or_est_fees, fx_component, tolerance
+            ):
+                return DiagnosticResult(
+                    diagnostic_type="FX_ADJUSTED",
+                    match_status="MATCHED",
+                    delta_amount=fx_component,
+                    diagnostic_note=(
+                        f"Cross-currency settlement delta of {format_inr(fx_component)} "
+                        f"matches international processing/FX adjustment."
+                    ),
+                )
 
         # Unresolved Exception
         unexplained_delta = abs(bank_amount - rzp_net)

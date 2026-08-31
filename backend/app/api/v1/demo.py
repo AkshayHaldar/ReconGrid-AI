@@ -247,7 +247,7 @@ async def seed_demo_dataset(
     ]
 
     # Additional standard settlements to scale up to count using standard 2% MDR + 18% GST formula
-    for i in range(12, count + 1):
+    for i in range(15, count + 1):
         amt = Decimal(f"{(i * 3750) % 85000 + 10000}.00")
         fees, tax, net_amt = calculate_standard_fees(amt)
         settlements_data.append({
@@ -413,7 +413,7 @@ async def seed_demo_dataset(
     ]
 
     # Additional standard bank transactions matching the extra settlements
-    for i in range(12, count + 1):
+    for i in range(15, count + 1):
         target_s = saved_settlements[i - 1]
         bank_txs_data.append({
             "date": target_s.settlement_created_at,

@@ -22,12 +22,36 @@ class ReconciliationRepository:
         await self.session.flush()
         return log
 
+    async def add_logs_bulk(self, logs_data: Sequence[dict]) -> list[ReconciliationLog]:
+        """Bulk appends new immutable decision logs in a single flush."""
+        if not logs_data:
+            return []
+        logs = [ReconciliationLog(**data) for data in logs_data]
+        self.session.add_all(logs)
+        await self.session.flush()
+        return logs
+
     async def supersede_previous_logs(self, bank_tx_id: str) -> None:
         """Marks any existing un-superseded logs for this bank_tx_id as superseded."""
         stmt = (
             update(ReconciliationLog)
             .where(
                 ReconciliationLog.bank_tx_id == bank_tx_id,
+                ReconciliationLog.superseded == False,  # noqa: E712
+            )
+            .values(superseded=True)
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def supersede_batch_logs(self, bank_tx_ids: Sequence[str]) -> None:
+        """Marks any existing un-superseded logs for multiple bank_tx_ids as superseded in a single query."""
+        if not bank_tx_ids:
+            return
+        stmt = (
+            update(ReconciliationLog)
+            .where(
+                ReconciliationLog.bank_tx_id.in_(bank_tx_ids),
                 ReconciliationLog.superseded == False,  # noqa: E712
             )
             .values(superseded=True)
@@ -46,6 +70,18 @@ class ReconciliationRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
+        """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""
+        stmt = (
+            select(ReconciliationLog.bank_tx_id, ReconciliationLog.match_status)
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.superseded == False,  # noqa: E712
+            )
+        )
+        result = await self.session.execute(stmt)
+        return {row[0]: row[1] for row in result.all()}
 
     async def get_competing_conflict_logs(
         self,

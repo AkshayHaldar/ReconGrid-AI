@@ -38,6 +38,13 @@ async def run_scorecard_generation():
     now = datetime.now(timezone.utc)
 
     async with async_session_factory() as session:
+        from sqlalchemy import delete
+        from app.models.reconciliation_log import ReconciliationLog
+        await session.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
+        await session.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
+        await session.execute(delete(RazorpaySettlement).where(RazorpaySettlement.is_test_mode == True))
+        await session.commit()
+
         recon_repo = ReconciliationRepository(session)
         engine = ReconciliationEngine(recon_repo)
 
@@ -168,7 +175,7 @@ async def run_scorecard_generation():
 |---|---|---|---|---|
 | **Tier 1** | Exact UTR + Exact Amount Match | `{scorecard['tier_1_count']}` | `{scorecard['tier_1_percentage']}%` | Automated `MATCHED` (100% confidence) |
 | **Tier 2** | Fuzzy Descriptor Similarity | `{scorecard['tier_2_count']}` | `{scorecard['tier_2_percentage']}%` | `SUGGESTED` match (Requires 1-click CA review) |
-| **Tier 0** | Date Window (±2d) + Amount Fallback | `{scorecard['tier_0_count']}` | `{scorecard['tier_0_percentage']}%` | `SUGGESTED` match (Missing UTR fallback) |
+| **Tier 0** | Date Window (±3d) + Amount Fallback | `{scorecard['tier_0_count']}` | `{scorecard['tier_0_percentage']}%` | `SUGGESTED` match (Missing UTR fallback) |
 | **Tier 3** | Diagnostic Delta (Fee/TDS/Refund/FX) | `{scorecard['tier_3_count']}` | `{scorecard['tier_3_percentage']}%` | Automated `MATCHED` with diagnostic breakdown |
 | **Conflicts** | Multi-Candidate Competing Claims | `{scorecard['total_conflict_count']}` | `{scorecard['total_conflict_percentage']}%` | `CONFLICT` (Locked pending human merge) |
 | **Exceptions** | Genuine Discrepancies (>5d old) | `{scorecard['total_exception_count']}` | `{scorecard['total_exception_percentage']}%` | `EXCEPTION` (Unresolved discrepancy) |

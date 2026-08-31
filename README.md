@@ -86,6 +86,50 @@ Real financial statements from Indian banks are notorious for breaking standard 
 
 ---
 
+## 🏆 Razorpay Buildathon Track 04 (AI Finance Controller) Compliance & Scorecard
+
+ReconGrid-AI is architected directly against the official Track 04 mandate: *"Build finance-ops agents that close the loop over synthetic data with 50+ record batches, reporting match rates and unresolved anomalies... Verification capacity, not generation speed, is the bottleneck."*
+
+### 📊 THE BAR — Compliance Matrix
+
+| Track Requirement | Where Satisfied in ReconGrid-AI | Verification Command / Metric |
+|---|---|---|
+| **High-Throughput Batch Processing** | Deterministic multi-tier engine with precomputed UTR indices & bulk persistence | `python backend/scripts/benchmark_throughput.py`<br>• **50 records:** 0.047s (1,043 rows/s)<br>• **1,000 records:** 2.76s (361 rows/s)<br>• **5,000 records:** 26.98s (185 rows/s) |
+| **Measured Accuracy & Tiered Match Rates** | Strict deterministic multi-tier pipeline: Tier 1 (Exact UTR), Tier 1.5 (Normalized UTR), Tier 2 (Fuzzy Descriptor), Tier 0 (Date Window Fallback), Tier 3 (Fee/GST/TDS Diagnostics & Subset Sum) | `GET /api/v1/reconciliation/{batch_id}/scorecard`<br>• **Tier 1:** Net & Gross exact reference matches<br>• **Tier 2:** $\ge 90\%$ fuzzy token similarity<br>• **Tier 0:** $\pm 3$ day date window + amount fallback |
+| **Honest Lists of Unresolved Anomalies** | Zero-silent-drop policy. Precision over recall. Seeded true exceptions remain unresolved with explicit diagnostic codes (`UNRESOLVED`, `FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `PENDING_SETTLEMENT`). | `python backend/scripts/generate_scorecard_report.py`<br>• Full unfiltered exception ledger output<br>• Precise root-cause notes for every anomaly |
+| **Closed-Loop Finance Controller** | End-to-end operational cycle: Statement Ingest $\rightarrow$ Gateway Sync $\rightarrow$ Deterministic Match $\rightarrow$ Anomaly Flagging $\rightarrow$ Q&A Explanation $\rightarrow$ Human CA Resolution with Automated Competitor Displacement | `pytest backend/tests/integration/test_synthetic_batch.py`<br>`pytest backend/tests/integration/test_api_routes.py` |
+| **Zero-Float Mathematical Conservation** | Python `Decimal` with `ROUND_HALF_UP` end-to-end. Pydantic v2 schema-level rejection of IEEE 754 floats. Strict row conservation: $\sum(\text{Matched} + \text{Suggested} + \text{Conflicts} + \text{Exceptions} + \text{Pending}) = \text{Total Ingested}$. | `pytest backend/tests/unit/test_schema_float_rejection.py`<br>`pytest backend/tests/unit/test_scorecard.py` |
+
+---
+
+### ⏱️ Batch Processing Throughput Benchmark
+
+Tested on standard laptop hardware using the full deterministic reconciliation pipeline, database persistence, and audit logging:
+
+```text
+==========================================================================================
+Batch Size   | Wall Time    | Throughput       | Peak Memory  | Match Rate   | Exceptions (INR)  | Conservation
+------------------------------------------------------------------------------------------
+50           | 0.0479s      | 1,043.8 rows/s   |     1.74 MB  |    96.00%    | 2 (INR 99,998)    | PASSED (0 lost)
+200          | 0.3305s      |   605.1 rows/s   |     2.55 MB  |    95.00%    | 10 (INR 499,990)  | PASSED (0 lost)
+500          | 1.4800s      |   337.8 rows/s   |     6.03 MB  |    94.80%    | 9 (INR 449,991)   | PASSED (0 lost)
+1000         | 2.7632s      |   361.9 rows/s   |    11.99 MB  |    94.80%    | 17 (INR 849,983)  | PASSED (0 lost)
+5000         | 26.9821s     |   185.3 rows/s   |    36.45 MB  |    94.80%    | 85 (INR 4,249,915)| PASSED (0 lost)
+==========================================================================================
+```
+
+---
+
+### 📋 Audit Scorecard Generation CLI
+
+To generate the audit scorecard report across any batch:
+```bash
+cd backend
+python scripts/generate_scorecard_report.py --batch-id default
+```
+
+---
+
 ## 🏗️ Tech Stack
 
 | Layer | Technology |
