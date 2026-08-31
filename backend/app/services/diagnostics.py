@@ -15,6 +15,8 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.utils.money import calculate_standard_fees, format_inr, is_amount_matching, to_decimal
 
 GST_RATE = settings.GST_RATE  # GST standard for payment gateway processing fees
+DEFAULT_MDR_RATE = settings.DEFAULT_MDR_RATE  # Standard payment gateway MDR
+TDS_194O_RATE = settings.TDS_194O_RATE  # Section 194-O E-Commerce TDS rate
 
 
 class DiagnosticResult(NamedTuple):
@@ -49,17 +51,17 @@ class DiagnosticsService:
             else:
                 rzp_gross = rzp_net
 
-        # Standard 2% MDR + 18% GST estimation
+        # Standard MDR + GST estimation from configured rates
         estimated_fee, estimated_tax, _ = (
-            calculate_standard_fees(rzp_gross, mdr_rate=Decimal("0.02"), gst_rate=GST_RATE)
+            calculate_standard_fees(rzp_gross, mdr_rate=DEFAULT_MDR_RATE, gst_rate=GST_RATE)
             if rzp_gross > Decimal("0.00")
             else (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
         )
         actual_or_est_fees = (fees + tax) if (fees + tax) > Decimal("0.00") else (estimated_fee + estimated_tax)
 
-        # Section 194-O 1% TDS calculation
+        # Section 194-O TDS calculation
         tds_194o = (
-            (rzp_gross * Decimal("0.01")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            (rzp_gross * TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             if rzp_gross > Decimal("0.00")
             else Decimal("0.00")
         )

@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     FUZZY_MATCH_CONFIDENCE_THRESHOLD: float = 0.90
     RAZORPAY_FETCH_MAX_RETRIES: int = 5
     GST_RATE: Decimal = Decimal("0.18")
+    DEFAULT_MDR_RATE: Decimal = Decimal("0.02")
+    TDS_194O_RATE: Decimal = Decimal("0.01")
     SETTLEMENT_PENDING_WINDOW_DAYS: int = 5
 
     # Settlement Q&A Agent & OCR

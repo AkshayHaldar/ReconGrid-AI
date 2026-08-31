@@ -294,3 +294,61 @@ async def export_reconciliation_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=recongrid_audit_{batch_id}.csv"},
     )
+
+
+@router.get("/{batch_id}/scorecard/export")
+async def export_scorecard_report(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Generates and downloads a formal Chartered Accountant reconciliation scorecard report."""
+    repo = ReconciliationRepository(db)
+    scorecard = await repo.get_scorecard_metrics(batch_id=batch_id)
+
+    lines = [
+        "=" * 90,
+        f"RECONGRID AI - FORMAL RECONCILIATION AUDIT SCORECARD (BATCH: {batch_id.upper()})",
+        "=" * 90,
+        f"Generated At: {scorecard.get('batch_id', batch_id)}",
+        f"Throughput:   {scorecard['rows_per_second']} rows/sec (Wall time: {scorecard['processing_time_seconds']}s)",
+        f"Conservation: {'100% CONSERVED (0 lost)' if scorecard['is_fully_accounted'] else 'UNBALANCED'}",
+        "-" * 90,
+        "1. SUMMARY TOTALS & RECONCILIATION RATE",
+        f"   Total Bank Ingested Rows:     {scorecard['total_rows_processed']:>8d}  |  Amount: INR {scorecard['total_ingested_amount']:>14,.2f}",
+        f"   Total Reconciled Amount:      {scorecard['total_matched_count']:>8d}  |  Amount: INR {scorecard['total_reconciled_amount']:>14,.2f}",
+        f"   Total Exception Amount:       {scorecard['total_exception_count']:>8d}  |  Amount: INR {scorecard['total_exception_amount']:>14,.2f}",
+        f"   Total Pending Amount:         {scorecard['total_pending_count']:>8d}  |  Amount: INR {scorecard['total_pending_amount']:>14,.2f}",
+        f"   Overall Net Match Rate:       {scorecard['total_matched_percentage']:>8.2f}%",
+        "-" * 90,
+        "2. TIERED RESOLUTION BREAKDOWN",
+        f"   - Tier 1 (Exact & Normalized UTR): {scorecard['tier_1_count']:>6d} rows ({scorecard['tier_1_percentage']}%)",
+        f"   - Tier 2 (Fuzzy Descriptor >=90%): {scorecard['tier_2_count']:>6d} rows ({scorecard['tier_2_percentage']}%)",
+        f"   - Tier 0 (Date Window Fallback):   {scorecard['tier_0_count']:>6d} rows ({scorecard['tier_0_percentage']}%)",
+        f"   - Tier 3 (Diagnostic & Subset-Sum):{scorecard['tier_3_count']:>6d} rows ({scorecard['tier_3_percentage']}%)",
+        "-" * 90,
+        "3. UNRESOLVED ANOMALIES & AUDIT VARIANCE",
+        f"   Total Residual Exceptions: {len(scorecard['exceptions'])}",
+        "",
+        f"{'Row #':<6} | {'Bank Tx ID':<12} | {'Amount (INR)':<14} | {'Reason Code':<22} | {'Diagnostic Note'}",
+        "-" * 90,
+    ]
+
+    for idx, exc in enumerate(scorecard["exceptions"], 1):
+        lines.append(
+            f"{idx:<6d} | {str(exc['bank_transaction_id'])[:12]:<12} | "
+            f"INR {exc['amount']:>10,.2f} | {exc['reason_code']:<22} | {exc['diagnostic_note']}"
+        )
+
+    lines.extend([
+        "=" * 90,
+        "END OF AUDIT SCORECARD REPORT - RECONGRID AI ENGINE",
+        "=" * 90,
+    ])
+
+    report_text = "\n".join(lines)
+    return Response(
+        content=report_text,
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename=recongrid_scorecard_{batch_id}.txt"},
+    )
+
