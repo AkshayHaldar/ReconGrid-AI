@@ -198,8 +198,8 @@ class BankCsvParser:
     @staticmethod
     def detect_headers(fieldnames: list[str]) -> dict[str, str]:
         """Maps bank-specific headers to canonical fields (date, description, ref, amount/cr/dr)."""
-        clean_fields = {f.strip(): f for f in fieldnames if f and f.strip()}
-        lower_map = {f.strip().lower(): f for f in fieldnames if f and f.strip()}
+        clean_fields = {f.lstrip("﻿").strip(): f for f in fieldnames if f and f.lstrip("﻿").strip()}
+        lower_map = {f.lstrip("﻿").strip().lower(): f for f in fieldnames if f and f.lstrip("﻿").strip()}
 
         mapping: dict[str, str] = {}
 
@@ -247,7 +247,7 @@ class BankCsvParser:
         best_score = 0
 
         for idx, line in enumerate(lines[:30]):  # check up to first 30 lines for table header
-            clean = line.strip()
+            clean = line.lstrip("﻿").strip()
             if not clean:
                 continue
             try:
@@ -271,7 +271,10 @@ class BankCsvParser:
                 continue
 
         if best_header_idx >= 0:
-            return best_header_fields, lines[best_header_idx:]
+            data_lines = lines[best_header_idx:]
+            if data_lines:
+                data_lines = [data_lines[0].lstrip("﻿")] + data_lines[1:]
+            return best_header_fields, data_lines
         return [], lines
 
     @classmethod
@@ -280,13 +283,16 @@ class BankCsvParser:
         text_stream: Iterator[str],
     ) -> Iterator[dict[str, Any]]:
         """Parses CSV text stream row by row yielding canonical records with robust error handling."""
-        raw_lines = [l for l in text_stream]
+        raw_lines = [l.lstrip("﻿") if idx == 0 else l for idx, l in enumerate(text_stream)]
         if not raw_lines:
             return
 
         header_fields, table_lines = cls._find_header_and_data_lines(raw_lines)
         if not table_lines:
             return
+
+        if table_lines:
+            table_lines = [table_lines[0].lstrip("﻿")] + table_lines[1:]
 
         reader = csv.DictReader(table_lines)
         if not reader.fieldnames:

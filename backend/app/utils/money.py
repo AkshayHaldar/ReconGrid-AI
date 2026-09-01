@@ -3,10 +3,6 @@
 Zero float usage permitted across money handling.
 """
 
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Union
-
-
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Optional, Tuple, Union

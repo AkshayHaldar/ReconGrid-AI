@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   ArrowUpRight,
   CheckCircle,
@@ -8,6 +8,10 @@ import {
   Sparkles,
   Layers,
   AlertTriangle,
+  TrendingUp,
+  Percent,
+  CheckCircle2,
+  HelpCircle,
 } from "lucide-react";
 import { ReconciliationStatus } from "@/lib/types";
 import { formatINR } from "@/lib/formatters";
@@ -23,25 +27,29 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
   onOpenUpload,
   onFilterTab,
 }) => {
+  const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
+
   if (!status || status.total_records === 0) {
     return (
-      <div className="bg-[#0f1624] border border-[#1c2b42] rounded-lg p-6 mb-4 text-center">
-        <div className="max-w-md mx-auto space-y-3">
-          <div className="w-10 h-10 rounded bg-[#131d2e] border border-[#223552] flex items-center justify-center mx-auto text-blue-400">
-            <ArrowUpRight className="w-5 h-5" />
+      <div className="fin-card rounded-xl p-8 mb-4 text-center shadow-lg border border-[#162438]">
+        <div className="max-w-lg mx-auto space-y-4">
+          <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto text-blue-400 shadow-inner">
+            <ArrowUpRight className="w-6 h-6" />
           </div>
-          <h3 className="text-sm font-semibold text-slate-100 font-sans">
-            No bank statement loaded for this reconciliation cycle
-          </h3>
-          <p className="text-xs text-slate-400 font-sans">
-            Upload an HDFC, ICICI, SBI, or Axis bank statement CSV, or click Sync/Seed to populate synthetic transactions.
-          </p>
-          <div className="pt-2 flex justify-center gap-2.5">
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-100 font-sans">
+              No bank statement loaded for this reconciliation cycle
+            </h3>
+            <p className="text-xs text-slate-400 font-sans leading-relaxed">
+              Upload an HDFC, ICICI, SBI, or Axis bank statement CSV/PDF, or click <strong className="text-slate-300">Sync/Seed</strong> in the top bar to generate synthetic golden test records.
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center gap-3">
             <button
               onClick={onOpenUpload}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-medium transition shadow-sm"
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-lg text-xs font-semibold shadow-md shadow-blue-500/20 transition transform active:scale-98"
             >
-              Upload Bank Statement CSV
+              Upload Bank Statement
             </button>
           </div>
         </div>
@@ -53,59 +61,71 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
   const isHealthy = matchRate >= 90;
   const totalReviewItems = (status.suggested_count || 0) + (status.conflict_count || 0);
 
+  // Segment percentages for visual distribution bar
+  const totalRecs = status.total_records || 1;
+  const matchedPct = ((status.matched_count || 0) / totalRecs) * 100;
+  const suggestedPct = ((status.suggested_count || 0) / totalRecs) * 100;
+  const conflictPct = ((status.conflict_count || 0) / totalRecs) * 100;
+  const exceptionPct = ((status.exception_count || 0) / totalRecs) * 100;
+
   return (
-    <div className="space-y-2 sm:space-y-2.5 mb-3 sm:mb-4">
-      {/* 4-Column Accounting Metrics Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-2.5">
+    <div className="space-y-3 mb-4">
+      {/* 4-Column Executive Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
         {/* Metric 1: Total Ingested */}
-        <div className="bg-[#0f1624] border border-[#1c2b42] rounded p-2.5 sm:p-3 shadow-sm hover:border-[#2a3d5e] transition">
-          <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1 font-medium font-sans">
-            <span>TOTAL INGESTED LEDGER</span>
-            <span className="text-[9px] sm:text-[10px] font-mono text-slate-400 bg-[#131b2c] px-1.5 py-0.2 rounded border border-[#1e2d44]">
-              {status.total_records} rows
+        <div className="fin-card fin-card-hover rounded-xl p-3.5 shadow-sm">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 font-medium font-sans">
+            <span className="tracking-wide">TOTAL INGESTED LEDGER</span>
+            <span className="text-[10px] font-mono text-slate-400 bg-[#0e1628] px-2 py-0.5 rounded border border-[#18263c]">
+              {status.total_records} txns
             </span>
           </div>
-          <div className="text-base sm:text-lg font-bold font-mono text-slate-100 tracking-tight font-tabular">
+          <div className="text-lg sm:text-xl font-bold font-mono text-slate-100 tracking-tight font-tabular">
             {formatINR(status.total_ingested_amount)}
           </div>
-          <div className="mt-1 sm:mt-1.5 text-[9px] sm:text-[10px] text-slate-400 flex items-center justify-between font-mono">
-            <span className="flex items-center gap-1 text-slate-400">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+          <div className="mt-2 text-[10px] text-slate-400 flex items-center justify-between font-mono pt-1.5 border-t border-[#131d2f]">
+            <span className="flex items-center gap-1.5 text-slate-300">
+              <span className="inline-block w-2 h-2 rounded-full bg-blue-400"></span>
               Bank Statement Flow
             </span>
-            <span className="text-slate-500">100% Ingested</span>
+            <span className="text-slate-500 font-semibold">100% Ingested</span>
           </div>
         </div>
 
-        {/* Metric 2: Auto-Reconciled */}
+        {/* Metric 2: Auto-Reconciled Net */}
         <div
           onClick={() => onFilterTab("MATCHED")}
-          className="bg-[#0f1624] border border-[#1c2b42] rounded p-2.5 sm:p-3 shadow-sm hover:border-emerald-700/60 cursor-pointer transition"
+          className="fin-card fin-card-hover rounded-xl p-3.5 shadow-sm hover:border-emerald-500/50 cursor-pointer group"
+          role="button"
+          tabIndex={0}
+          aria-label="Filter by Matched Records"
         >
-          <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1 font-medium font-sans">
-            <span>AUTO-RECONCILED NET</span>
-            <div className="flex items-center text-emerald-400 text-[9px] sm:text-[10px] gap-1 font-mono">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 font-medium font-sans">
+            <span className="tracking-wide group-hover:text-emerald-300 transition-colors">
+              AUTO-RECONCILED NET
+            </span>
+            <div className="flex items-center text-emerald-400 text-[10px] gap-1 font-mono bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
               <CheckCircle className="w-3 h-3" />
               <span>{status.matched_count} txns</span>
             </div>
           </div>
-          <div className="flex items-baseline gap-1.5 sm:gap-2">
+          <div className="flex items-baseline gap-2">
             <span
-              className={`text-base sm:text-lg font-bold font-mono font-tabular ${
+              className={`text-lg sm:text-xl font-bold font-mono font-tabular ${
                 isHealthy ? "text-emerald-400" : "text-amber-400"
               }`}
             >
               {matchRate.toFixed(1)}%
             </span>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-400 font-tabular truncate">
+            <span className="text-[11px] font-mono text-slate-400 font-tabular truncate">
               ({formatINR(status.total_reconciled_amount)})
             </span>
           </div>
           {/* Subtle Progress Bar */}
-          <div className="mt-1.5 sm:mt-2 w-full bg-[#141e30] rounded-full h-1 overflow-hidden">
+          <div className="mt-2.5 w-full bg-[#101928] rounded-full h-1.5 overflow-hidden">
             <div
               className={`h-full transition-all duration-500 ${
-                isHealthy ? "bg-emerald-500" : "bg-amber-500"
+                isHealthy ? "bg-gradient-to-r from-emerald-500 to-teal-400" : "bg-gradient-to-r from-amber-500 to-yellow-400"
               }`}
               style={{ width: `${Math.min(matchRate, 100)}%` }}
             />
@@ -115,69 +135,163 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
         {/* Metric 3: Suggested & Conflict Review */}
         <div
           onClick={() => onFilterTab(status.conflict_count > 0 ? "CONFLICT" : "SUGGESTED")}
-          className="bg-[#0f1624] border border-[#1c2b42] rounded p-2.5 sm:p-3 shadow-sm hover:border-sky-700/60 cursor-pointer transition"
+          className="fin-card fin-card-hover rounded-xl p-3.5 shadow-sm hover:border-sky-500/50 cursor-pointer group"
+          role="button"
+          tabIndex={0}
+          aria-label="Filter by Review Required"
         >
-          <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1 font-medium font-sans">
-            <span>CA REVIEW REQUIRED</span>
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 font-medium font-sans">
+            <span className="tracking-wide group-hover:text-sky-300 transition-colors">
+              CA REVIEW REQUIRED
+            </span>
             {totalReviewItems > 0 && (
-              <span className="px-1.5 py-0.2 rounded bg-[#10243e] text-sky-300 border border-[#1b4372] text-[9px] sm:text-[10px] font-mono">
-                {status.conflict_count > 0 ? `${status.conflict_count} Conflict` : "Needs Review"}
+              <span className="px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800 text-[10px] font-mono">
+                {status.conflict_count > 0 ? `${status.conflict_count} Conflicts` : "Review"}
               </span>
             )}
           </div>
-          <div className="text-base sm:text-lg font-bold font-mono text-sky-300 font-tabular">
-            {totalReviewItems}{" "}
-            <span className="text-[10px] sm:text-xs font-normal text-slate-400 font-sans">
-              ({status.suggested_count} sugg, {status.conflict_count} confl)
+          <div className="text-lg sm:text-xl font-bold font-mono text-sky-300 font-tabular flex items-baseline gap-1.5">
+            {totalReviewItems}
+            <span className="text-[11px] font-normal text-slate-400 font-sans">
+              ({status.suggested_count} suggested, {status.conflict_count} conflict)
             </span>
           </div>
-          <div className="mt-1 sm:mt-1.5 text-[9px] sm:text-[10px] text-sky-400/80 flex items-center gap-1 font-mono">
-            <Clock className="w-3 h-3" />
-            <span>Single-click Approve & Resolve →</span>
+          <div className="mt-2 text-[10px] text-sky-400/90 flex items-center justify-between font-mono pt-1.5 border-t border-[#131d2f]">
+            <span className="flex items-center gap-1">
+              <Clock className="w-3 h-3 text-sky-400" />
+              <span>1-Click Approve & Resolve</span>
+            </span>
+            <span className="text-slate-500 group-hover:text-sky-300 transition-colors">View &rarr;</span>
           </div>
         </div>
 
         {/* Metric 4: Unresolved Exceptions */}
         <div
           onClick={() => onFilterTab("EXCEPTION")}
-          className="bg-[#0f1624] border border-[#1c2b42] rounded p-2.5 sm:p-3 shadow-sm hover:border-rose-700/60 cursor-pointer transition"
+          className="fin-card fin-card-hover rounded-xl p-3.5 shadow-sm hover:border-rose-500/50 cursor-pointer group"
+          role="button"
+          tabIndex={0}
+          aria-label="Filter by Exceptions"
         >
-          <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1 font-medium font-sans">
-            <span>UNRESOLVED VARIANCE</span>
-            <span className="flex items-center text-rose-400 text-[9px] sm:text-[10px] font-mono gap-1">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1.5 font-medium font-sans">
+            <span className="tracking-wide group-hover:text-rose-300 transition-colors">
+              UNRESOLVED VARIANCE
+            </span>
+            <span className="flex items-center text-rose-400 text-[10px] font-mono gap-1 bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800/60">
               <ShieldAlert className="w-3 h-3" />
               {status.exception_count} txns
             </span>
           </div>
-          <div className="text-base sm:text-lg font-bold font-mono text-rose-400 font-tabular">
+          <div className="text-lg sm:text-xl font-bold font-mono text-rose-400 font-tabular">
             {formatINR(status.total_exception_amount)}
           </div>
-          <div className="mt-1 sm:mt-1.5 text-[9px] sm:text-[10px] text-rose-400/80 flex items-center gap-1 font-mono">
-            <AlertTriangle className="w-3 h-3" />
-            <span>Auditable exception ledger →</span>
+          <div className="mt-2 text-[10px] text-rose-400/90 flex items-center justify-between font-mono pt-1.5 border-t border-[#131d2f]">
+            <span className="flex items-center gap-1">
+              <AlertTriangle className="w-3 h-3 text-rose-400" />
+              <span>Auditable Exception Ledger</span>
+            </span>
+            <span className="text-slate-500 group-hover:text-rose-300 transition-colors">Audit &rarr;</span>
           </div>
         </div>
       </div>
 
-      {/* Trial Balance Reconciliation Status Strip */}
-      <div className="bg-[#0b111c] border border-[#18253a] rounded px-2.5 sm:px-3 py-1.5 flex flex-col md:flex-row items-start md:items-center justify-between text-[10px] sm:text-[11px] text-slate-400 font-mono gap-1.5 sm:gap-2">
-        <div className="flex items-start sm:items-center gap-2">
-          <Scale className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5 sm:mt-0" />
+      {/* Visual Ledger Distribution Bar */}
+      <div className="fin-card rounded-xl p-3 shadow-sm space-y-2">
+        <div className="flex items-center justify-between text-[10px] sm:text-[11px] font-mono text-slate-400">
+          <div className="flex items-center gap-2">
+            <Layers className="w-3.5 h-3.5 text-blue-400" />
+            <span className="font-semibold text-slate-200">Ledger Composition & Distribution</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => onFilterTab("MATCHED")}
+              className="flex items-center gap-1 hover:text-emerald-300 transition-colors cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span>Matched ({matchedPct.toFixed(0)}%)</span>
+            </button>
+            <button
+              onClick={() => onFilterTab("SUGGESTED")}
+              className="flex items-center gap-1 hover:text-sky-300 transition-colors cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+              <span>Suggested ({suggestedPct.toFixed(0)}%)</span>
+            </button>
+            {status.conflict_count > 0 && (
+              <button
+                onClick={() => onFilterTab("CONFLICT")}
+                className="flex items-center gap-1 hover:text-amber-300 transition-colors cursor-pointer"
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Conflicts ({conflictPct.toFixed(0)}%)</span>
+              </button>
+            )}
+            <button
+              onClick={() => onFilterTab("EXCEPTION")}
+              className="flex items-center gap-1 hover:text-rose-300 transition-colors cursor-pointer"
+            >
+              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+              <span>Exceptions ({exceptionPct.toFixed(0)}%)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Multi-Segment Bar */}
+        <div className="w-full bg-[#080d16] rounded-lg h-2.5 flex overflow-hidden p-0.5 border border-[#162337] gap-0.5">
+          {matchedPct > 0 && (
+            <div
+              style={{ width: `${matchedPct}%` }}
+              className="bg-emerald-500 hover:bg-emerald-400 transition-all rounded-sm cursor-pointer"
+              title={`Matched: ${status.matched_count} txns (${formatINR(status.total_reconciled_amount)})`}
+              onClick={() => onFilterTab("MATCHED")}
+            />
+          )}
+          {suggestedPct > 0 && (
+            <div
+              style={{ width: `${suggestedPct}%` }}
+              className="bg-sky-500 hover:bg-sky-400 transition-all rounded-sm cursor-pointer"
+              title={`Suggested: ${status.suggested_count} txns`}
+              onClick={() => onFilterTab("SUGGESTED")}
+            />
+          )}
+          {conflictPct > 0 && (
+            <div
+              style={{ width: `${conflictPct}%` }}
+              className="bg-amber-500 hover:bg-amber-400 transition-all rounded-sm cursor-pointer"
+              title={`Conflicts: ${status.conflict_count} txns`}
+              onClick={() => onFilterTab("CONFLICT")}
+            />
+          )}
+          {exceptionPct > 0 && (
+            <div
+              style={{ width: `${exceptionPct}%` }}
+              className="bg-rose-500 hover:bg-rose-400 transition-all rounded-sm cursor-pointer"
+              title={`Exceptions: ${status.exception_count} txns (${formatINR(status.total_exception_amount)})`}
+              onClick={() => onFilterTab("EXCEPTION")}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Trial Balance Reconciliation Control Strip */}
+      <div className="bg-[#080d17] border border-[#162438] rounded-xl px-3.5 py-2 flex flex-col md:flex-row items-start md:items-center justify-between text-[11px] text-slate-400 font-mono gap-2 shadow-xs">
+        <div className="flex items-center gap-2">
+          <Scale className="w-4 h-4 text-blue-400 shrink-0" />
           <span className="leading-snug">
             <strong className="text-slate-200">Reconciliation Control:</strong>{" "}
             Ingested ({formatINR(status.total_ingested_amount)}) = Reconciled ({formatINR(status.total_reconciled_amount)}) + Exceptions ({formatINR(status.total_exception_amount)})
           </span>
         </div>
-        <div className="flex items-center gap-1.5 text-[9px] sm:text-[10px] shrink-0 self-end md:self-auto">
+        <div className="flex items-center gap-2 text-[10px] shrink-0 self-end md:self-auto">
           {status.exception_count === 0 ? (
-            <span className="text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60 flex items-center gap-1">
-              <CheckCircle className="w-3 h-3" />
-              Trial Balance In-Balance (₹0.00 Variance)
+            <span className="text-emerald-300 bg-emerald-950/70 px-2.5 py-0.5 rounded-full border border-emerald-800/80 flex items-center gap-1.5 shadow-xs">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Trial Balance In-Balance (₹0.00 Variance)</span>
             </span>
           ) : (
-            <span className="text-amber-400 bg-amber-950/40 px-2 py-0.5 rounded border border-amber-800/50 flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" />
-              Variance Pending CA Audit: {formatINR(status.total_exception_amount)}
+            <span className="text-amber-300 bg-amber-950/50 px-2.5 py-0.5 rounded-full border border-amber-800/60 flex items-center gap-1.5 shadow-xs">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>Variance Pending CA Audit: {formatINR(status.total_exception_amount)}</span>
             </span>
           )}
         </div>

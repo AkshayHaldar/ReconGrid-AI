@@ -9,7 +9,7 @@
 2. Fetch and store Razorpay settlements and refunds; handle real-time webhooks
 3. Run deterministic 4-tier matching to categorize every record as `MATCHED`, `SUGGESTED`, `CONFLICT`, or `EXCEPTION`
 4. Provide human-in-the-loop review for suggested matches and conflicts
-5. Maintain an immutable audit trail and support CSV/JSON exports
+5. Maintain an append-only, superseded-not-deleted audit trail and support CSV/JSON exports
 6. Provide a natural-language Q&A agent that explains reconciliation results with strict numeric guardrails
 
 ### Non-Functional Requirements

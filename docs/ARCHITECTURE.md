@@ -70,10 +70,11 @@ The matching runs in tiers, from strongest to weakest evidence:
 
 | Tier | What It Checks | Result If It Matches |
 |---|---|---|
-| **Tier 1** (Exact) | `utr == utr` AND `amount == amount` | `MATCHED` ✅ |
-| **Tier 0** (Fallback) | Date window ±2 days + exact amount (used when UTR is missing) | `SUGGESTED` — needs human approval |
-| **Tier 2** (Fuzzy) | Levenshtein/Jaro-Winkler similarity ≥ 90% on descriptor text | `SUGGESTED` — needs human review |
-| **Tier 3** (Diagnostics) | Delta explained by: fees + 18% GST? Refund batch? FX adjustment? | Explained → diagnostic logged • Unexplained → `EXCEPTION` ❌ |
+| **Tier 1** (Exact) | `utr == utr` AND `amount == amount` | `MATCHED` ✅ (100% confidence) |
+| **Tier 1.5** (Normalized UTR) | Normalized UTR prefix/suffix match (≥6 chars entropy floor) | `SUGGESTED` 🔍 (98% confidence) — CA approves |
+| **Tier 2** (Fuzzy) | Levenshtein/Jaro-Winkler similarity ≥ 90% on descriptor text | `SUGGESTED` 🔍 — needs human review |
+| **Tier 0** (Fallback) | Date window ±3 days + exact amount (used when UTR is missing) | `SUGGESTED` 🔍 — needs human approval |
+| **Tier 3** (Diagnostics & Subset Sum) | Delta explained by fees + 18% GST, Section 194-O TDS, refunds, or batched subset sum | Explained → `MATCHED` / diagnostic logged • Unexplained → `EXCEPTION` ❌ |
 
 **Conflict rule:** If one settlement matches multiple bank rows → both are locked as `CONFLICT` (confidence score 0.50) until a human reviews and resolves them. Resolving a conflict on Bank Row A automatically unlocks and transitions competing Bank Rows B...N to `EXCEPTION` (`human_action = "AUTO_DISPLACED"`), preventing double-credit and maintaining a clean audit trail.
 
@@ -96,7 +97,7 @@ How it works:
 
 Each row stores: input record IDs, which tier matched, confidence score, computed delta, diagnostic type, and timestamp.
 
-**Critical rule:** Rows are **never updated or deleted**. A correction is a new row pointing back to the one it supersedes. Full history preserved forever — this is an audit tool.
+**Critical rule:** Rows are **append-only** — records are marked `superseded=True`, never physically deleted. A re-reconciliation or human adjustment creates an updated row while preserving the complete audit history.
 
 Q&A interactions are also logged in `QaInteractionLog` — query text, source record, LLM output, whether the guardrail rejected it. The Q&A layer is auditable too.
 

@@ -10,6 +10,9 @@ import {
   Trash2,
   Layers,
   History,
+  Info,
+  CheckCircle2,
+  CornerDownLeft,
 } from "lucide-react";
 import { QaAskResponse } from "@/lib/types";
 import { askQaAgent } from "@/lib/api";
@@ -38,12 +41,12 @@ interface ChatTab {
 
 const createInitialTab = (tabNum: number): ChatTab => ({
   id: `tab-${Date.now()}-${tabNum}`,
-  title: `Chat ${tabNum}`,
+  title: `Session ${tabNum}`,
   messages: [
     {
       id: `welcome-${Date.now()}`,
       sender: "agent",
-      text: "Welcome to ReconGrid Settlement Q&A. Ask any question about a specific UTR, Order, or Settlement ID to get an audited explanation narrated directly from deterministic log records.",
+      text: "Welcome to ReconGrid Settlement Copilot. Ask any question regarding UTR matches, 2% MDR fee + 18% GST deductions, Section 194-O TDS calculations, batched settlements, or specific transaction IDs to get an audited explanation narrated directly from deterministic log records.",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ],
@@ -56,14 +59,14 @@ const PROMPT_CATEGORIES = [
     prompts: [
       "What is Ingested Ledger?",
       "What is Auto-Reconciled Net?",
-      "How do the 3 tiers of matching work?",
+      "How do the 4 tiers of matching work?",
       "How is 2% MDR fee and 18% GST calculated?",
       "Explain Section 194-O TDS deduction",
       "How to claim GST ITC on gateway fees?",
       "Why did order #4521 have a fee deduction?",
       "Explain UTR RTGS983921092812",
       "How are customer refunds handled?",
-      "How do batched / split settlements work?",
+      "How do batched settlements work?",
       "How does the token guardrail work?",
       "What are bank PDF password formats?",
     ],
@@ -90,12 +93,11 @@ const PROMPT_CATEGORIES = [
   {
     category: "Recon & Batches",
     prompts: [
-      "How do the 3 tiers of matching work?",
-      "How do batched / split settlements work?",
+      "How do the 4 tiers of matching work?",
+      "How do batched settlements work?",
       "How are customer refunds handled?",
       "Why did order #4521 have a fee deduction?",
       "Explain UTR RTGS983921092812",
-      "What is the status of settlement setl_Kjs9283jkd906?",
     ],
   },
   {
@@ -126,6 +128,16 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
   const currentCategoryData = PROMPT_CATEGORIES.find((c) => c.category === selectedCategory) || PROMPT_CATEGORIES[0];
 
+  useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 150);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeTab.messages]);
+
   const handleAddNewTab = () => {
     const newTabNum = tabs.length + 1;
     const newTab = createInitialTab(newTabNum);
@@ -137,7 +149,6 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
   const handleCloseTab = (e: React.MouseEvent, tabIdToClose: string) => {
     e.stopPropagation();
     if (tabs.length <= 1) {
-      // If closing the only tab, reset it to clean state
       const freshTab = createInitialTab(1);
       setTabs([freshTab]);
       setActiveTabId(freshTab.id);
@@ -183,22 +194,19 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
 
-    // Auto-update tab title if it's the first question
+    // Auto-update tab title if it's the first user question
     const isFirstQuestion = activeTab.messages.filter((m) => m.sender === "user").length === 0;
     let newTitle = activeTab.title;
     if (isFirstQuestion) {
-      // Pick settlement token or shorten prompt
       const tokenMatch = q.match(/(setl_[a-zA-Z0-9_]+|CMS[a-zA-Z0-9]+|#\d+|RTGS[a-zA-Z0-9]+)/i);
-      newTitle = tokenMatch ? tokenMatch[0] : q.length > 18 ? q.slice(0, 16) + "…" : q;
+      newTitle = tokenMatch ? tokenMatch[0] : q.length > 16 ? q.slice(0, 14) + "..." : q;
     }
 
-    // Format conversation history for memory
     const historyPayload = activeTab.messages.map((m) => ({
       role: m.sender === "user" ? "user" : "assistant",
       content: m.text,
     }));
 
-    // Update active tab state with user message
     setTabs((prev) =>
       prev.map((t) =>
         t.id === activeTabId
@@ -269,64 +277,64 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
 
   return (
     <>
-      {/* Mobile Backdrop Overlay */}
+      {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40 sm:hidden"
+        className="fixed inset-0 bg-black/60 backdrop-blur-xs z-40"
         onClick={onClose}
       />
 
-      <div className="fixed inset-y-0 right-0 w-full sm:w-[460px] bg-[#0c121e] border-l border-[#1c2b42] shadow-2xl z-50 flex flex-col backdrop-blur-xl animate-in slide-in-from-right duration-200">
+      <div className="fixed inset-y-0 right-0 w-full sm:w-[500px] bg-[#070b14] border-l border-[#18263a] shadow-2xl z-50 flex flex-col backdrop-blur-xl animate-in slide-in-from-right duration-200">
         {/* Panel Header */}
-        <div className="p-2.5 sm:p-3 border-b border-[#1c2b42] flex items-center justify-between bg-[#0f1728]">
-          <div className="flex items-center gap-2">
-            <div className="p-1 rounded bg-[#162138] border border-[#233555] text-indigo-400">
-              <Sparkles className="w-3.5 h-3.5" />
+        <div className="p-3.5 border-b border-[#18263a] flex items-center justify-between bg-[#0a101d]">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-gradient-to-br from-indigo-600/30 to-purple-600/30 border border-indigo-500/40 text-indigo-300 shadow-inner">
+              <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-xs font-semibold text-slate-100 flex items-center gap-1.5 font-sans">
-                Ask ReconGrid AI
-                <span className="px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[9px] font-mono">
-                  Context Memory Active
+              <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2 font-sans">
+                Settlement Copilot
+                <span className="px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[9px] font-mono">
+                  Context Memory
                 </span>
               </h3>
-              <p className="text-[9px] sm:text-[10px] text-slate-400 font-mono">
-                Multi-Tab Sessions • Verifiable Settlement Explanations
+              <p className="text-[10px] text-slate-400 font-mono">
+                Verifiable Multi-Session Explanations
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <button
               onClick={handleClearCurrentChat}
-              title="Clear current tab memory"
-              className="p-1 text-slate-400 hover:text-rose-300 hover:bg-[#182438] rounded transition"
+              title="Clear current session memory"
+              className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-[#121c2e] rounded-lg transition"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-4 h-4" />
             </button>
             <button
               onClick={onClose}
-              className="p-1 text-slate-400 hover:text-slate-200 hover:bg-[#182438] rounded transition"
+              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-[#121c2e] rounded-lg transition"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Tab Bar for Multi-Chat Memory */}
-        <div className="flex items-center gap-1 px-2 pt-2 bg-[#090e18] border-b border-[#182337] overflow-x-auto touch-scroll scrollbar-none">
+        {/* Multi-Tab Bar */}
+        <div className="flex items-center gap-1 px-2.5 pt-2 bg-[#060a12] border-b border-[#141f32] overflow-x-auto touch-scroll scrollbar-none">
           {tabs.map((t) => {
             const isActive = t.id === activeTabId;
             return (
               <div
                 key={t.id}
                 onClick={() => setActiveTabId(t.id)}
-                className={`group flex items-center gap-1.5 px-2.5 py-1.5 rounded-t-lg text-[11px] font-mono cursor-pointer transition border-t border-x ${
+                className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-xs font-mono cursor-pointer transition border-t border-x ${
                   isActive
-                    ? "bg-[#0f1728] border-[#1c2b42] text-blue-300 font-semibold shadow-sm"
-                    : "bg-[#070b13] border-transparent text-slate-400 hover:text-slate-200 hover:bg-[#0c1322]"
+                    ? "bg-[#0b1220] border-[#18263a] text-blue-300 font-semibold shadow-xs"
+                    : "bg-[#040810] border-transparent text-slate-400 hover:text-slate-200 hover:bg-[#080e1a]"
                 }`}
               >
                 <MessageSquare className={`w-3 h-3 ${isActive ? "text-blue-400" : "text-slate-500"}`} />
-                <span className="truncate max-w-[90px]">{t.title}</span>
+                <span className="truncate max-w-[100px]">{t.title}</span>
                 <button
                   type="button"
                   onClick={(e) => handleCloseTab(e, t.id)}
@@ -342,16 +350,16 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
           <button
             onClick={handleAddNewTab}
             title="New Chat Session"
-            className="flex items-center gap-1 px-2 py-1 mb-1 rounded text-[10px] font-mono bg-[#111a2c] hover:bg-[#18253d] border border-[#1e2d46] text-blue-300 hover:text-blue-200 transition shrink-0"
+            className="flex items-center gap-1 px-2.5 py-1 mb-1 rounded-lg text-[10px] font-mono bg-[#0c1424] hover:bg-[#121e36] border border-[#1a2c48] text-blue-300 hover:text-blue-200 transition shrink-0"
           >
             <Plus className="w-3 h-3" />
-            <span>New Tab</span>
+            <span>New</span>
           </button>
         </div>
 
         {/* Suggested Prompt Categories & Chips */}
-        <div className="px-2.5 sm:px-3 py-1.5 border-b border-[#182337] bg-[#090e18] space-y-1.5">
-          {/* Category Tabs */}
+        <div className="px-3 py-2 border-b border-[#141f32] bg-[#060a12] space-y-1.5">
+          {/* Category Selector */}
           <div className="flex items-center gap-1 overflow-x-auto touch-scroll scrollbar-none pb-0.5">
             {PROMPT_CATEGORIES.map((cat) => {
               const isSelected = selectedCategory === cat.category;
@@ -359,10 +367,10 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
                 <button
                   key={cat.category}
                   onClick={() => setSelectedCategory(cat.category)}
-                  className={`text-[9px] font-mono px-2 py-0.5 rounded whitespace-nowrap transition shrink-0 ${
+                  className={`text-[9px] font-mono px-2 py-0.5 rounded-md whitespace-nowrap transition shrink-0 ${
                     isSelected
                       ? "bg-blue-600 text-white font-semibold shadow-xs"
-                      : "bg-[#111a2c] hover:bg-[#18253d] text-slate-400 hover:text-slate-200 border border-[#1a2940]"
+                      : "bg-[#0b1220] hover:bg-[#121c2e] text-slate-400 hover:text-slate-200 border border-[#162337]"
                   }`}
                 >
                   {cat.category}
@@ -371,14 +379,14 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
             })}
           </div>
 
-          {/* Categorized Inquiries */}
+          {/* Prompt Chips */}
           <div className="flex items-center gap-1.5 overflow-x-auto touch-scroll scrollbar-none pb-0.5">
             {currentCategoryData.prompts.map((p, idx) => (
               <button
                 key={idx}
                 onClick={() => handleSend(p)}
                 disabled={loading}
-                className="text-[10px] font-mono px-2 py-0.5 bg-[#0f1624] hover:bg-[#152033] border border-[#1c2b42] text-slate-300 hover:text-blue-300 rounded whitespace-nowrap transition shrink-0"
+                className="text-[10px] font-mono px-2.5 py-0.5 bg-[#0b1220] hover:bg-[#121d30] border border-[#18263a] text-slate-300 hover:text-blue-300 rounded-md whitespace-nowrap transition shrink-0 shadow-2xs"
               >
                 {p}
               </button>
@@ -386,76 +394,77 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
           </div>
         </div>
 
-        {/* Message List */}
-        <div className="flex-1 overflow-y-auto p-2.5 sm:p-3 space-y-2.5 sm:space-y-3 font-sans touch-scroll">
+        {/* Message Stream */}
+        <div className="flex-1 overflow-y-auto p-3.5 space-y-3 font-sans touch-scroll bg-[#070b14]">
           {activeTab.messages.map((m) => (
             <div
               key={m.id}
               className={`flex flex-col ${m.sender === "user" ? "items-end" : "items-start"}`}
             >
               <div
-                className={`max-w-[92%] sm:max-w-[90%] rounded p-2 sm:p-2.5 text-xs leading-relaxed ${
+                className={`max-w-[92%] sm:max-w-[88%] rounded-xl p-3 text-xs leading-relaxed ${
                   m.sender === "user"
-                    ? "bg-blue-600 text-white rounded-br-none shadow-sm font-sans"
-                    : "bg-[#0f1624] border border-[#1c2b42] text-slate-200 rounded-bl-none shadow-sm whitespace-pre-line"
+                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-br-none shadow-md"
+                    : "bg-[#0b1220] border border-[#18263a] text-slate-200 rounded-bl-none shadow-sm whitespace-pre-line"
                 }`}
               >
                 <div>{m.text}</div>
 
                 {/* Source Record Jump Link */}
                 {m.sourceRecordId && (
-                  <div className="mt-2 pt-1.5 border-t border-[#1a283e] flex items-center justify-between text-[10px] sm:text-[11px] font-mono">
+                  <div className="mt-2.5 pt-2 border-t border-[#162438] flex items-center justify-between text-[11px] font-mono">
                     <button
                       onClick={() => onSelectRecord(m.sourceRecordId!)}
-                      className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 font-medium transition group"
+                      className="inline-flex items-center gap-1.5 text-blue-400 hover:text-blue-300 font-semibold transition group"
                     >
-                      <span>View source record</span>
-                      <ArrowRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+                      <span>Highlight in Ledger</span>
+                      <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
                     </button>
-                    <span className="flex items-center gap-1 text-emerald-400 text-[9px] sm:text-[10px]">
-                      <ShieldCheck className="w-3 h-3" />
-                      Guardrail OK
+                    <span className="flex items-center gap-1 text-emerald-400 text-[10px]">
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      Audited Grounding
                     </span>
                   </div>
                 )}
               </div>
-              <span className="text-[9px] sm:text-[10px] text-slate-500 mt-0.5 px-1 font-mono">{m.timestamp}</span>
+              <span className="text-[10px] text-slate-500 mt-1 px-1 font-mono">{m.timestamp}</span>
             </div>
           ))}
 
           {loading && (
-            <div className="flex items-center gap-2 text-slate-400 text-xs font-mono py-1.5">
-              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+            <div className="flex items-center gap-2 text-slate-400 text-xs font-mono py-2 px-1">
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></div>
               <span>Consulting deterministic reconciliation audit log...</span>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className="p-2 sm:p-2.5 border-t border-[#1c2b42] bg-[#0f1728]">
+        {/* Input Bar */}
+        <div className="p-3 border-t border-[#18263a] bg-[#0a101d]">
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleSend();
             }}
-            className="flex items-center gap-1.5 sm:gap-2"
+            className="flex items-center gap-2"
           >
             <input
               ref={inputRef}
               type="text"
-              placeholder="Ask about UTR, order, or follow-up on this settlement..."
+              placeholder="Ask about UTR, order #, or fee calculation..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={loading}
-              className="flex-1 px-2.5 py-1.5 bg-[#090e18] border border-[#1c2b42] rounded text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition font-mono"
+              className="flex-1 px-3.5 py-2 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition font-mono shadow-inner"
             />
             <button
               type="submit"
               disabled={!query.trim() || loading}
-              className="p-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded transition shrink-0"
+              className="p-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 text-white rounded-xl transition shadow-md shadow-blue-600/20 shrink-0"
+              aria-label="Send Query"
             >
-              <Send className="w-3.5 h-3.5" />
+              <Send className="w-4 h-4" />
             </button>
           </form>
         </div>

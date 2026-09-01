@@ -118,3 +118,29 @@ def test_parse_empty_or_corrupted_csv():
     # Whitespace and blank lines only
     blank_lines = ["Date,Ref,Narration,Deposit Amt.,Withdrawal Amt.", "", "   ", ",,,,"]
     assert list(BankCsvParser.parse_csv_stream(iter(blank_lines))) == []
+
+
+def test_parse_utf8_bom_prefixed_csv():
+    # Prepend UTF-8 BOM character to header
+    bom_csv_lines = [
+        "﻿Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.",
+        "24/08/2026,CMS002938491801,CMS/002938491801/HDFC,98200.00,0.00",
+    ]
+    rows = list(BankCsvParser.parse_csv_stream(iter(bom_csv_lines)))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("98200.00")
+    assert rows[0]["utr"] == "CMS002938491801"
+    assert rows[0]["direction"] == "CREDIT"
+
+
+def test_parse_indian_lakh_crore_comma_amounts():
+    csv_lines = [
+        "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.",
+        "24/08/2026,CMS002938491820,CMS/002938491820/HDFC,\"1,23,456.78\",0.00",
+        "25/08/2026,CMS002938491821,CMS/002938491821/HDFC,\"12,34,56,789.50\",0.00",
+    ]
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
+    assert len(rows) == 2
+    assert rows[0]["amount"] == Decimal("123456.78")
+    assert rows[1]["amount"] == Decimal("123456789.50")
+

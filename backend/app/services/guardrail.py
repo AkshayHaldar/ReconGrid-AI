@@ -1,7 +1,12 @@
 """Strict Numeric Token Guardrail for Settlement Q&A Agent.
 
 Enforces the non-negotiable rule: LLMs narrate facts, they NEVER compute or invent numbers.
-Any generated answer containing a number not present in the underlying record is rejected.
+Any generated answer containing a numeric token not present in the underlying record is rejected.
+
+Scoped v1 Design Note:
+The numeric guardrail operates on digit-based tokens (integers, floats, currency values, percentages).
+Spelled-out words for numbers (e.g. 'nine hundred rupees', 'fifty thousand') are explicitly forbidden
+at the LLM system prompt layer to ensure all financial figures remain machine-verifiable via exact regex tokens.
 """
 
 import re

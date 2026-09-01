@@ -58,7 +58,7 @@ And here's the twist — there's a **Settlement Q&A Agent** on top. You can type
              ▼                                 ▼
 ┌─────────────────────────┐      ┌─────────────────────────┐
 │ Audit Ledger & Cards    │      │ Settlement Q&A Agent    │
-│ • Immutable Log DB      │      │ • Deterministic Query   │
+│ • Append-Only Audit DB  │      │ • Deterministic Query   │
 │ • Scorecard & Metrics   │      │ • LLM Narration         │
 │ • CSV Audit Export      │      │ • Anti-Hallucination    │
 │ • One-Click Approvals   │      │   Regex Guardrail       │
@@ -104,17 +104,17 @@ ReconGrid-AI is architected directly against the official Track 04 mandate: *"Bu
 
 ### ⏱️ Batch Processing Throughput Benchmark
 
-Tested on standard laptop hardware using the full deterministic reconciliation pipeline, database persistence, and audit logging:
+Tested on standard hardware using the full deterministic reconciliation pipeline, database persistence, and audit logging (`python backend/scripts/benchmark_throughput.py`):
 
 ```text
 ==========================================================================================
 Batch Size   | Wall Time    | Throughput       | Peak Memory  | Match Rate   | Exceptions (INR)  | Conservation
 ------------------------------------------------------------------------------------------
-50           | 0.0479s      | 1,043.8 rows/s   |     1.74 MB  |    96.00%    | 2 (INR 99,998)    | PASSED (0 lost)
-200          | 0.3305s      |   605.1 rows/s   |     2.55 MB  |    95.00%    | 10 (INR 499,990)  | PASSED (0 lost)
-500          | 1.4800s      |   337.8 rows/s   |     6.03 MB  |    94.80%    | 9 (INR 449,991)   | PASSED (0 lost)
-1000         | 2.7632s      |   361.9 rows/s   |    11.99 MB  |    94.80%    | 17 (INR 849,983)  | PASSED (0 lost)
-5000         | 26.9821s     |   185.3 rows/s   |    36.45 MB  |    94.80%    | 85 (INR 4,249,915)| PASSED (0 lost)
+50           | 0.0351s      | 1,424.5 rows/s   |     1.52 MB  |    96.00%    | 2 (INR 99,998)    | PASSED (0 lost)
+200          | 0.1078s      | 1,855.3 rows/s   |     2.68 MB  |    95.00%    | 10 (INR 499,990)  | PASSED (0 lost)
+500          | 0.3136s      | 1,594.4 rows/s   |     6.49 MB  |    94.80%    | 9 (INR 449,991)   | PASSED (0 lost)
+1000         | 0.9716s      | 1,029.2 rows/s   |    12.88 MB  |    94.80%    | 17 (INR 849,983)  | PASSED (0 lost)
+5000         | 32.6310s     |   153.2 rows/s   |    67.50 MB  |    94.72%    | 13 (INR 649,987)  | PASSED (0 lost)
 ==========================================================================================
 ```
 
@@ -126,6 +126,62 @@ To generate the audit scorecard report across any batch:
 ```bash
 cd backend
 python scripts/generate_scorecard_report.py --batch-id default
+```
+
+---
+
+## 🎯 Demo Verification (cURL Guide)
+
+You can verify the entire end-to-end reconciliation lifecycle directly from the terminal:
+
+### 1. Seed 60-Record Synthetic Dataset (All Tiers & Edge Cases)
+```bash
+curl -X POST "http://localhost:8000/api/v1/demo/seed?count=60&batch_id=default" \
+  -H "Content-Type: application/json"
+```
+
+### 2. Check Reconciliation Status Cards (Ramesh Dashboard Metrics)
+```bash
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/status"
+```
+
+### 3. Retrieve Audit-Grade Scorecard & Tier Breakdown
+```bash
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/scorecard"
+```
+
+### 4. Ask the Settlement Q&A Agent (Audited & Guardrailed)
+```bash
+curl -X POST "http://localhost:8000/api/v1/qa/ask" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Why did order 4521 settle with a delta?", "history": []}'
+```
+
+### 5. Fetch Ledger Records & Inspect Suggested / Conflict Rows
+```bash
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/records?status=SUGGESTED"
+```
+
+### 6. Single-Click Approve a Suggested Match
+```bash
+# Replace <RECORD_ID> with an actual record ID from the ledger
+curl -X POST "http://localhost:8000/api/v1/reconciliation/records/<RECORD_ID>/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Approved by CA after verifying client invoice."}'
+```
+
+### 7. Resolve a Conflict with Automatic Competitor Displacement
+```bash
+# Assigns settlement to chosen row and moves competing row to EXCEPTION
+curl -X POST "http://localhost:8000/api/v1/reconciliation/records/<RECORD_ID>/resolve-conflict" \
+  -H "Content-Type: application/json" \
+  -d '{"chosen_settlement_id": "setl_Kjs9283jkd911", "note": "Allocated to Branch A after physical slip verification."}'
+```
+
+### 8. Download Complete Audit Ledger CSV
+```bash
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/export" \
+  -o recongrid_audit_ledger.csv
 ```
 
 ---
@@ -149,7 +205,7 @@ python scripts/generate_scorecard_report.py --batch-id default
 - Python 3.11+
 - Node.js 18+
 - Docker & Docker Compose (for Postgres + Redis)
-- Razorpay test-mode account ([setup guide →](./RAZORPAY-INTEGRATION.md))
+- Razorpay test-mode account ([setup guide →](./docs/RAZORPAY-INTEGRATION.md))
 
 ### 1. Clone & Set Up Environment
 
@@ -204,10 +260,10 @@ Open [http://localhost:3000](http://localhost:3000) — you will see the high-de
 ```bash
 cd backend
 
-# Run all 85 unit, integration, and e2e tests
+# Run all unit, integration, and e2e tests
 pytest -v
 
-# Run with full coverage report (96% backend coverage)
+# Run with full coverage report
 pytest --cov=app --cov-report=term-missing
 
 # Run the golden test batch (50+ record synthetic dataset)

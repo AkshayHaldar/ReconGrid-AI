@@ -10,6 +10,10 @@ def test_to_decimal_precision():
     assert to_decimal(100) == Decimal("100.00")
     assert to_decimal(None) == Decimal("0.00")
     assert to_decimal("1,42,85,900.00") == Decimal("14285900.00")
+    assert to_decimal("1,23,456.78") == Decimal("123456.78")
+    assert to_decimal("12,34,56,789.50") == Decimal("123456789.50")
+    assert to_decimal("₹ 1,23,456.78") == Decimal("123456.78")
+    assert to_decimal("(1,23,456.78)") == Decimal("-123456.78")
 
 
 def test_paise_conversions():

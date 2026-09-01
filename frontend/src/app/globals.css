@@ -3,43 +3,53 @@
 @tailwind utilities;
 
 :root {
-  --background: #080c14;
-  --foreground: #e2e8f0;
+  --background: #060913;
+  --foreground: #f8fafc;
+  --color-primary: #0f172a;
+  --color-card: #0b1120;
+  --color-card-elevated: #0e1628;
+  --color-border: #18263a;
+  --color-border-subtle: #131d2e;
+  --color-border-hover: #223754;
+  --color-accent-emerald: #10b981;
+  --color-accent-sky: #0ea5e9;
+  --color-accent-amber: #f59e0b;
+  --color-accent-rose: #f43f5e;
+  --color-accent-indigo: #6366f1;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Tabular numbers for financial and numerical precision */
+/* Strict Tabular Numbers for Financial Precision */
 .font-tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1, "zero" 1;
 }
 
-/* Custom Financial High-Density Scrollbars */
+/* Sleek Financial High-Density Scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #080c14;
+  background: #060913;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1c2b42;
-  border-radius: 2px;
+  background: #19263a;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3d5e;
+  background: #283d5d;
 }
 
 /* Touch-friendly smooth scroll and hidden scrollbar utility */
@@ -55,15 +65,15 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Muted animation for Q&A citation jump */
+/* Glowing Pulsing Animations */
 @keyframes citationPulse {
   0% {
-    background-color: rgba(59, 130, 246, 0.25);
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6);
+    background-color: rgba(59, 130, 246, 0.32);
+    box-shadow: inset 0 0 0 2px rgba(59, 130, 246, 0.8), 0 0 20px rgba(59, 130, 246, 0.4);
   }
   50% {
-    background-color: rgba(59, 130, 246, 0.12);
-    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.4);
+    background-color: rgba(59, 130, 246, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.5), 0 0 10px rgba(59, 130, 246, 0.2);
   }
   100% {
     background-color: transparent;
@@ -75,13 +85,78 @@ body {
   animation: citationPulse 3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
 
-/* High-density financial card surface */
-.financial-surface {
-  background-color: #0f1624;
-  border: 1px solid #1c2b42;
+@keyframes subtleGlow {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
 }
 
-.financial-surface-hover:hover {
-  border-color: #2a3d5e;
-  background-color: #131b2c;
+.animate-glow-pulse {
+  animation: subtleGlow 2.5s ease-in-out infinite;
+}
+
+/* Financial Surface Cards */
+.fin-card {
+  background: linear-gradient(180deg, #0d1424 0%, #090e1a 100%);
+  border: 1px solid #162438;
+}
+
+.fin-card-hover {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.fin-card-hover:hover {
+  border-color: #243a59;
+  background: linear-gradient(180deg, #101a2e 0%, #0b1120 100%);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+/* Sub-pixel border divider utility */
+.border-subtle {
+  border-color: #141f32;
+}
+
+/* Keyboard hint chip */
+.kbd-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background-color: #0d1524;
+  border: 1px solid #1c2c44;
+  color: #94a3b8;
+}
+
+/* Table zebra striping */
+.table-row-even {
+  background-color: rgba(12, 18, 32, 0.6);
+}
+
+.table-row-odd {
+  background-color: rgba(9, 14, 25, 0.9);
+}
+
+/* Tooltip transition */
+.tooltip-fade {
+  animation: tooltipIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tooltipIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }

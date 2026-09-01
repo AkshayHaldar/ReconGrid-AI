@@ -536,6 +536,8 @@ class SettlementQaAgent:
             "You are ReconGrid AI's Settlement Explainer for Chartered Accountants.\n"
             "Explain this existing computed reconciliation result in clear, professional language.\n"
             "CRITICAL RULE: Do NOT perform math, do NOT estimate, do NOT invent any numbers.\n"
+            "FORMAT RULE: Always write numbers in exact digit format (e.g. '50000.00', '₹ 49,100.00', '18%'). "
+            "Never spell out numbers as words (e.g. do NOT write 'nine hundred rupees' or 'fifty thousand').\n"
             f"Record Details:\n"
             f"- Status: {log.match_status}\n"
             f"- Tier: {log.match_tier}\n"

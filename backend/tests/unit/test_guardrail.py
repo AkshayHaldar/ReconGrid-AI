@@ -100,3 +100,71 @@ def test_guardrail_rejects_fabricated_gst_claim():
     is_valid, invented = validate_qa_narration(narration, fake_log)
     assert is_valid is False, f"Guardrail still lets fabricated GST claims through: {invented}"
 
+
+def test_guardrail_rejects_arbitrary_invented_digit_tokens():
+    bank = BankTransaction(
+        id="bank_test_digits",
+        row_hash="hash_digits",
+        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        amount=Decimal("10000.00"),
+        direction="CREDIT",
+        utr="CMS112233445566",
+        description="CMS/112233445566/RAZORPAY",
+    )
+    log = ReconciliationLog(
+        id="log_test_digits",
+        bank_tx_id="bank_test_digits",
+        match_status="MATCHED",
+        match_tier="TIER_1",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="EXACT_MATCH",
+        diagnostic_note="Exact match on UTR CMS112233445566.",
+        bank_transaction=bank,
+    )
+
+    # Narration inventing unrelated digit numbers: 45000.00, 999
+    narration_with_hallucination = "Settlement was 10000.00 but fee was 45000.00 and code was 999."
+    is_valid, invented = validate_qa_narration(narration_with_hallucination, log)
+    assert is_valid is False
+    assert "45000" in invented or "45000.00" in invented
+    assert "999" in invented
+
+
+def test_guardrail_word_based_number_limitation_documentation():
+    """Documents scoped v1 behavior: word-based numbers ('nine hundred rupees') are not digit tokens.
+
+    The system relies on LLM system prompt instructions ('Never spell out numbers as words')
+    to prevent word-based number hallucinations, keeping all financial numbers strictly digit-formatted.
+    """
+    bank = BankTransaction(
+        id="bank_test_words",
+        row_hash="hash_words",
+        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        amount=Decimal("10000.00"),
+        direction="CREDIT",
+        utr="CMS112233445577",
+        description="CMS/112233445577",
+    )
+    log = ReconciliationLog(
+        id="log_test_words",
+        bank_tx_id="bank_test_words",
+        match_status="MATCHED",
+        match_tier="TIER_1",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="EXACT_MATCH",
+        diagnostic_note="Exact match.",
+        bank_transaction=bank,
+    )
+
+    # Word-based numbers have no digit characters
+    word_text = "The discrepancy was nine hundred rupees and fifty paise."
+    extracted = extract_numeric_tokens(word_text)
+    # Verifies extract_numeric_tokens produces empty set for purely spelled-out words
+    assert len(extracted) == 0
+
+    # Therefore validate_qa_narration returns is_valid=True for word-only text
+    is_valid, invented = validate_qa_narration(word_text, log)
+    assert is_valid is True
+    assert len(invented) == 0
+
+

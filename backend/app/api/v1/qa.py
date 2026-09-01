@@ -32,7 +32,7 @@ async def get_qa_history(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns the immutable audit log of past Q&A agent queries and answers."""
+    """Returns the append-only audit log of past Q&A agent queries and answers."""
     qa_repo = QaRepository(db)
     history = await qa_repo.get_history(limit=limit)
     items = [QaHistoryItem.model_validate(h) for h in history]

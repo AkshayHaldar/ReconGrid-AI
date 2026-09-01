@@ -10,6 +10,7 @@ import { DemoSyncModal } from "@/components/DemoSyncModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
+import { CheckCircle2, RotateCcw, X, AlertTriangle, Sparkles } from "lucide-react";
 import {
   ReconciliationRecordItem,
   ReconciliationStatus,
@@ -23,6 +24,14 @@ import {
   resolveConflict,
 } from "@/lib/api";
 
+interface ToastAction {
+  id: string;
+  message: string;
+  type: "approve" | "deny" | "info";
+  recordId: string;
+  previousRecord: ReconciliationRecordItem;
+}
+
 export default function DashboardPage() {
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
   const [records, setRecords] = useState<ReconciliationRecordItem[]>([]);
@@ -32,6 +41,7 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
+  const [toast, setToast] = useState<ToastAction | null>(null);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -62,6 +72,14 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Toast Auto-Dismiss
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Global Keyboard Shortcuts
   useEffect(() => {
@@ -99,8 +117,32 @@ export default function DashboardPage() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Handle single-click Approve
+  // Handle single-click Approve with Optimistic UI & Undo Toast
   const handleApprove = async (recordId: string) => {
+    const targetRecord = records.find((r) => r.id === recordId);
+    if (!targetRecord) return;
+
+    // Optimistic local update
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id === recordId
+          ? {
+              ...r,
+              match_status: "MATCHED",
+              human_action: "APPROVED",
+            }
+          : r
+      )
+    );
+
+    setToast({
+      id: `toast-${Date.now()}`,
+      message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
+      type: "approve",
+      recordId,
+      previousRecord: targetRecord,
+    });
+
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
@@ -108,11 +150,45 @@ export default function DashboardPage() {
       setStatus(newStatus);
     } catch (err) {
       console.error("Approve failed:", err);
+      // Revert on error
+      setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
+      setToast({
+        id: `toast-err-${Date.now()}`,
+        message: "Failed to save approval. Reverted changes.",
+        type: "deny",
+        recordId,
+        previousRecord: targetRecord,
+      });
     }
   };
 
-  // Handle single-click Deny
+  // Handle single-click Deny with Optimistic UI & Undo Toast
   const handleDeny = async (recordId: string) => {
+    const targetRecord = records.find((r) => r.id === recordId);
+    if (!targetRecord) return;
+
+    // Optimistic local update
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.id === recordId
+          ? {
+              ...r,
+              match_status: "EXCEPTION",
+              human_action: "DENIED",
+              diagnostic_type: "UNRESOLVED",
+            }
+          : r
+      )
+    );
+
+    setToast({
+      id: `toast-${Date.now()}`,
+      message: `Moved ${targetRecord.bank_utr || "Record #" + targetRecord.id} to Exceptions`,
+      type: "deny",
+      recordId,
+      previousRecord: targetRecord,
+    });
+
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
@@ -120,7 +196,17 @@ export default function DashboardPage() {
       setStatus(newStatus);
     } catch (err) {
       console.error("Deny failed:", err);
+      setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
     }
+  };
+
+  // Handle Undo from Toast
+  const handleUndo = async () => {
+    if (!toast) return;
+    const { previousRecord } = toast;
+    setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
+    setToast(null);
+    await loadData();
   };
 
   // Handle Batch Approve High-Confidence (≥90%)
@@ -181,7 +267,7 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#080c14] text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#060913] text-slate-100 flex flex-col font-sans selection:bg-blue-600/90 selection:text-white">
       {/* Header Navigation */}
       <Header
         selectedBank={selectedBank}
@@ -193,7 +279,7 @@ export default function DashboardPage() {
       />
 
       {/* Main Financial Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-4 py-2.5 sm:py-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-5 py-4 sm:py-5">
         {/* Executive Summary Metric Cards & Trial Balance Control */}
         <SummaryCards
           status={status}
@@ -233,7 +319,7 @@ export default function DashboardPage() {
         />
       </main>
 
-      {/* Slide-out Settlement Q&A Panel */}
+      {/* Slide-out Settlement Q&A Copilot Panel */}
       <SettlementQaPanel
         isOpen={isQaOpen}
         onClose={() => setIsQaOpen(false)}
@@ -267,6 +353,35 @@ export default function DashboardPage() {
         record={exceptionTarget}
         onClose={() => setExceptionTarget(null)}
       />
+
+      {/* Optimistic Action Undo Toast Snackbar */}
+      {toast && (
+        <div className="fixed bottom-5 left-5 sm:left-6 z-50 flex items-center gap-3.5 bg-[#0b1220] border border-[#1e3250] shadow-2xl rounded-xl px-4 py-3 text-xs text-slate-200 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="flex items-center gap-2.5">
+            {toast.type === "approve" ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <span className="font-medium text-slate-200">{toast.message}</span>
+          </div>
+          <div className="flex items-center gap-2 pl-3 border-l border-[#19273c]">
+            <button
+              onClick={handleUndo}
+              className="px-2.5 py-1 bg-[#121f35] hover:bg-[#1a2d4e] text-blue-300 hover:text-blue-200 rounded-lg text-[11px] font-mono flex items-center gap-1.5 transition font-semibold"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Undo</span>
+            </button>
+            <button
+              onClick={() => setToast(null)}
+              className="p-1 text-slate-400 hover:text-slate-200 rounded-lg transition"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

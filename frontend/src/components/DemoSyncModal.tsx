@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, RefreshCw, Zap, CheckCircle, Database } from "lucide-react";
+import { X, RefreshCw, Zap, CheckCircle2, Database, Layers, ArrowRight } from "lucide-react";
 import { triggerRazorpaySync, seedDemoData } from "@/lib/api";
 
 interface DemoSyncModalProps {
@@ -32,10 +32,10 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
     setSuccessMsg(null);
     try {
       await triggerRazorpaySync(100);
-      setSuccessMsg("Synced Razorpay settlements and ran reconciliation engine!");
+      setSuccessMsg("Synced Razorpay settlements and executed 4-tier reconciliation engine.");
       onSuccess();
     } catch (err: any) {
-      setSuccessMsg("Sync completed (cached / mock test mode active).");
+      setSuccessMsg("Sync completed (mock sandbox gateway mode active).");
       onSuccess();
     } finally {
       setLoadingSync(false);
@@ -48,90 +48,101 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
     try {
       const data = await seedDemoData(count);
       setSuccessMsg(
-        `Seeded ${data.total_bank_transactions} bank transactions & ${data.total_settlements} Razorpay settlements! Reconciled ${data.reconciled_logs} rows.`
+        `Successfully seeded ${data.total_bank_transactions} bank transactions & ${data.total_settlements} Razorpay settlements. Reconciled ${data.reconciled_logs} rows across 4 tiers.`
       );
       onSuccess();
     } catch (err: any) {
-      setSuccessMsg("Seeding failed: " + err.message);
+      setSuccessMsg("Seeding failed: " + (err.message || "Unknown error"));
     } finally {
       setLoadingSeed(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-2.5 sm:p-4">
-      <div className="bg-[#0f1624] border border-[#1c2b42] rounded-lg max-w-md w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4">
+      <div className="bg-[#070b14] border border-[#18263a] rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="p-3 sm:p-3.5 bg-[#121a2a] border-b border-[#1c2b42] flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+        <div className="p-4 bg-[#0a101d] border-b border-[#18263a] flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+              <Zap className="w-5 h-5 text-amber-400 shrink-0" />
+            </div>
             <div>
-              <h3 className="text-xs font-semibold text-slate-100 font-sans">
-                Razorpay REST Sync & Synthetic Data
+              <h3 className="text-sm font-bold text-slate-100 font-sans flex items-center gap-2">
+                Sync Gateway & Demo Data
               </h3>
-              <p className="text-[9px] sm:text-[10px] text-slate-400 font-mono">
-                Buildathon Demonstration & Test Seeder
+              <p className="text-[11px] text-slate-400 font-mono">
+                Razorpay REST Ingestion & 60-Row Test Fixtures
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 p-1 rounded transition"
+            className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800/50 transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-3 sm:p-4 space-y-3 text-xs font-sans overflow-y-auto touch-scroll flex-1">
-          {/* Action 1: Seed 60 golden synthetic records */}
-          <div className="bg-[#0b101b] border border-[#1c2b42] rounded p-2.5 sm:p-3 space-y-1.5">
+        <div className="p-4 space-y-3.5 text-xs font-sans overflow-y-auto touch-scroll flex-1">
+          {/* Card 1: Seed 60 golden synthetic records */}
+          <div className="fin-card rounded-xl p-4 space-y-2.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5 text-xs">
-                <Database className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span className="font-bold text-slate-100 flex items-center gap-2 text-xs">
+                <Database className="w-4 h-4 text-blue-400 shrink-0" />
                 Seed 60 Golden Test Transactions
               </span>
-              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-blue-950 text-blue-300 border border-blue-800 shrink-0">
-                Track 04 Golden
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800 shrink-0">
+                Track 04 Fixture
               </span>
             </div>
-            <p className="text-slate-400 text-[10px] sm:text-[11px] leading-relaxed">
-              Populates realistic transactions covering Tier 1 exact matches, Tier 2 fuzzy descriptors, Tier 3 MDR fee + 18% GST deductions, 1% Section 194-O TDS, refund clawbacks, batched settlements, FX deltas, reversals, and multi-candidate conflicts.
+            <p className="text-slate-400 text-[11px] leading-relaxed font-sans">
+              Populates realistic transactions covering Exact Matches, Substring Matches, Fuzzy Descriptors, MDR fees (2%) + GST (18%), Section 194-O TDS (1%), Batched Settlements, Customer Refunds, FX deltas, Reversals, and Multi-candidate Conflicts.
             </p>
             <button
               onClick={() => handleSeed(60)}
               disabled={loadingSeed}
-              className="w-full py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium rounded shadow-sm transition flex items-center justify-center gap-1.5 text-xs mt-1"
+              className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-md shadow-blue-600/20 transition flex items-center justify-center gap-2 text-xs"
             >
               {loadingSeed ? (
-                <span>Generating & Reconciling...</span>
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Generating & Reconciling...</span>
+                </>
               ) : (
                 <>
-                  <Zap className="w-3.5 h-3.5" />
+                  <Zap className="w-3.5 h-3.5 text-amber-300" />
                   <span>Seed 60 Golden Records</span>
                 </>
               )}
             </button>
           </div>
 
-          {/* Action 2: Trigger Razorpay API Sync */}
-          <div className="bg-[#0b101b] border border-[#1c2b42] rounded p-2.5 sm:p-3 space-y-1.5">
+          {/* Card 2: Trigger Razorpay API Sync */}
+          <div className="fin-card rounded-xl p-4 space-y-2.5 shadow-sm">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5 text-xs">
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="font-bold text-slate-100 flex items-center gap-2 text-xs">
+                <RefreshCw className="w-4 h-4 text-emerald-400 shrink-0" />
                 Pull Settlements via Razorpay REST API
               </span>
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 shrink-0">
+                Gateway Sync
+              </span>
             </div>
-            <p className="text-slate-400 text-[10px] sm:text-[11px] leading-relaxed">
-              Fetches latest settlements using cursor pagination with exponential retry backoff, and automatically triggers multi-tier matching against statement rows.
+            <p className="text-slate-400 text-[11px] leading-relaxed font-sans">
+              Fetches latest settlements using cursor pagination with exponential backoff, and automatically triggers multi-tier matching against statement rows.
             </p>
             <button
               onClick={handleSync}
               disabled={loadingSync}
-              className="w-full py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-medium rounded shadow-sm transition flex items-center justify-center gap-1.5 text-xs mt-1"
+              className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 text-xs"
             >
               {loadingSync ? (
-                <span>Pulling via REST API...</span>
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  <span>Pulling via REST API...</span>
+                </>
               ) : (
                 <>
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -143,18 +154,18 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
 
           {/* Success / Status Banner */}
           {successMsg && (
-            <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded text-emerald-300 flex items-start gap-2 text-[10px] sm:text-[11px]">
-              <CheckCircle className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-              <span>{successMsg}</span>
+            <div className="p-3.5 bg-emerald-950/40 border border-emerald-800/70 rounded-xl text-emerald-300 flex items-start gap-2.5 text-xs animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed font-medium">{successMsg}</span>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-2.5 sm:p-3 bg-[#0a0f19] border-t border-[#182538] flex justify-end text-xs font-sans shrink-0">
+        <div className="p-4 bg-[#0a101d] border-t border-[#18263a] flex justify-end text-xs font-sans shrink-0">
           <button
             onClick={onClose}
-            className="w-full sm:w-auto px-3.5 py-1.5 bg-[#121b2b] hover:bg-[#182338] border border-[#1c2b42] text-slate-200 rounded transition text-center"
+            className="w-full sm:w-auto px-4 py-2 bg-[#0e1626] hover:bg-[#162338] border border-[#18263a] text-slate-300 rounded-xl transition text-center"
           >
             Close
           </button>

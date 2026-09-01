@@ -186,6 +186,13 @@ class ReconciliationEngine:
                     note = f"Tier 3 diagnostic on UTR {bank_utr or norm_bank_utr}: {diag.diagnostic_note}"
 
             # --- TIER 1.5: Substring / Prefix-stripped UTR Match ---
+            # Entropy Floor Rationale:
+            # A 6-character alphanumeric token provides at least 36^6 (~2.17 billion) possible permutations,
+            # ensuring sufficient entropy to prevent spurious random substring collisions in high-volume bank statements
+            # while gracefully handling gateway truncation or transport prefix discrepancies (e.g. "CMS...", "NEFT-HDFC-...").
+            # Safety Invariant:
+            # Substring matches produce status="SUGGESTED" with confidence 0.98 (never a silent auto-MATCHED)
+            # so that any false positive is always human-reviewable by a Chartered Accountant / Finance Controller.
             if not candidate and (bank_utr or norm_bank_utr):
                 search_utrs = [u for u in [bank_utr, norm_bank_utr] if u and len(u) >= 6]
                 if search_utrs:
@@ -199,10 +206,10 @@ class ReconciliationEngine:
                             candidate, diag_eval = _pick_best_candidate(s_candidates)
                             if is_amount_matching(bank_amount, to_decimal(candidate.amount), tolerance):
                                 tier = "TIER_1"
-                                status = "MATCHED"
+                                status = "SUGGESTED"
                                 diagnostic_type = "EXACT_MATCH"
                                 confidence = 0.98
-                                note = f"Tier 1 UTR reference match ({bank_utr} ~ {s_utr}) and amount {format_inr(bank_amount)}."
+                                note = f"Tier 1.5 UTR reference substring match ({bank_utr} ~ {s_utr}) and amount {format_inr(bank_amount)}. Flagged as SUGGESTED for verification."
                             else:
                                 tier = "TIER_3"
                                 diag = diag_eval or DiagnosticsService.evaluate_delta(bank_tx, candidate, tolerance)
@@ -283,6 +290,9 @@ class ReconciliationEngine:
                     )
 
             # --- TIER 3b: Batched Settlements (Many-to-One Subset Sum) ---
+            # Complexity budget: Candidates in ±4-day window bucketed and bounded to top 40 by time proximity.
+            # Pairs (k=2): O(N log N) via two-pointer scan on amount-sorted array.
+            # Triplets (k=3): O(N^2) bounded two-pointer scan on top 20 candidates.
             if not candidate and bank_amount > Decimal("0.00"):
                 window_setls = [
                     entry.s for entry in settlement_entries
@@ -291,14 +301,19 @@ class ReconciliationEngine:
                     and abs(tx_ts - entry.ts) <= 4 * 86400
                 ]
                 window_setls.sort(key=lambda s: abs(tx_ts - _to_utc_timestamp(s.settlement_created_at)))
-                window_setls = window_setls[:40]
+                window_candidates = window_setls[:40]
 
-                # 1. Pairs (k=2)
-                for i in range(len(window_setls)):
-                    for j in range(i + 1, len(window_setls)):
-                        s1, s2 = window_setls[i], window_setls[j]
-                        combined = to_decimal(s1.amount) + to_decimal(s2.amount)
+                # 1. Pairs (k=2): Two-pointer scan on amount-sorted candidates
+                if len(window_candidates) >= 2:
+                    sorted_pairs = sorted(window_candidates, key=lambda s: to_decimal(s.amount))
+                    left = 0
+                    right = len(sorted_pairs) - 1
+                    while left < right:
+                        s_left = sorted_pairs[left]
+                        s_right = sorted_pairs[right]
+                        combined = to_decimal(s_left.amount) + to_decimal(s_right.amount)
                         if is_amount_matching(bank_amount, combined, tolerance):
+                            s1, s2 = s_left, s_right
                             candidate = s1
                             tier = "TIER_3"
                             status = "MATCHED"
@@ -312,34 +327,45 @@ class ReconciliationEngine:
                                 f"+ {s2.settlement_id} ({format_inr(to_decimal(s2.amount))})."
                             )
                             break
-                    if candidate:
-                        break
+                        elif combined < bank_amount - tolerance:
+                            left += 1
+                        else:
+                            right -= 1
 
-                # 2. Triplets (k=3) if pair did not match
-                if not candidate and len(window_setls) >= 3:
-                    for i in range(min(len(window_setls), 20)):
-                        for j in range(i + 1, min(len(window_setls), 20)):
-                            for k in range(j + 1, min(len(window_setls), 20)):
-                                s1, s2, s3 = window_setls[i], window_setls[j], window_setls[k]
-                                combined = to_decimal(s1.amount) + to_decimal(s2.amount) + to_decimal(s3.amount)
-                                if is_amount_matching(bank_amount, combined, tolerance):
-                                    candidate = s1
-                                    tier = "TIER_3"
-                                    status = "MATCHED"
-                                    diagnostic_type = "BATCHED_SETTLEMENT"
-                                    confidence = 0.95
-                                    matched_settlement_ids.add(s1.settlement_id)
-                                    matched_settlement_ids.add(s2.settlement_id)
-                                    matched_settlement_ids.add(s3.settlement_id)
-                                    note = (
-                                        f"Batched Settlement Match: Bank credit of {format_inr(bank_amount)} "
-                                        f"matches 3 batched Razorpay payouts: {s1.settlement_id} ({format_inr(to_decimal(s1.amount))}) "
-                                        f"+ {s2.settlement_id} ({format_inr(to_decimal(s2.amount))}) "
-                                        f"+ {s3.settlement_id} ({format_inr(to_decimal(s3.amount))})."
-                                    )
-                                    break
-                            if candidate:
+                # 2. Triplets (k=3): Bounded two-pointer scan with fixed first element on top 20 candidates
+                if not candidate and len(window_candidates) >= 3:
+                    triplet_pool = sorted(window_candidates[:20], key=lambda s: to_decimal(s.amount))
+                    n_triplets = len(triplet_pool)
+                    for i in range(n_triplets - 2):
+                        s_i = triplet_pool[i]
+                        amt_i = to_decimal(s_i.amount)
+                        left = i + 1
+                        right = n_triplets - 1
+                        while left < right:
+                            s_left = triplet_pool[left]
+                            s_right = triplet_pool[right]
+                            combined = amt_i + to_decimal(s_left.amount) + to_decimal(s_right.amount)
+                            if is_amount_matching(bank_amount, combined, tolerance):
+                                s1, s2, s3 = s_i, s_left, s_right
+                                candidate = s1
+                                tier = "TIER_3"
+                                status = "MATCHED"
+                                diagnostic_type = "BATCHED_SETTLEMENT"
+                                confidence = 0.95
+                                matched_settlement_ids.add(s1.settlement_id)
+                                matched_settlement_ids.add(s2.settlement_id)
+                                matched_settlement_ids.add(s3.settlement_id)
+                                note = (
+                                    f"Batched Settlement Match: Bank credit of {format_inr(bank_amount)} "
+                                    f"matches 3 batched Razorpay payouts: {s1.settlement_id} ({format_inr(to_decimal(s1.amount))}) "
+                                    f"+ {s2.settlement_id} ({format_inr(to_decimal(s2.amount))}) "
+                                    f"+ {s3.settlement_id} ({format_inr(to_decimal(s3.amount))})."
+                                )
                                 break
+                            elif combined < bank_amount - tolerance:
+                                left += 1
+                            else:
+                                right -= 1
                         if candidate:
                             break
 
