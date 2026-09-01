@@ -275,13 +275,6 @@ pytest tests/integration/test_messy_fixtures_e2e.py -v
 
 ---
 
-## 🗂️ Sample Test Files (Repo Root)
-
-Known-good sample statements are included directly in the repository root for live demo testing:
-- `sample_hdfc_bank_statement.csv` — Clean HDFC multi-column statement
-- `sample_sbi_bank_statement.csv` — Clean SBI statement with Indian number formatting
-
----
 
 ## 🔌 API Reference
 
