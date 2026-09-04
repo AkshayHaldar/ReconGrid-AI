@@ -34,8 +34,8 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="border-b border-[#162438] bg-[#070b14]/95 backdrop-blur-md sticky top-0 z-30 px-3 sm:px-5 py-2.5 transition-all">
-        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+      <header className="border-b border-[#162438] bg-[#070b14]/95 backdrop-blur-md sticky top-0 z-30 px-3 sm:px-6 lg:px-8 py-2.5 transition-all">
+        <div className="w-full max-w-[1920px] mx-auto flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           {/* Brand & Workspace Identity */}
           <div className="flex items-center justify-between lg:justify-start gap-3">
             <div className="flex items-center gap-3">

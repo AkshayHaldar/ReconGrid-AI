@@ -255,7 +255,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                           <span className="text-slate-500 text-[10px] font-mono italic">No UTR Detected</span>
                         )}
                         <span
-                          className="text-slate-400 text-[11px] truncate max-w-[200px] sm:max-w-xs md:max-w-md"
+                          className="text-slate-400 text-[11px] truncate max-w-[220px] sm:max-w-sm md:max-w-lg lg:max-w-2xl xl:max-w-4xl"
                           title={r.bank_description}
                         >
                           {r.bank_description}
@@ -286,7 +286,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                     <td className="py-2.5 px-3 whitespace-nowrap">
                       {r.rzp_settlement_id ? (
                         <div className="flex items-center gap-1.5 font-mono text-xs text-blue-400">
-                          <span className="truncate max-w-[120px]" title={r.rzp_settlement_id}>
+                          <span className="truncate max-w-[130px] sm:max-w-[160px] lg:max-w-none" title={r.rzp_settlement_id}>
                             {r.rzp_settlement_id}
                           </span>
                           <button

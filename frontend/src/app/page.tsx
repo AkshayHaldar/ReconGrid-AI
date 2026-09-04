@@ -279,7 +279,7 @@ export default function DashboardPage() {
       />
 
       {/* Main Financial Workspace */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-5 py-4 sm:py-5">
+      <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
         {/* Executive Summary Metric Cards & Trial Balance Control */}
         <SummaryCards
           status={status}
