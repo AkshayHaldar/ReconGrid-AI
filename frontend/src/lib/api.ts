@@ -129,6 +129,16 @@ export async function seedDemoData(count: number = 60, batchId: string = "defaul
   return json.data;
 }
 
+export async function resetDemoData(batchId: string = "default"): Promise<any> {
+  const res = await fetch(`${API_BASE}/demo/reset?batch_id=${batchId}`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to reset demo data");
+  const json = await res.json();
+  return json.data;
+}
+
+
 export async function askQaAgent(
   query: string,
   contextRecordId?: string | null,

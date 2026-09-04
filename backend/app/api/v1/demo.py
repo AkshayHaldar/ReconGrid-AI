@@ -30,6 +30,7 @@ async def reset_demo_dataset(
     """Clears all bank transactions and reconciliation logs for clean testing."""
     await db.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
     await db.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
+    await db.execute(delete(RazorpaySettlement).where(RazorpaySettlement.is_test_mode == True))
     await db.commit()
     return ApiResponse.ok({"status": "reset", "batch_id": batch_id})
 

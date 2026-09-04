@@ -286,6 +286,7 @@ export default function DashboardPage() {
         <SummaryCards
           status={status}
           onOpenUpload={() => setIsUploadOpen(true)}
+          onOpenSync={() => setIsSyncOpen(true)}
           onFilterTab={(tab) => {
             setActiveTab(tab);
             setSelectedDiagnostic("ALL");

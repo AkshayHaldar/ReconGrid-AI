@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { X, RefreshCw, Zap, CheckCircle2, Database, Layers, ArrowRight } from "lucide-react";
-import { triggerRazorpaySync, seedDemoData } from "@/lib/api";
+import { X, RefreshCw, Zap, CheckCircle2, Database, Layers, ArrowRight, Trash2 } from "lucide-react";
+import { triggerRazorpaySync, seedDemoData, resetDemoData } from "@/lib/api";
 
 interface DemoSyncModalProps {
   isOpen: boolean;
@@ -15,6 +15,7 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
 }) => {
   const [loadingSync, setLoadingSync] = useState(false);
   const [loadingSeed, setLoadingSeed] = useState(false);
+  const [loadingReset, setLoadingReset] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,6 +56,21 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
       setSuccessMsg("Seeding failed: " + (err.message || "Unknown error"));
     } finally {
       setLoadingSeed(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!window.confirm("Are you sure you want to clear all transactions and reset the ledger to a clean state?")) return;
+    setLoadingReset(true);
+    setSuccessMsg(null);
+    try {
+      await resetDemoData("default");
+      setSuccessMsg("Ledger successfully cleared! The dashboard is now in a clean zero state.");
+      onSuccess();
+    } catch (err: any) {
+      setSuccessMsg("Reset failed: " + (err.message || "Unknown error"));
+    } finally {
+      setLoadingReset(false);
     }
   };
 
@@ -151,6 +167,40 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
               )}
             </button>
           </div>
+
+          {/* Card 3: Reset & Clear Ledger (Zero State) */}
+          <div className="fin-card rounded-xl p-4 space-y-2.5 shadow-sm border border-rose-950/40">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-100 flex items-center gap-2 text-xs">
+                <Trash2 className="w-4 h-4 text-rose-400 shrink-0" />
+                Reset & Clear Ledger (Zero State)
+              </span>
+              <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800/80 shrink-0">
+                Fresh Start
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px] leading-relaxed font-sans">
+              Wipes all seeded bank transactions and settlements, returning the dashboard to a completely clean zero-state ledger.
+            </p>
+            <button
+              onClick={handleReset}
+              disabled={loadingReset}
+              className="w-full py-2 bg-[#12080c] hover:bg-[#200e15] border border-rose-800/50 hover:border-rose-600/80 disabled:opacity-50 text-rose-300 hover:text-rose-200 font-semibold rounded-xl transition flex items-center justify-center gap-2 text-xs cursor-pointer"
+            >
+              {loadingReset ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-rose-400 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Clearing Ledger...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Clear All Transactions</span>
+                </>
+              )}
+            </button>
+          </div>
+
 
           {/* Success / Status Banner */}
           {successMsg && (

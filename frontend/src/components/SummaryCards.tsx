@@ -15,6 +15,7 @@ import {
   ArrowDownLeft,
   DollarSign,
   Info,
+  Zap,
 } from "lucide-react";
 import { ReconciliationStatus } from "@/lib/types";
 import { formatINR } from "@/lib/formatters";
@@ -22,12 +23,14 @@ import { formatINR } from "@/lib/formatters";
 interface SummaryCardsProps {
   status: ReconciliationStatus | null;
   onOpenUpload: () => void;
+  onOpenSync?: () => void;
   onFilterTab: (tab: string) => void;
 }
 
 export const SummaryCards: React.FC<SummaryCardsProps> = ({
   status,
   onOpenUpload,
+  onOpenSync,
   onFilterTab,
 }) => {
   const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
@@ -44,16 +47,25 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
               No bank statement loaded for this reconciliation cycle
             </h3>
             <p className="text-xs text-slate-400 font-sans leading-relaxed">
-              Upload an HDFC, ICICI, SBI, or Axis bank statement CSV/PDF, or click <strong className="text-slate-300">Sync/Seed</strong> in the top bar to generate synthetic golden test records.
+              Upload an HDFC, ICICI, SBI, or Axis bank statement CSV/PDF, or click <strong className="text-slate-300">Seed Test Data</strong> below to populate golden test records.
             </p>
           </div>
-          <div className="pt-2 flex justify-center gap-3">
+          <div className="pt-2 flex flex-wrap justify-center gap-3">
             <button
               onClick={onOpenUpload}
               className="px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-lg text-xs font-semibold shadow-md shadow-blue-500/20 transition transform active:scale-98 cursor-pointer"
             >
               Upload Bank Statement
             </button>
+            {onOpenSync && (
+              <button
+                onClick={onOpenSync}
+                className="px-4 py-2 bg-[#0c1527] hover:bg-[#14233e] border border-amber-500/40 text-amber-300 hover:text-amber-200 rounded-lg text-xs font-semibold shadow-sm transition transform active:scale-98 cursor-pointer flex items-center gap-1.5"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Seed Test Data</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
