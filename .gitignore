@@ -1,12 +1,13 @@
 # =====================================================================
-# ReconGrid-AI — Professional .gitignore
-# Stack: Python (FastAPI) + Node.js (Next.js/React/Tailwind) + SQLite/Redis
+# ReconGrid-AI — Master .gitignore
+# Stack: Python (FastAPI) + Node.js (Next.js 14 / TypeScript) + Redis / Postgres / SQLite
 # =====================================================================
 
 # =========================
 #  Environment & Secrets
 # =========================
 .env
+.env.*
 .env.local
 .env.*.local
 .env.development
@@ -24,6 +25,8 @@ secrets/
 
 # Keep onboarding templates
 !.env.example
+!backend/.env.example
+!frontend/.env.example
 
 # =========================
 #  Operating System Artifacts
@@ -36,8 +39,6 @@ ehthumbs_vista.db
 *.stackdump
 [Dd]esktop.ini
 $RECYCLE.BIN/
-*.exe
-cloudflared.exe
 
 # macOS
 .DS_Store
@@ -67,14 +68,18 @@ cloudflared.exe
 *.sublime-workspace
 *.swp
 *.swo
-*~
 
-# AI Assistant & Tool Caches
+# =========================
+#  AI Assistant & Tool Caches
+# =========================
 .claude/
-.claude-omniroute/
+.claude-*/
 .cursor/
 .windsurf/
 .aider*
+.gemini/
+omniroute.log
+*.session
 
 # =========================
 #  Python & Virtual Envs
@@ -130,7 +135,9 @@ coverage.xml
 celerybeat-schedule
 celerybeat.pid
 
-# SQLite Databases & WAL Journal Files
+# =========================
+#  SQLite & Local Databases
+# =========================
 *.db
 *.sqlite
 *.sqlite3
@@ -159,9 +166,8 @@ pnpm-debug.log*
 # Next.js Build Outputs
 .next/
 out/
-dist/
-build/
 *.tsbuildinfo
+next-env.d.ts
 
 # Turbo / Vercel
 .turbo/
@@ -208,5 +214,9 @@ ngrok.yml
 *.dylib
 cloudflared*
 
-AccountStatement_29082026_212430.pdf
-sbi_100_rows_statement.csv
+# =========================
+#  User Uploaded Raw Statements
+# =========================
+AccountStatement_*.pdf
+AccountStatement_*.csv
+*statement*private*.csv

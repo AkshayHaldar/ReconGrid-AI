@@ -108,10 +108,16 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     if any(k in q for k in ("ingested ledger", "total ingested", "ingested amount", "ingestion")):
         total_txs = summary.get("total_records", "N/A") if summary else "all"
         total_amt = format_inr(to_decimal(summary.get("total_ingested_amount", 0))) if summary else "the ledger sum"
+        credit_amt = format_inr(to_decimal(summary.get("total_credit_amount", 0))) if summary else "₹ 0.00"
+        debit_amt = format_inr(to_decimal(summary.get("total_debit_amount", 0))) if summary else "₹ 0.00"
+        net_amt = format_inr(to_decimal(summary.get("net_ingested_amount", 0))) if summary else "₹ 0.00"
         return (
-            "📊 **Total Ingested Ledger** represents the complete sum of all bank statement transactions (credits & debits) parsed and loaded into ReconGrid AI from your uploaded bank statement files (PDF/CSV).\n\n"
-            f"• **Current Ingested Total**: {total_txs} transactions amounting to {total_amt}.\n"
-            "• **Purpose**: It serves as the primary cash-in-bank baseline against which payment gateway payouts (Razorpay settlements) are audited and verified.\n"
+            "📊 **Total Ingested Ledger** represents the complete baseline sum of all bank statement transactions (both inflow credits and outflow debits) parsed and loaded into ReconGrid AI from your uploaded bank statement files (PDF/CSV).\n\n"
+            f"• **Current Ingested Total**: {total_txs} transactions totaling {total_amt}.\n"
+            f"• **Gross Credits (Inflows)**: {credit_amt}\n"
+            f"• **Gross Debits (Outflows/Reversals)**: {debit_amt}\n"
+            f"• **Net Cash Inflow**: {net_amt}\n"
+            "• **Purpose**: It establishes the 100% auditable ground truth of cash-in-bank movements against which payment gateway payouts (Razorpay settlements) are matched and verified.\n"
             "• **Formats Supported**: Multi-page PDFs (SBI, HDFC, ICICI, Axis, Kotak, etc. with auto-decryption) and NetBanking CSVs."
         )
 
@@ -141,17 +147,31 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         )
 
     # 4. Unresolved Variance / Exceptions
-    if any(k in q for k in ("unresolved variance", "variance", "exception")):
-        exc_count = summary.get("exception_count", "N/A") if summary else "the exception"
-        exc_amt = format_inr(to_decimal(summary.get("total_exception_amount", 0))) if summary else "the variance"
+    if any(k in q for k in ("unresolved variance", "variance", "trial balance", "in balance", "exception")):
+        exc_count = summary.get("exception_count", 0) if summary else 0
+        exc_amt = format_inr(to_decimal(summary.get("total_exception_amount", 0))) if summary else "₹ 0.00"
+        sugg_amt = format_inr(to_decimal(summary.get("total_suggested_amount", 0))) if summary else "₹ 0.00"
+        conf_amt = format_inr(to_decimal(summary.get("total_conflict_amount", 0))) if summary else "₹ 0.00"
+        pend_amt = format_inr(to_decimal(summary.get("total_pending_amount", 0))) if summary else "₹ 0.00"
+        total_var = format_inr(to_decimal(summary.get("total_unresolved_variance", 0))) if summary else exc_amt
+        is_bal = summary.get("is_in_balance", False) if summary else False
+
+        status_tag = "✅ **Trial Balance is In-Balance (₹0.00 Variance)**" if is_bal else f"⚠️ **Active Variance: {total_var}**"
+
         return (
-            "🚨 **Unresolved Variance** is the total amount in your bank statement that could not be matched to any Razorpay settlement (`EXCEPTION`).\n\n"
-            f"• **Current Variance**: {exc_count} transactions totaling {exc_amt}.\n"
-            "• **Common Reasons**:\n"
-            "  1. Personal or P2P UPI transfers in the same account.\n"
-            "  2. Bank maintenance charges, SMS fees, or interest credits.\n"
-            "  3. Customer refund adjustments or missing gateway payout batches.\n"
-            "• **Resolution**: Use the **Audit Drawer** on each exception row to add verification notes or trigger **'Sync / Seed'** to ingest pending settlements."
+            f"🚨 **Unresolved Variance & Trial Balance Audit**:\n\n"
+            f"{status_tag}\n\n"
+            f"**Complete Financial Conservation Breakdown**:\n"
+            f"• **Hard Exceptions ({exc_count} txns)**: {exc_amt} (no gateway settlement match found)\n"
+            f"• **Review-Pending Suggestions**: {sugg_amt} (requires 1-click CA approval)\n"
+            f"• **Conflicting Claims**: {conf_amt} (requires dispute resolution)\n"
+            f"• **In-Transit Settlements**: {pend_amt} (pending Razorpay payout batch ingestion)\n\n"
+            "**Reconciliation Balance Invariant**:\n"
+            "$$\\text{Total Ingested} = \\text{Auto-Reconciled} + \\text{CA Review} + \\text{In-Transit} + \\text{Exceptions}$$\n\n"
+            "**Resolution Actions**:\n"
+            "1. Open the **Audit Drawer** on any exception row to view root cause & raw payload.\n"
+            "2. Approve high-confidence suggestions or resolve conflicts in the **Conflict Drawer**.\n"
+            "3. Click **'Sync / Seed'** to ingest subsequent Razorpay settlement batches for in-transit entries."
         )
 
     # 5. About ReconGrid AI / Overview

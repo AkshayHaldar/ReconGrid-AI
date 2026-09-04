@@ -1,4 +1,9 @@
-export type MatchStatus = "MATCHED" | "SUGGESTED" | "CONFLICT" | "EXCEPTION";
+export type MatchStatus =
+  | "MATCHED"
+  | "SUGGESTED"
+  | "CONFLICT"
+  | "EXCEPTION"
+  | "PENDING_SETTLEMENT_DATA";
 
 export type MatchTier = "TIER_0" | "TIER_1" | "TIER_2" | "TIER_3" | "MANUAL";
 
@@ -11,6 +16,7 @@ export type DiagnosticType =
   | "FX_ADJUSTED"
   | "REVERSAL"
   | "UNRESOLVED"
+  | "PENDING_SETTLEMENT"
   | "DATE_AMOUNT_FALLBACK"
   | "FUZZY_MATCH";
 
@@ -52,10 +58,19 @@ export interface ReconciliationStatus {
   suggested_count: number;
   conflict_count: number;
   exception_count: number;
+  pending_count?: number;
   match_rate_percentage: number;
   total_ingested_amount: string;
   total_reconciled_amount: string;
   total_exception_amount: string;
+  total_pending_amount?: string;
+  total_credit_amount?: string;
+  total_debit_amount?: string;
+  net_ingested_amount?: string;
+  total_suggested_amount?: string;
+  total_conflict_amount?: string;
+  total_unresolved_variance?: string;
+  is_in_balance?: boolean;
   last_reconciled_at?: string | null;
 }
 

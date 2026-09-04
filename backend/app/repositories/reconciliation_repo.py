@@ -180,15 +180,26 @@ class ReconciliationRepository:
         exception_count = 0
         pending_count = 0
 
+        total_credit_amount = Decimal("0.00")
+        total_debit_amount = Decimal("0.00")
         total_ingested_amount = Decimal("0.00")
         total_reconciled_amount = Decimal("0.00")
+        total_suggested_amount = Decimal("0.00")
+        total_conflict_amount = Decimal("0.00")
         total_exception_amount = Decimal("0.00")
         total_pending_amount = Decimal("0.00")
         last_reconciled_at = None
 
         for log in active_logs:
-            bank_amt = to_decimal(log.bank_transaction.amount) if log.bank_transaction else Decimal("0.00")
+            bank = log.bank_transaction
+            bank_amt = to_decimal(bank.amount) if bank else Decimal("0.00")
+            direction = (bank.direction if bank else "CREDIT").upper()
+
             total_ingested_amount += bank_amt
+            if direction == "DEBIT":
+                total_debit_amount += bank_amt
+            else:
+                total_credit_amount += bank_amt
 
             if last_reconciled_at is None:
                 last_reconciled_at = log.matched_at
@@ -198,7 +209,7 @@ class ReconciliationRepository:
                         from datetime import timezone
                         return dt.astimezone(timezone.utc).replace(tzinfo=None)
                     return dt
-                
+
                 if _to_utc_naive(log.matched_at) > _to_utc_naive(last_reconciled_at):
                     last_reconciled_at = log.matched_at
 
@@ -211,12 +222,14 @@ class ReconciliationRepository:
                     total_reconciled_amount += bank_amt
                 else:
                     suggested_count += 1
+                    total_suggested_amount += bank_amt
             elif log.match_status == "CONFLICT":
                 if log.human_action == "RESOLVED":
                     matched_count += 1
                     total_reconciled_amount += bank_amt
                 else:
                     conflict_count += 1
+                    total_conflict_amount += bank_amt
             elif log.match_status == "EXCEPTION":
                 exception_count += 1
                 total_exception_amount += bank_amt
@@ -226,6 +239,21 @@ class ReconciliationRepository:
 
         match_rate = (
             round((matched_count / total_records) * 100.0, 2) if total_records > 0 else 0.0
+        )
+
+        net_ingested_amount = total_credit_amount - total_debit_amount
+        total_unresolved_variance = (
+            total_exception_amount
+            + total_suggested_amount
+            + total_conflict_amount
+            + total_pending_amount
+        )
+        is_in_balance = (
+            total_records > 0
+            and exception_count == 0
+            and suggested_count == 0
+            and conflict_count == 0
+            and pending_count == 0
         )
 
         return {
@@ -241,6 +269,13 @@ class ReconciliationRepository:
             "total_reconciled_amount": total_reconciled_amount,
             "total_exception_amount": total_exception_amount,
             "total_pending_amount": total_pending_amount,
+            "total_credit_amount": total_credit_amount,
+            "total_debit_amount": total_debit_amount,
+            "net_ingested_amount": net_ingested_amount,
+            "total_suggested_amount": total_suggested_amount,
+            "total_conflict_amount": total_conflict_amount,
+            "total_unresolved_variance": total_unresolved_variance,
+            "is_in_balance": is_in_balance,
             "last_reconciled_at": last_reconciled_at,
         }
 
@@ -281,8 +316,12 @@ class ReconciliationRepository:
         total_exception_count = 0
         total_pending_count = 0
 
+        total_credit_amount = Decimal("0.00")
+        total_debit_amount = Decimal("0.00")
         total_ingested_amount = Decimal("0.00")
         total_reconciled_amount = Decimal("0.00")
+        total_suggested_amount = Decimal("0.00")
+        total_conflict_amount = Decimal("0.00")
         total_exception_amount = Decimal("0.00")
         total_pending_amount = Decimal("0.00")
 
@@ -291,7 +330,13 @@ class ReconciliationRepository:
         for log in active_logs:
             bank = log.bank_transaction
             bank_amt = to_decimal(bank.amount) if bank else Decimal("0.00")
+            direction = (bank.direction if bank else "CREDIT").upper()
+
             total_ingested_amount += bank_amt
+            if direction == "DEBIT":
+                total_debit_amount += bank_amt
+            else:
+                total_credit_amount += bank_amt
 
             # Match status categorization
             if log.match_status == "MATCHED":
@@ -303,12 +348,14 @@ class ReconciliationRepository:
                     total_reconciled_amount += bank_amt
                 else:
                     total_suggested_count += 1
+                    total_suggested_amount += bank_amt
             elif log.match_status == "CONFLICT":
                 if log.human_action == "RESOLVED":
                     total_matched_count += 1
                     total_reconciled_amount += bank_amt
                 else:
                     total_conflict_count += 1
+                    total_conflict_amount += bank_amt
             elif log.match_status == "EXCEPTION":
                 total_exception_count += 1
                 total_exception_amount += bank_amt
@@ -363,6 +410,22 @@ class ReconciliationRepository:
         )
         unaccounted = total_rows - records_accounted_for
 
+        net_ingested_amount = total_credit_amount - total_debit_amount
+        total_unresolved_variance = (
+            total_exception_amount
+            + total_suggested_amount
+            + total_conflict_amount
+            + total_pending_amount
+        )
+        is_in_balance = (
+            unaccounted == 0
+            and total_rows > 0
+            and total_exception_count == 0
+            and total_suggested_count == 0
+            and total_conflict_count == 0
+            and total_pending_count == 0
+        )
+
         return {
             "batch_id": batch_id,
             "total_rows_processed": total_rows,
@@ -390,6 +453,13 @@ class ReconciliationRepository:
             "total_ingested_amount": total_ingested_amount,
             "total_exception_amount": total_exception_amount,
             "total_pending_amount": total_pending_amount,
+            "total_credit_amount": total_credit_amount,
+            "total_debit_amount": total_debit_amount,
+            "net_ingested_amount": net_ingested_amount,
+            "total_suggested_amount": total_suggested_amount,
+            "total_conflict_amount": total_conflict_amount,
+            "total_unresolved_variance": total_unresolved_variance,
+            "is_in_balance": is_in_balance,
             "records_accounted_for": records_accounted_for,
             "unaccounted_records": unaccounted,
             "is_fully_accounted": (unaccounted == 0),

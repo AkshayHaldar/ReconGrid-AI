@@ -19,6 +19,13 @@ class ReconciliationStatusResponse(BaseModel):
     total_reconciled_amount: Decimal = Field(..., decimal_places=2)
     total_exception_amount: Decimal = Field(..., decimal_places=2)
     total_pending_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_credit_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_debit_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    net_ingested_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_suggested_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_conflict_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_unresolved_variance: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    is_in_balance: bool = False
     last_reconciled_at: Optional[datetime] = None
 
     @field_validator(
@@ -26,6 +33,12 @@ class ReconciliationStatusResponse(BaseModel):
         "total_reconciled_amount",
         "total_exception_amount",
         "total_pending_amount",
+        "total_credit_amount",
+        "total_debit_amount",
+        "net_ingested_amount",
+        "total_suggested_amount",
+        "total_conflict_amount",
+        "total_unresolved_variance",
         mode="before",
     )
     @classmethod
@@ -161,6 +174,13 @@ class ScorecardResponse(BaseModel):
     total_ingested_amount: Decimal = Field(..., decimal_places=2)
     total_exception_amount: Decimal = Field(..., decimal_places=2)
     total_pending_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_credit_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_debit_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    net_ingested_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_suggested_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_conflict_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    total_unresolved_variance: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
+    is_in_balance: bool = False
 
     # Conservation audit
     records_accounted_for: int
@@ -186,6 +206,12 @@ class ScorecardResponse(BaseModel):
         "total_ingested_amount",
         "total_exception_amount",
         "total_pending_amount",
+        "total_credit_amount",
+        "total_debit_amount",
+        "net_ingested_amount",
+        "total_suggested_amount",
+        "total_conflict_amount",
+        "total_unresolved_variance",
         mode="before",
     )
     @classmethod

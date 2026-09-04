@@ -110,6 +110,8 @@ export default function DashboardPage() {
         setActiveTab("CONFLICT");
       } else if (e.key === "5") {
         setActiveTab("EXCEPTION");
+      } else if (e.key === "6") {
+        setActiveTab("PENDING_SETTLEMENT_DATA");
       }
     };
 

@@ -64,6 +64,18 @@ export const FilterBar: React.FC<FilterBarProps> = ({
       color: "text-amber-400",
       activeBg: "bg-amber-950/40 text-amber-300 border-amber-700/60",
     },
+    ...(status?.pending_count && status.pending_count > 0
+      ? [
+          {
+            id: "PENDING_SETTLEMENT_DATA",
+            label: "In-Transit",
+            count: status.pending_count,
+            shortcut: "6",
+            color: "text-purple-400",
+            activeBg: "bg-purple-950/40 text-purple-300 border-purple-700/60",
+          },
+        ]
+      : []),
     {
       id: "EXCEPTION",
       label: "Exceptions",
@@ -143,6 +155,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
                 </option>
                 <option value="REVERSAL" className="bg-[#0c121e] text-slate-200">
                   Direct Debit Reversals
+                </option>
+                <option value="PENDING_SETTLEMENT" className="bg-[#0c121e] text-slate-200">
+                  In-Transit Pending Settlements
                 </option>
                 <option value="UNRESOLVED" className="bg-[#0c121e] text-slate-200">
                   Unresolved Exceptions
