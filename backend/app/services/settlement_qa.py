@@ -96,14 +96,86 @@ def generate_template_fallback(log: ReconciliationLog, query: str = "") -> str:
 
 
 def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
-    """Deterministic fallback narration for reconciliation log responses."""
+    """Provides conversational, context-aware follow-up answers for a specific reconciliation log."""
+    q = query.lower().strip()
+    setl_id = log.rzp_settlement.settlement_id if log.rzp_settlement else "Unlinked"
+    bank_amt = format_inr(to_decimal(log.bank_transaction.amount)) if log.bank_transaction else "N/A"
+    utr = log.bank_transaction.utr if log.bank_transaction else (log.rzp_settlement.utr if log.rzp_settlement else "N/A")
+
+    # 1. Actionable verification & resolution queries ("how i verfie", "how to verify", "how to resolve", "what should I do", "verify")
+    if any(k in q for k in ("verfie", "verif", "resolve", "how do i", "how to", "what should i do", "action", "how can i", "fix", "approve")):
+        if log.match_status == "CONFLICT":
+            return (
+                f"⚔️ **How to Verify & Resolve Conflict for {setl_id}**:\n\n"
+                f"1. Click **'Highlight in Ledger'** below to jump directly to this transaction.\n"
+                "2. Click the **'Resolve Conflict'** button on the row to open the **Conflict Resolution Drawer**.\n"
+                "3. Review the candidate bank credits claiming this settlement. Select the legitimate transaction and click **'Confirm Assignment'**.\n"
+                "4. The selected row will be locked as `OK MATCHED`, and duplicate claims will be transferred to `EXCEPTION`."
+            )
+        elif log.match_status == "SUGGESTED":
+            return (
+                f"⚖️ **How to Verify & Approve Suggested Match for {setl_id}**:\n\n"
+                f"• This transaction ({bank_amt}) was suggested with {int(log.confidence_score * 100)}% descriptor similarity.\n"
+                "• **1-Click Approval**: Click the green checkmark (**Approve**) on the table row to lock it as `OK MATCHED`.\n"
+                "• **Bulk Approval**: Click **'Batch Approve (≥90%)'** in the top filter bar to approve all high-confidence suggestions at once.\n"
+                "• If incorrect, click the red **'Deny'** button to move it to `EXCEPTION`."
+            )
+        elif log.match_status == "EXCEPTION":
+            return (
+                f"🚨 **How to Audit & Resolve Exception ({bank_amt})**:\n\n"
+                "1. Click **'Highlight in Ledger'** below to locate this row.\n"
+                "2. Click the **Audit Drawer** (inspect button) to review the raw bank statement row and error diagnostics.\n"
+                "3. If this was an internal P2P deposit, interest, or bank fee, add an audit remark and keep it as a verified exception.\n"
+                "4. If awaiting gateway settlement, click **'Sync / Seed'** in the top bar to pull subsequent settlement batches."
+            )
+        elif log.match_status == "PENDING_SETTLEMENT_DATA":
+            return (
+                f"⏳ **How to Handle In-Transit Settlement ({bank_amt})**:\n\n"
+                f"• This bank transaction is within the active settlement window (≤5 days old).\n"
+                "• Click **'Sync / Seed'** in the top bar to pull the latest settlement batch from Razorpay. Once ingested, it will automatically transition to `OK MATCHED`."
+            )
+        else: # MATCHED
+            return (
+                f"✅ **Transaction is Already Fully Reconciled**:\n\n"
+                f"• Settlement `{setl_id}` has already been mathematically verified against UTR `{utr}` with zero delta.\n"
+                "• No further action or verification is required. This record is sealed for statutory audit."
+            )
+
+    # 2. Fee / Calculation queries ("what is the fee", "why fee", "tax", "gst", "tds")
+    if any(k in q for k in ("fee", "tax", "gst", "tds", "deduction", "mdr", "charge")):
+        fees_amt = to_decimal(log.rzp_settlement.fees) if log.rzp_settlement else Decimal("0.00")
+        tax_amt = to_decimal(log.rzp_settlement.tax) if log.rzp_settlement else Decimal("0.00")
+        gross_amt = to_decimal(log.rzp_settlement.gross_amount) if log.rzp_settlement else Decimal("0.00")
+        delta = format_inr(to_decimal(log.delta_amount))
+
+        return (
+            f"💰 **Fee & Tax Breakdown for {setl_id}**:\n\n"
+            f"• **Gross Amount**: {format_inr(gross_amt)}\n"
+            f"• **Gateway MDR Fee (2%)**: {format_inr(fees_amt)}\n"
+            f"• **GST on Fee (18%)**: {format_inr(tax_amt)}\n"
+            f"• **Total Variance / Delta**: {delta}\n"
+            f"• **Diagnostic Classification**: `{log.diagnostic_type}`\n"
+            f"• **Audit Note**: {log.diagnostic_note}"
+        )
+
+    # 3. Default fallback
     return generate_template_fallback(log, query)
 
 
 def answer_project_overview_question(query: str, summary: dict | None = None) -> str | None:
     """Answers general architecture, KPI metric, and domain questions about ReconGrid AI."""
-    q = query.lower()
+    q = query.lower().strip()
     
+    # Specific Conflict Resolution Guide
+    if any(k in q for k in ("resolve conflict", "resolve conflicts", "how do i resolve conflict", "how to resolve conflict", "conflict resolution")):
+        return (
+            "⚔️ **How to Resolve Multi-Candidate Conflicts**:\n\n"
+            "1. **Locate the Conflict**: Select the **'Conflicts'** tab on the ledger table to view rows in conflict.\n"
+            "2. **Open Conflict Drawer**: Click **'Resolve Conflict'** on the row to inspect all competing bank entries claiming the same Razorpay settlement ID.\n"
+            "3. **Select Valid Row**: Compare dates, reference remarks, and amounts, then choose the legitimate claimant bank credit.\n"
+            "4. **Confirm Assignment**: Click **'Confirm Resolution'**. The winning transaction is locked as `OK MATCHED`, while duplicate/competing rows are automatically transferred to `EXCEPTION` with an audit trail note."
+        )
+
     # 1. Total Ingested Ledger
     if any(k in q for k in ("ingested ledger", "total ingested", "ingested amount", "ingestion")):
         total_txs = summary.get("total_records", "N/A") if summary else "all"
@@ -122,7 +194,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         )
 
     # 2. Auto-Reconciled Net / Match Rate
-    if any(k in q for k in ("auto-reconciled", "auto reconciled", "reconciled net", "match rate")):
+    if any(k in q for k in ("auto-reconciled", "auto reconciled", "reconciled net", "match rate", "auto reconcile")):
         matched_txs = summary.get("matched_count", "N/A") if summary else "the matched"
         match_pct = summary.get("match_rate_percentage", "N/A") if summary else "the match"
         reconciled_amt = format_inr(to_decimal(summary.get("total_reconciled_amount", 0))) if summary else "the reconciled total"
@@ -322,24 +394,10 @@ class SettlementQaAgent:
             except Exception as ex:
                 logger.warning("qa_fetch_summary_failed", error=str(ex))
 
-        # 1. Deterministic Retrieval Step for Specific Record Lookups
+        # 1. Deterministic Retrieval Step for Specific Record Lookups in Current Query
         source_log = await self.qa_repo.find_reconciliation_record(clean_query)
 
-        # 1b. Memory Fallback: If not found in current query, check context_record_id or previous history
-        if not source_log and context_record_id:
-            source_log = await self.qa_repo.get_record_by_id(context_record_id)
-
-        if not source_log and history:
-            # Search candidate tokens from prior messages (most recent first)
-            for prev_msg in reversed(history):
-                content = prev_msg.content if hasattr(prev_msg, "content") else prev_msg.get("content", "")
-                if content:
-                    prev_log = await self.qa_repo.find_reconciliation_record(content)
-                    if prev_log:
-                        source_log = prev_log
-                        break
-
-        # 1c. General Project / Metric / Architecture Inquiry Fallback
+        # 2. General Project / Metric / Architecture Inquiry (Checked BEFORE falling back to unrelated active record)
         if not source_log:
             project_ans = answer_project_overview_question(clean_query, summary_metrics)
             if project_ans:
@@ -359,6 +417,23 @@ class SettlementQaAgent:
                     retrieved_data={"type": "project_overview", "summary": summary_metrics},
                     asked_at=now,
                 )
+
+        # 3. Context / Memory Fallback: If not an overview question, see if user is asking a follow-up about the active record or history
+        if not source_log and context_record_id:
+            source_log = await self.qa_repo.get_record_by_id(context_record_id)
+
+        if not source_log and history:
+            # Search candidate tokens from prior messages (most recent first)
+            for prev_msg in reversed(history):
+                content = prev_msg.content if hasattr(prev_msg, "content") else prev_msg.get("content", "")
+                if content:
+                    prev_log = await self.qa_repo.find_reconciliation_record(content)
+                    if prev_log:
+                        source_log = prev_log
+                        break
+
+        # 4. If still no record and no overview answer matched:
+        if not source_log:
 
             # If external LLM is configured, ask LLM with full project context
             if settings.LLM_API_KEY:

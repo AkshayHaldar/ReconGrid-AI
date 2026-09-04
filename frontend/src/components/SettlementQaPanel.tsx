@@ -233,7 +233,7 @@ export const SettlementQaPanel: React.FC<SettlementQaPanelProps> = ({
         id: `agent-${Date.now()}`,
         sender: "agent",
         text: response.answer,
-        sourceRecordId: response.source_record_id || activeTab.activeRecordId,
+        sourceRecordId: response.source_record_id || null,
         guardrailPassed: !response.guardrail_rejected,
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       };

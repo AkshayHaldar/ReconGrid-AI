@@ -391,3 +391,63 @@ async def test_call_llm_narration_live_mock():
         with pytest.raises(RuntimeError) as exc_info:
             await agent._call_llm_narration("Why did this settle?", log)
         assert "LLM API error: 401" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_qa_general_query_not_hijacked_by_active_context_record():
+    """Ensures general questions (Auto-Reconciled Net, PDF passwords) are answered accurately even when a record was previously active."""
+    repo = AsyncMock()
+    repo.find_reconciliation_record.return_value = None
+    agent = SettlementQaAgent(repo)
+
+    # User asks "What is Auto-Reconciled Net?" while context_record_id is active
+    res = await agent.answer_query(
+        query="What is Auto-Reconciled Net?",
+        context_record_id="setl_Kjs9283jkd911",
+    )
+    assert "Auto-Reconciled Net" in res.answer
+    assert "3 deterministic tiers" in res.answer
+    assert res.source_record_id is None
+
+    # User asks "What are bank PDF password formats?" while context_record_id is active
+    res_pw = await agent.answer_query(
+        query="What are bank PDF password formats?",
+        context_record_id="setl_Kjs9283jkd911",
+    )
+    assert "Indian Bank PDF Password Formulas" in res_pw.answer
+    assert "SBI" in res_pw.answer
+    assert res_pw.source_record_id is None
+
+
+@pytest.mark.asyncio
+async def test_qa_followup_verification_guidance_for_conflict():
+    """Ensures 'how i verfie' on a conflict record returns actionable conflict resolution steps."""
+    now = datetime.now(timezone.utc)
+    bank = BankTransaction(id="b1", amount=Decimal("50000.00"), date=now, direction="CREDIT", utr="CMS123456", description="CMS/123", row_hash="h1")
+    rzp = RazorpaySettlement(id="r1", settlement_id="setl_Kjs9283jkd911", amount=Decimal("50000.00"), gross_amount=Decimal("50000.00"), fees=Decimal("0.00"), tax=Decimal("0.00"), utr="CMS123456", settlement_created_at=now)
+    log_conflict = ReconciliationLog(
+        id="l_conflict",
+        bank_tx_id="b1",
+        rzp_settlement_id="r1",
+        match_status="CONFLICT",
+        match_tier="TIER_1",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="CONFLICT",
+        diagnostic_note="Competing claims",
+        bank_transaction=bank,
+        rzp_settlement=rzp,
+        matched_at=now,
+    )
+    repo = AsyncMock()
+    repo.find_reconciliation_record.return_value = None
+    repo.get_record_by_id.return_value = log_conflict
+    agent = SettlementQaAgent(repo)
+
+    res = await agent.answer_query(
+        query="how i verfie",
+        context_record_id="l_conflict",
+    )
+    assert "How to Verify & Resolve Conflict" in res.answer
+    assert "Conflict Resolution Drawer" in res.answer
+    assert res.source_record_id == "l_conflict"
+
