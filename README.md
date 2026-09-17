@@ -2,9 +2,6 @@
 
 **Autonomous settlement reconciliation and discrepancy-diagnostic engine with Settlement Q&A Agent for Razorpay merchants.**
 
-Built for the Razorpay Buildathon — Track 04 (AI Finance Controller).
-
----
 
 ## 🧠 What Is This?
 
@@ -319,10 +316,3 @@ For deeper dives into specific areas:
 
 ---
 
-## 📝 License
-
-This project was built for the Razorpay Buildathon hackathon.
-
----
-
-*Built by [Akshay](https://github.com/Akshayhaldar) — because no CA should waste their month-end doing VLOOKUPs in 2026.*
