@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-ReconGrid-AI does not currently have any published releases or versioned packages.
+ReconGrid-AI currently reports version 0.1.0 for its backend package, but no formal releases or versioned security-support commitments have been published.
 
 Currently, the project supports the latest state of the `main` branch with security updates.
 
