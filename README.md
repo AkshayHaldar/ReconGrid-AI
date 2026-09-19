@@ -313,6 +313,7 @@ For deeper dives into specific areas:
 | [Workflow Rules](./docs/WORKFLOW-RULES.md) | Git branching, commit conventions, definition of done |
 | [UX Context](./docs/UX-CONTEXT.md) | User persona (Ramesh), wireframes, all UI states |
 | [Bug Log](./docs/BUGLOG.md) | Real bugs hit during the build — root causes, fixes, time lost |
+| [Security Policy](./SECURITY.md) | Supported versions, vulnerability reporting, response targets, and disclosure guidelines |
 
 ---
 
