@@ -5,8 +5,9 @@ import io
 import json
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
 from app.core.database import get_db
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
@@ -19,7 +20,32 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import calculate_standard_fees, to_decimal
 
-router = APIRouter(prefix="/demo", tags=["Demo & Fixtures"])
+
+def verify_demo_enabled() -> None:
+    """Guards all /demo/* endpoints against unauthorized or production invocation (Issue 08)."""
+    if settings.ENV == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "DEMO_MODE_FORBIDDEN_IN_PRODUCTION",
+                "message": "Demo and seeding endpoints are permanently disabled in production environments.",
+            },
+        )
+    if not settings.ENABLE_DEMO:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "DEMO_MODE_DISABLED",
+                "message": "Demo mode is disabled. Set ENABLE_DEMO=true in non-production environments to enable demo routes.",
+            },
+        )
+
+
+router = APIRouter(
+    prefix="/demo",
+    tags=["Demo & Fixtures [DEMO ONLY]"],
+    dependencies=[Depends(verify_demo_enabled)],
+)
 
 
 @router.post("/reset", response_model=ApiResponse[dict])

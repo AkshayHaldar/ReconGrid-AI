@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 from typing import Literal
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,10 +13,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Razorpay Test / Live Configuration
-    RAZORPAY_KEY_ID: str = "rzp_test_samplekey123"
-    RAZORPAY_KEY_SECRET: str = "sample_secret_key"
-    RAZORPAY_WEBHOOK_SECRET: str = "sample_webhook_secret_key"
+    # Razorpay Test / Live Configuration (No hardcoded sample secrets)
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
 
     # Database: Defaults to SQLite for zero-friction local run/tests, easily points to PostgreSQL
     DATABASE_URL: str = "sqlite+aiosqlite:///./recongrid.db"
@@ -54,7 +55,44 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
 
     # Feature Flags
-    IS_TEST_MODE: bool = True
+    IS_TEST_MODE: bool = False
+    ENABLE_DEMO: bool = False
+
+    @model_validator(mode="after")
+    def validate_production_invariants(self) -> "Settings":
+        """Enforces Issue 06 & Issue 08 acceptance criteria for production environments."""
+        if self.ENV == "production":
+            if self.IS_TEST_MODE:
+                raise ValueError("IS_TEST_MODE must be False in production environments.")
+
+            if self.ENABLE_DEMO:
+                raise ValueError("ENABLE_DEMO must be False in production environments.")
+
+            if self.DATABASE_URL.startswith("sqlite"):
+                raise ValueError(
+                    "Production environment requires an explicit production database (PostgreSQL), SQLite is not permitted."
+                )
+
+            # Reject empty or placeholder secrets in production
+            invalid_placeholders = {
+                "rzp_test_samplekey123",
+                "sample_secret_key",
+                "sample_webhook_secret_key",
+                "rzp_test_your_key_id_here",
+                "your_razorpay_key_secret_here",
+                "your_webhook_secret_here",
+            }
+
+            if not self.RAZORPAY_KEY_ID or self.RAZORPAY_KEY_ID in invalid_placeholders or "sample" in self.RAZORPAY_KEY_ID:
+                raise ValueError("Valid RAZORPAY_KEY_ID must be configured for production.")
+
+            if not self.RAZORPAY_KEY_SECRET or self.RAZORPAY_KEY_SECRET in invalid_placeholders:
+                raise ValueError("Valid RAZORPAY_KEY_SECRET must be configured for production.")
+
+            if not self.RAZORPAY_WEBHOOK_SECRET or self.RAZORPAY_WEBHOOK_SECRET in invalid_placeholders:
+                raise ValueError("Valid RAZORPAY_WEBHOOK_SECRET must be configured for production.")
+
+        return self
 
 
 settings = Settings()
