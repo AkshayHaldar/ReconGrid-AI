@@ -1,319 +1,314 @@
-# 🔍 ReconGrid AI
+# ReconGrid AI
 
-**Autonomous settlement reconciliation and discrepancy-diagnostic engine with Settlement Q&A Agent for Razorpay merchants.**
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-brightgreen.svg)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-teal.svg)](https://fastapi.tiangolo.com)
+[![Next.js 14](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org)
+[![Razorpay Buildathon Track 04](https://img.shields.io/badge/Razorpay_Buildathon-Track_04:_AI_Finance_Controller-blue)](https://razorpay.com)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-green.svg)](./contribution.md)
 
+An open-source settlement reconciliation and discrepancy diagnostic engine with an audited Q&A agent for Razorpay merchants and finance teams.
 
-## 🧠 What Is This?
-
-If you're an SME founder, a Chartered Accountant, or a finance ops manager using Razorpay, you know the pain: every month, you sit down with a bank statement in one tab and a Razorpay settlement report in another, and spend hours (sometimes days) doing VLOOKUPs trying to figure out why the numbers don't match.
-
-**ReconGrid AI automates that entire process.**
-
-You upload your bank statement (CSV or PDF, even password-protected), it ingests your Razorpay settlements, and a deterministic matching engine tells you exactly:
-- ✅ Which transactions matched perfectly (Tier 1 & Tier 1.5)
-- 🔍 Which ones are fuzzy or fallback candidates needing single-click CA approval (Tier 2 & Tier 0)
-- ⚖️ Which payouts have multiple competing bank claims (`CONFLICT` locking to prevent double-credit)
-- ⏳ Which transactions are awaiting settlement within the T+2 window (`PENDING_SETTLEMENT_DATA`)
-- ❌ Which ones are true discrepancies or fee/tax/refund adjustments with root-cause diagnostics (Tier 3)
-
-And here's the twist — there's a **Settlement Q&A Agent** on top. You can type *"Why didn't order #4521 settle correctly?"* and get a plain-English explanation. Unlike ChatGPT-style guessing, this answer is **sourced from an already-computed audit record** — the AI explains facts and is strictly guardrailed against inventing numbers.
+Originally built for the **Razorpay Buildathon 2026 (Track 04: AI Finance Controller)**, ReconGrid AI automates the painful process of matching bank statements against Razorpay payment gateway settlements.
 
 ---
 
-## 🏛️ System Architecture
+## The Problem
 
-```
-                                    RECONGRID-AI SYSTEM ARCHITECTURE
-                                    
-  [ Bank Statements ]              [ Razorpay Gateway ]
-    (CSV / Multi-page PDF)           (API / HMAC Webhooks)
-             │                                │
-             ▼                                ▼
-┌─────────────────────────┐      ┌─────────────────────────┐
-│ Ingestion & Resilient   │      │ Cursor-Paginated Sync   │
-│ Normalization Engine    │      │ & Webhook Ingestion     │
-│ • Preamble skip (SBI)   │      │ • Net = Gross - Fee-Tax │
-│ • BOM & ₹ parsing       │      │ • Section 194-O TDS     │
-│ • Embedded UTR extract  │      │ • Refund clawbacks      │
-│ • Zero-float Decimal    │      │ • Deduplicated (Id)     │
-└────────────┬────────────┘      └────────────┬────────────┘
-             │                                │
-             └────────────────┬───────────────┘
-                              ▼
-        ┌───────────────────────────────────────────┐
-        │  Deterministic Multi-Tier Matching Engine  │
-        │                                           │
-        │  Tier 1:   Exact UTR + Net Amount Match   │
-        │  Tier 1.5: Prefix/Substring UTR Match     │
-        │  Tier 2:   Descriptor Fuzzy Match (>=90%) │
-        │  Tier 0:   Date Window (+/-2d) + Amount   │
-        │  Tier 3:   Batched Subset-Sum & Delta     │
-        │  Conflict: Multi-candidate Lock & Displace│
-        └─────────────────────┬─────────────────────┘
-                              │
-             ┌────────────────┴────────────────┐
-             ▼                                 ▼
-┌─────────────────────────┐      ┌─────────────────────────┐
-│ Audit Ledger & Cards    │      │ Settlement Q&A Agent    │
-│ • Append-Only Audit DB  │      │ • Deterministic Query   │
-│ • Scorecard & Metrics   │      │ • LLM Narration         │
-│ • CSV Audit Export      │      │ • Anti-Hallucination    │
-│ • One-Click Approvals   │      │   Regex Guardrail       │
-└─────────────────────────┘      └─────────────────────────┘
-```
+If you run a business in India accepting payments via Razorpay, your finance team or Chartered Accountant spends hours at month-end cross-checking bank statements against settlement reports.
+
+The numbers rarely match 1-to-1 because:
+- **Gateway fees:** Razorpay deducts a 2% MDR fee plus 18% GST on each transaction.
+- **Statutory taxes:** E-commerce sales have 1% Section 194-O TDS deducted at source.
+- **Mid-cycle refunds:** Customer refunds get deducted from subsequent settlement batches.
+- **Messy bank exports:** Indian banks (SBI, HDFC, ICICI, Axis) export statements with non-standard preambles, encrypted PDFs, and UTRs buried in long transaction descriptions.
+- **Batched payouts:** Multiple orders are often paid out as a single lump sum in the bank statement.
+
+Manual VLOOKUP in Excel is slow, error-prone, and painful. Naive LLM solutions fail because LLMs hallucinate numbers and cannot be trusted with financial math.
+
+ReconGrid AI solves this by keeping a **hard separation**: all math, reconciliation, and ledger operations are 100% deterministic code using Python `Decimal` (zero floats), while AI is used strictly for read-only natural language explanations backed by anti-hallucination guardrails.
 
 ---
 
-## 🛡️ How ReconGrid-AI Handles Messy Real-World Data
+## Razorpay Hackathon Track 04: AI Finance Controller
 
-Real financial statements from Indian banks are notorious for breaking standard parsers. ReconGrid-AI is engineered with 30+ years of mission-critical financial software practices:
+ReconGrid AI was built specifically to address the mandate of Track 04:
 
-1. **Bank Preamble Resilience:**
-   1990s/2000s core banking software (e.g. SBI, HDFC) outputs 5–8 lines of account metadata before the actual table header. ReconGrid dynamically scores candidate header rows across multi-bank dialects to skip preambles automatically.
-2. **Indian Currency & Notation Normalization:**
-   Correctly handles UTF-8 BOM (`﻿`), currency symbols (`₹`, `INR`, `Rs.`), lakh/crore commas (`1,23,456.78`), column suffixes (`Cr` / `Dr`), and accounting parentheses `(5,000.00)`.
-3. **Embedded UTR Tokenization:**
-   Extracts valid 8–24 character banking UTR/RRN tokens embedded inside free-form NEFT/RTGS/UPI narrations (e.g. `NEFT CR-HDFC N296250485376 RAZORPAY SETTLEMENT`) while excluding reserved banking keywords (`RAZORPAY`, `SETTLEMENT`, `BANGALORE`).
-4. **Zero-Float Financial Precision & Unscaled Paise Protection:**
-   Uses Python `Decimal` with `ROUND_HALF_UP` end-to-end. Rejects unscaled integer paise imports (e.g. `5000000` instead of `50000.00`) with actionable error messages.
-5. **Password-Protected Multi-Page PDFs:**
-   Ingests encrypted statements from HDFC, ICICI, SBI, Axis, Kotak with automated bank password formula cheat sheets and decryption fallbacks.
-6. **Graceful Row-Level Error Isolation:**
-   A corrupted row in a 5,000-line statement never crashes the upload with a raw 500. Corrupted rows are isolated and surfaced in `validation_errors`, while all valid rows are ingested and reconciled immediately.
+> *"Build finance-ops agents that close the loop over synthetic data with 50+ record batches, reporting match rates and unresolved anomalies... Verification capacity, not generation speed, is the bottleneck."*
 
----
+### Track 04 Requirements vs Implementation
 
-## 🏆 Razorpay Buildathon Track 04 (AI Finance Controller) Compliance & Scorecard
-
-ReconGrid-AI is architected directly against the official Track 04 mandate: *"Build finance-ops agents that close the loop over synthetic data with 50+ record batches, reporting match rates and unresolved anomalies... Verification capacity, not generation speed, is the bottleneck."*
-
-### 📊 THE BAR — Compliance Matrix
-
-| Track Requirement | Where Satisfied in ReconGrid-AI | Verification Command / Metric |
+| Hackathon Requirement | How ReconGrid AI Implements It | Verification |
 |---|---|---|
-| **High-Throughput Batch Processing** | Deterministic multi-tier engine with precomputed UTR indices & bulk persistence | `python backend/scripts/benchmark_throughput.py`<br>• **50 records:** 0.047s (1,043 rows/s)<br>• **1,000 records:** 2.76s (361 rows/s)<br>• **5,000 records:** 26.98s (185 rows/s) |
-| **Measured Accuracy & Tiered Match Rates** | Strict deterministic multi-tier pipeline: Tier 1 (Exact UTR), Tier 1.5 (Normalized UTR), Tier 2 (Fuzzy Descriptor), Tier 0 (Date Window Fallback), Tier 3 (Fee/GST/TDS Diagnostics & Subset Sum) | `GET /api/v1/reconciliation/{batch_id}/scorecard`<br>• **Tier 1:** Net & Gross exact reference matches<br>• **Tier 2:** $\ge 90\%$ fuzzy token similarity<br>• **Tier 0:** $\pm 3$ day date window + amount fallback |
-| **Honest Lists of Unresolved Anomalies** | Zero-silent-drop policy. Precision over recall. Seeded true exceptions remain unresolved with explicit diagnostic codes (`UNRESOLVED`, `FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `PENDING_SETTLEMENT`). | `python backend/scripts/generate_scorecard_report.py`<br>• Full unfiltered exception ledger output<br>• Precise root-cause notes for every anomaly |
-| **Closed-Loop Finance Controller** | End-to-end operational cycle: Statement Ingest $\rightarrow$ Gateway Sync $\rightarrow$ Deterministic Match $\rightarrow$ Anomaly Flagging $\rightarrow$ Q&A Explanation $\rightarrow$ Human CA Resolution with Automated Competitor Displacement | `pytest backend/tests/integration/test_synthetic_batch.py`<br>`pytest backend/tests/integration/test_api_routes.py` |
-| **Zero-Float Mathematical Conservation** | Python `Decimal` with `ROUND_HALF_UP` end-to-end. Pydantic v2 schema-level rejection of IEEE 754 floats. Strict row conservation: $\sum(\text{Matched} + \text{Suggested} + \text{Conflicts} + \text{Exceptions} + \text{Pending}) = \text{Total Ingested}$. | `pytest backend/tests/unit/test_schema_float_rejection.py`<br>`pytest backend/tests/unit/test_scorecard.py` |
+| **50+ Record Batch Processing** | Deterministic multi-tier matcher with indexed UTR lookup and batched DB persistence. | `python backend/scripts/benchmark_throughput.py`<br>Processes 50 rows in **0.035s** (~1,424 rows/s); 1,000 rows in **0.97s**. |
+| **Tiered Match Rates** | Clear classification into Tier 1 (exact UTR), Tier 1.5 (normalized UTR), Tier 2 (fuzzy narration), Tier 0 (date window fallback), and Tier 3 (fee/tax delta diagnostics). | `GET /api/v1/reconciliation/{batch_id}/scorecard`<br>Reports exact per-tier counts rather than an opaque single percentage. |
+| **Honest Anomaly Reporting** | Zero-silent-drop policy. Unmatched transactions remain unresolved with specific diagnostic reason codes (`UNRESOLVED`, `FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `PENDING_SETTLEMENT`). | `python backend/scripts/generate_scorecard_report.py`<br>Outputs the complete unedited exception ledger. |
+| **Closed-Loop Controller** | Move beyond read-only views: CA can approve suggested matches, reject false positives, and resolve multi-row conflicts with automated competitor displacement. | `POST /api/v1/reconciliation/records/{id}/approve`<br>`POST /api/v1/reconciliation/records/{id}/resolve-conflict` |
+| **Zero-Float Conservation** | End-to-end Python `Decimal(18, 2)` arithmetic with schema-level rejection of IEEE 754 floats. Mathematical row conservation guaranteed: $\sum(\text{all tiers} + \text{exceptions} + \text{pending}) = \text{total ingested}$. | `pytest backend/tests/unit/test_schema_float_rejection.py` |
+
+### Throughput Benchmarks
+
+Measured on standard hardware with full DB writes and audit logging:
+
+| Batch Size | Time | Throughput | Peak RAM | Match Rate | Unresolved Anomalies | Conservation |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **50** | 0.035s | 1,424 rows/s | 1.5 MB | 96.0% | 2 (₹ 99,998.00) | 100% (0 lost) |
+| **200** | 0.108s | 1,855 rows/s | 2.7 MB | 95.0% | 10 (₹ 499,990.00) | 100% (0 lost) |
+| **500** | 0.314s | 1,594 rows/s | 6.5 MB | 94.8% | 9 (₹ 449,991.00) | 100% (0 lost) |
+| **1,000** | 0.972s | 1,029 rows/s | 12.9 MB | 94.8% | 17 (₹ 849,983.00) | 100% (0 lost) |
+| **5,000** | 32.63s | 153 rows/s | 67.5 MB | 94.7% | 13 (₹ 649,987.00) | 100% (0 lost) |
 
 ---
 
-### ⏱️ Batch Processing Throughput Benchmark
+## How It Works
 
-Tested on standard hardware using the full deterministic reconciliation pipeline, database persistence, and audit logging (`python backend/scripts/benchmark_throughput.py`):
-
-```text
-==========================================================================================
-Batch Size   | Wall Time    | Throughput       | Peak Memory  | Match Rate   | Exceptions (INR)  | Conservation
-------------------------------------------------------------------------------------------
-50           | 0.0351s      | 1,424.5 rows/s   |     1.52 MB  |    96.00%    | 2 (INR 99,998)    | PASSED (0 lost)
-200          | 0.1078s      | 1,855.3 rows/s   |     2.68 MB  |    95.00%    | 10 (INR 499,990)  | PASSED (0 lost)
-500          | 0.3136s      | 1,594.4 rows/s   |     6.49 MB  |    94.80%    | 9 (INR 449,991)   | PASSED (0 lost)
-1000         | 0.9716s      | 1,029.2 rows/s   |    12.88 MB  |    94.80%    | 17 (INR 849,983)  | PASSED (0 lost)
-5000         | 32.6310s     |   153.2 rows/s   |    67.50 MB  |    94.72%    | 13 (INR 649,987)  | PASSED (0 lost)
-==========================================================================================
 ```
+Bank Statements (CSV / PDF)             Razorpay Gateway (API / Webhooks)
+           │                                           │
+           ▼                                           ▼
+┌─────────────────────────────┐             ┌─────────────────────────────┐
+│ Ingestion & Normalization   │             │ Gateway Sync & Webhooks     │
+│ • Skip bank preambles (SBI) │             │ • HMAC signature check      │
+│ • Clean ₹ and lakh commas   │             │ • Cursor pagination         │
+│ • Extract embedded UTRs     │             │ • Net = Gross - Fees - Tax  │
+└──────────────┬──────────────┘             └──────────────┬──────────────┘
+               │                                           │
+               └─────────────────────┬─────────────────────┘
+                                     ▼
+                   ┌───────────────────────────────────┐
+                   │ Deterministic Multi-Tier Matcher  │
+                   │ • Tier 1:   Exact UTR + Amount    │
+                   │ • Tier 1.5: Normalized UTR        │
+                   │ • Tier 2:   Fuzzy Narration (90%) │
+                   │ • Tier 0:   Date Fallback (+/-3d) │
+                   │ • Tier 3:   Delta Diagnostics     │
+                   └─────────────────┬─────────────────┘
+                                     │
+                     ┌───────────────┴───────────────┐
+                     ▼                               ▼
+       ┌───────────────────────────┐   ┌───────────────────────────┐
+       │ Append-Only Audit Ledger  │   │ Settlement Q&A Agent      │
+       │ • Matched / Suggested     │   │ • Reads computed DB facts │
+       │ • Conflict lock           │   │ • Plain-English summary   │
+       │ • 1-click CA approval     │   │ • Regex guardrail checks  │
+       │ • CSV export              │   │   every number mentioned  │
+       └───────────────────────────┘   └───────────────────────────┘
+```
+
+### The Multi-Tier Matching Engine
+
+1. **Tier 1 (Exact Match — 100%):** Bank UTR matches Razorpay UTR exactly and the net amount matches. Automatically marked `MATCHED`.
+2. **Tier 1.5 (Normalized UTR — 98%):** UTR match after stripping bank-specific prefix/suffix tokens. Marked `SUGGESTED`.
+3. **Tier 2 (Fuzzy Descriptor — $\ge 90\%$):** Levenshtein token similarity on narrations. Marked `SUGGESTED` for human review.
+4. **Tier 0 (Date Window Fallback):** For rows missing UTRs, matches on amount within a $\pm 3$ day settlement window. Marked `SUGGESTED`.
+5. **Tier 3 (Diagnostic Deltas & Subset-Sum):** Explains differences due to MDR fees, 18% GST, Section 194-O TDS, refunds, or batched payouts.
+6. **Conflict Resolution:** When multiple bank transactions claim the same Razorpay settlement, both are locked in `CONFLICT`. A human CA can assign the settlement to the correct row with one click, which automatically moves the competing row to `EXCEPTION`.
+
+### Guardrailed AI Q&A Agent
+
+Users can ask questions like:
+> *"Why did order #4521 settle with a ₹23.60 difference?"*
+
+- The backend fetches the pre-computed audit record from PostgreSQL/SQLite.
+- An LLM (via NVIDIA NIM / LLaMA 3.3 70B) generates a plain-English explanation.
+- An anti-hallucination regex guardrail checks all numbers in the LLM response against the DB record. If any number was invented, the LLM response is discarded and replaced with raw database facts.
 
 ---
 
-### 📋 Audit Scorecard Generation CLI
+## Tech Stack
 
-To generate the audit scorecard report across any batch:
-```bash
-cd backend
-python scripts/generate_scorecard_report.py --batch-id default
-```
-
----
-
-## 🎯 Demo Verification (cURL Guide)
-
-You can verify the entire end-to-end reconciliation lifecycle directly from the terminal:
-
-### 1. Seed 60-Record Synthetic Dataset (All Tiers & Edge Cases)
-```bash
-curl -X POST "http://localhost:8000/api/v1/demo/seed?count=60&batch_id=default" \
-  -H "Content-Type: application/json"
-```
-
-### 2. Check Reconciliation Status Cards (Ramesh Dashboard Metrics)
-```bash
-curl -X GET "http://localhost:8000/api/v1/reconciliation/default/status"
-```
-
-### 3. Retrieve Audit-Grade Scorecard & Tier Breakdown
-```bash
-curl -X GET "http://localhost:8000/api/v1/reconciliation/default/scorecard"
-```
-
-### 4. Ask the Settlement Q&A Agent (Audited & Guardrailed)
-```bash
-curl -X POST "http://localhost:8000/api/v1/qa/ask" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Why did order 4521 settle with a delta?", "history": []}'
-```
-
-### 5. Fetch Ledger Records & Inspect Suggested / Conflict Rows
-```bash
-curl -X GET "http://localhost:8000/api/v1/reconciliation/default/records?status=SUGGESTED"
-```
-
-### 6. Single-Click Approve a Suggested Match
-```bash
-# Replace <RECORD_ID> with an actual record ID from the ledger
-curl -X POST "http://localhost:8000/api/v1/reconciliation/records/<RECORD_ID>/approve" \
-  -H "Content-Type: application/json" \
-  -d '{"note": "Approved by CA after verifying client invoice."}'
-```
-
-### 7. Resolve a Conflict with Automatic Competitor Displacement
-```bash
-# Assigns settlement to chosen row and moves competing row to EXCEPTION
-curl -X POST "http://localhost:8000/api/v1/reconciliation/records/<RECORD_ID>/resolve-conflict" \
-  -H "Content-Type: application/json" \
-  -d '{"chosen_settlement_id": "setl_Kjs9283jkd911", "note": "Allocated to Branch A after physical slip verification."}'
-```
-
-### 8. Download Complete Audit Ledger CSV
-```bash
-curl -X GET "http://localhost:8000/api/v1/reconciliation/default/export" \
-  -o recongrid_audit_ledger.csv
-```
+- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.0 (async), SQLite (dev/test) / PostgreSQL (prod)
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, Lucide icons
+- **Payment Gateway:** Razorpay REST API (settlements, payments, refunds, HMAC-SHA256 webhooks)
+- **AI / LLM:** NVIDIA NIM (LLaMA 3.3 70B) for read-only explanations with strict regex guardrail
 
 ---
 
-## 🏗️ Tech Stack
-
-| Layer | Technology |
-|---|---|
-| **Backend** | Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy (async) |
-| **Database** | PostgreSQL (via Docker Compose) • SQLite for local dev/tests |
-| **Queue / Cache** | Redis |
-| **Frontend** | Next.js 14, React 18, Tailwind CSS, TypeScript |
-| **External APIs** | Razorpay REST API (settlements, refunds, webhooks) |
-| **AI / LLM** | NVIDIA NIM / LLaMA 3.3 70B (narration only — never for math) |
-
----
-
-## ⚡ Quickstart
+## Quickstart
 
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+
-- Docker & Docker Compose (for Postgres + Redis)
-- Razorpay test-mode account ([setup guide →](./docs/RAZORPAY-INTEGRATION.md))
+- Git
 
-### 1. Clone & Set Up Environment
-
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/ReconGrid-AI.git
+git clone https://github.com/AkshayHaldar/ReconGrid-AI.git
 cd ReconGrid-AI
 ```
 
-### 2. Start Infrastructure (Postgres + Redis)
-
-```bash
-docker compose up -d
-```
-
-This spins up:
-- **PostgreSQL 15** on port `5432` (user: `recongrid`, db: `recongrid`)
-- **Redis 7** on port `6379`
-
-### 3. Backend Setup
-
+### 2. Backend Setup
 ```bash
 cd backend
-cp .env.example .env     # ← fill in your Razorpay test keys + LLM API key
+python -m venv .venv
+
+# On Windows:
+.venv\Scripts\activate
+# On macOS / Linux:
+source .venv/bin/activate
+
 pip install -r requirements.txt
+cp .env.example .env
+```
+
+Start the API server:
+```bash
 uvicorn app.main:app --reload --port 8000
 ```
+Interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-> **Note:** The `.env.example` file has every config var documented. At minimum you need `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, and `RAZORPAY_WEBHOOK_SECRET`.
-
-### 4. Seed Test Data
-
-```bash
-python scripts/seed_test_transactions.py --count 60
-```
-
-This creates synthetic transactions in your Razorpay test account so you have settlement data to reconcile against.
-
-### 5. Frontend Setup
-
+### 3. Frontend Setup
+In a new terminal:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+Open [http://localhost:3000](http://localhost:3000) to view the reconciliation dashboard.
 
-Open [http://localhost:3000](http://localhost:3000) — you will see the high-density reconciliation dashboard.
-
----
-
-## 🧪 Running Tests
-
+### 4. (Optional) Run with Docker Compose
+If you prefer running PostgreSQL 15 and Redis locally:
 ```bash
-cd backend
-
-# Run all unit, integration, and e2e tests
-pytest -v
-
-# Run with full coverage report
-pytest --cov=app --cov-report=term-missing
-
-# Run the golden test batch (50+ record synthetic dataset)
-pytest tests/integration/test_synthetic_batch.py -v
-
-# Run dirty real-world messy fixtures e2e tests
-pytest tests/integration/test_messy_fixtures_e2e.py -v
+docker compose up -d
 ```
 
 ---
 
+## Testing & Verification
 
-## 🔌 API Reference
+Run the test suite from the `backend/` directory:
 
-All endpoints live under `/api/v1`.
+```bash
+cd backend
 
-| Method | Endpoint | What It Does |
+# Run all tests
+pytest -v
+
+# Run the 50+ record synthetic batch test
+pytest tests/integration/test_synthetic_batch.py -v
+
+# Run messy bank statement fixture tests
+pytest tests/integration/test_messy_fixtures_e2e.py -v
+
+# Run zero-float schema validation test
+pytest tests/unit/test_schema_float_rejection.py -v
+
+# Run throughput benchmark
+python scripts/benchmark_throughput.py
+```
+
+---
+
+## Testing via cURL
+
+You can test the entire workflow from the terminal:
+
+```bash
+# 1. Seed a 60-record synthetic batch covering all tiers
+curl -X POST "http://localhost:8000/api/v1/demo/seed?count=60&batch_id=default"
+
+# 2. Get batch status and match rate
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/status"
+
+# 3. Get audit scorecard with per-tier breakdown
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/scorecard"
+
+# 4. Ask the Settlement Q&A Agent
+curl -X POST "http://localhost:8000/api/v1/qa/ask" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Why did order 4521 settle with a delta?", "history": []}'
+
+# 5. Fetch records needing CA review
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/records?status=SUGGESTED"
+
+# 6. One-click approve a suggested match
+curl -X POST "http://localhost:8000/api/v1/reconciliation/records/<RECORD_ID>/approve" \
+  -H "Content-Type: application/json" \
+  -d '{"note": "Approved by CA"}'
+
+# 7. Download complete audit ledger CSV
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/export" \
+  -o recongrid_audit.csv
+```
+
+---
+
+## API Endpoints
+
+All routes are under `/api/v1`:
+
+| Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/bank/upload` | Upload a bank statement (CSV or PDF, optional password) |
-| `GET` | `/bank/transactions` | List ingested bank statement transactions |
-| `GET` | `/bank/password-hints` | Common Indian bank PDF password formula guide |
-| `POST` | `/razorpay/sync` | Manually trigger a settlement/refund pull from Razorpay |
-| `GET` | `/razorpay/settlements` | List stored Razorpay settlements |
-| `POST` | `/webhooks/razorpay` | Receive Razorpay webhooks (HMAC-verified) |
-| `GET` | `/reconciliation/{batch_id}/status` | Get summary cards metrics (match rate %, ₹ reconciled) |
-| `GET` | `/reconciliation/{batch_id}/scorecard` | Audit-grade scorecard metrics with separate Tier 0/1/2/3 breakdown |
-| `GET` | `/reconciliation/{batch_id}/records` | Filtered, paginated reconciliation records |
-| `POST` | `/reconciliation/records/{id}/approve` | One-click approve a suggested match |
-| `POST` | `/reconciliation/records/{id}/deny` | Move suggested match to exception |
-| `POST` | `/reconciliation/records/{id}/resolve-conflict` | Assign settlement to specific bank row & auto-displace competitors |
-| `GET` | `/reconciliation/{batch_id}/export` | Export the full ledger as CSV |
-| `POST` | `/qa/ask` | Ask the Settlement Q&A Agent a question |
-| `GET` | `/qa/history` | View past Q&A interactions (audit trail) |
-| `POST` | `/demo/seed` | Seed 50+ record synthetic batch across all tiers |
-| `POST` | `/demo/reset` | Clear test batch records |
-| `GET` | `/demo/sample-statement` | Download sample CSV for HDFC, ICICI, or SBI |
+| `POST` | `/bank/upload` | Upload CSV/PDF bank statement (supports password-protected PDFs) |
+| `GET` | `/bank/transactions` | List ingested bank statement rows |
+| `GET` | `/bank/password-hints` | Bank PDF password formats (SBI, HDFC, ICICI, Axis) |
+| `POST` | `/razorpay/sync` | Trigger settlement pull from Razorpay REST API |
+| `GET` | `/razorpay/settlements` | List stored settlements |
+| `POST` | `/webhooks/razorpay` | Ingest real-time webhooks (HMAC-SHA256 verified) |
+| `GET` | `/reconciliation/{batch_id}/status` | Summary metrics (match rate, ₹ reconciled) |
+| `GET` | `/reconciliation/{batch_id}/scorecard` | Audit scorecard with separate Tier 0/1/1.5/2/3 breakdown |
+| `GET` | `/reconciliation/{batch_id}/records` | Paginated records filtered by status or diagnostic code |
+| `POST` | `/reconciliation/records/{id}/approve` | Approve a suggested match |
+| `POST` | `/reconciliation/records/{id}/deny` | Move suggested match to unresolved exception |
+| `POST` | `/reconciliation/records/{id}/resolve-conflict` | Assign settlement and displace competing rows |
+| `GET` | `/reconciliation/{batch_id}/export` | Export audit ledger as CSV |
+| `POST` | `/qa/ask` | Ask question to the Settlement Q&A Agent |
+| `GET` | `/qa/history` | View Q&A query history |
+| `POST` | `/demo/seed` | Seed test batch |
+| `POST` | `/demo/reset` | Clear test records |
 
 ---
 
-## 📚 Documentation
+## Open Source & Contributing
 
-For deeper dives into specific areas:
+We are opening this project up to the community to make it the standard open-source reconciliation engine for businesses, developers, and finance teams.
 
-| Document | What You'll Learn |
-|---|---|
-| [Architecture](./docs/ARCHITECTURE.md) | Component design, DB schema, security boundaries, API reference |
-| [System Design](./docs/SYSTEM-DESIGN.md) | NFRs, sequence diagrams for every flow, failure/recovery matrix |
-| [Razorpay Integration](./docs/RAZORPAY-INTEGRATION.md) | Test-mode setup, API endpoints used, webhook verification code |
-| [Code Standards](./docs/CODE-STANDARDS.md) | Financial correctness rules, Zero-Float policy, testing bar |
-| [Workflow Rules](./docs/WORKFLOW-RULES.md) | Git branching, commit conventions, definition of done |
-| [UX Context](./docs/UX-CONTEXT.md) | User persona (Ramesh), wireframes, all UI states |
-| [Bug Log](./docs/BUGLOG.md) | Real bugs hit during the build — root causes, fixes, time lost |
-| [Security Policy](./SECURITY.md) | Supported versions, vulnerability reporting, response targets, and disclosure guidelines |
+If you want to contribute, please check [contribution.md](./contribution.md).
+
+### Roadmap & Ideas to Work On
+
+- **Bank Statement Parsers:** Add parser dialects for more Indian and international banks (Kotak, Punjab National Bank, Bank of Baroda, Federal Bank, Canara Bank).
+- **Payment Gateway Adapters:** Add modular connectors for Stripe, Cashfree, PayU, and Pine Labs following the `RazorpayClient` pattern.
+- **Accounting ERP Exports:** Direct export to Tally Prime XML, Zoho Books, or QuickBooks.
+- **Local LLM Support:** Add Ollama or vLLM backends for running the Q&A Agent entirely offline.
+- **Frontend Enhancements:** Add keyboard shortcuts (`A` to approve, `D` to deny), custom date filters, and dark mode toggles.
+
+### Core Development Rules
+
+1. **Zero-Float Policy:** Never use `float` for currency. Always use Python `Decimal` with explicit rounding (`ROUND_HALF_UP`).
+2. **Deterministic Financial Math:** The AI must never perform reconciliation matching or calculations. Financial decisions stay in deterministic code.
+3. **Guardrailed Output:** Any LLM explanation must be verified by `app/services/guardrail.py` to ensure zero hallucinated numbers.
 
 ---
 
+## Project Structure
+
+```
+ReconGrid-AI/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/         # Route handlers (bank, razorpay, reconciliation, qa, webhooks)
+│   │   ├── core/           # Config, database, security (HMAC), logging
+│   │   ├── models/         # SQLAlchemy async models
+│   │   ├── schemas/        # Pydantic v2 validation models
+│   │   ├── services/       # Ingestion, matching engine, diagnostics, Q&A agent
+│   │   └── utils/          # Decimal money helpers, CSV streaming, fuzzy string logic
+│   ├── scripts/            # Benchmarks, synthetic data seeder, scorecard CLI
+│   └── tests/              # Unit, integration, and messy fixture test suites
+├── frontend/
+│   ├── src/
+│   │   ├── app/            # Next.js App Router (dashboard page and layout)
+│   │   ├── components/     # Table, drawers, summary cards, Q&A slide-out
+│   │   └── lib/            # Typed API client, currency formatters
+├── docs/                   # Deep dives on architecture, system design, Razorpay setup
+├── sample_data/            # Sample statement fixtures (HDFC, ICICI, SBI)
+└── docker-compose.yml      # PostgreSQL 15 & Redis 7 services
+```
+
+---
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
+
+Copyright (c) 2026 Akshay Haldar.
