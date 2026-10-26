@@ -1,9 +1,27 @@
 import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus } from "./types";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000/api/v1";
+/**
+ * Resolves the API base URL depending on execution environment:
+ * - Server functions/SSR: Reads BACKEND_URL injected by Vercel service binding.
+ * - Browser / Client: Defaults to relative path "/api/v1" to route through Vercel's rewrites on the same domain without CORS.
+ * - Local fallback: http://127.0.0.1:8000/api/v1
+ */
+export function getApiBase(): string {
+  if (typeof window === "undefined") {
+    const backendUrl = process.env.BACKEND_URL;
+    if (backendUrl) {
+      return `${backendUrl.replace(/\/$/, "")}/api/v1`;
+    }
+    return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:8000/api/v1";
+  }
+  return process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "/api/v1";
+}
+
+export const API_BASE = getApiBase();
 
 export async function fetchStatus(batchId: string = "default"): Promise<ReconciliationStatus> {
-  const res = await fetch(`${API_BASE}/reconciliation/${batchId}/status`, { cache: "no-store" });
+  const base = getApiBase();
+  const res = await fetch(`${base}/reconciliation/${batchId}/status`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch reconciliation status");
   const json: ApiResponse<ReconciliationStatus> = await res.json();
   return json.data;
@@ -22,7 +40,7 @@ export async function fetchRecords(
     page: page.toString(),
     page_size: pageSize.toString(),
   });
-  const res = await fetch(`${API_BASE}/reconciliation/${batchId}/records?${params}`, {
+  const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/records?${params}`, {
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Failed to fetch reconciliation records");
@@ -31,7 +49,7 @@ export async function fetchRecords(
 }
 
 export async function approveRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
-  const res = await fetch(`${API_BASE}/reconciliation/records/${recordId}/approve`, {
+  const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
@@ -42,7 +60,7 @@ export async function approveRecord(recordId: string, note?: string): Promise<Re
 }
 
 export async function denyRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
-  const res = await fetch(`${API_BASE}/reconciliation/records/${recordId}/deny`, {
+  const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/deny`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
@@ -57,7 +75,7 @@ export async function resolveConflict(
   chosenSettlementId: string,
   note?: string
 ): Promise<ReconciliationRecordItem> {
-  const res = await fetch(`${API_BASE}/reconciliation/records/${recordId}/resolve-conflict`, {
+  const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/resolve-conflict`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chosen_settlement_id: chosenSettlementId, note }),
@@ -79,7 +97,7 @@ export async function uploadBankStatement(
     formData.append("password", password.trim());
   }
 
-  const res = await fetch(`${API_BASE}/bank/upload`, {
+  const res = await fetch(`${getApiBase()}/bank/upload`, {
     method: "POST",
     body: formData,
   });
@@ -100,7 +118,7 @@ export const uploadBankCsv = uploadBankStatement;
 
 export async function fetchBankPasswordHints(): Promise<Array<{ bank: string; pattern: string; example: string }>> {
   try {
-    const res = await fetch(`${API_BASE}/bank/password-hints`, { cache: "no-store" });
+    const res = await fetch(`${getApiBase()}/bank/password-hints`, { cache: "no-store" });
     if (!res.ok) return [];
     const json = await res.json();
     return json.data || [];
@@ -110,7 +128,7 @@ export async function fetchBankPasswordHints(): Promise<Array<{ bank: string; pa
 }
 
 export async function triggerRazorpaySync(count: number = 100, batchId: string = "default"): Promise<any> {
-  const res = await fetch(`${API_BASE}/razorpay/sync?batch_id=${batchId}`, {
+  const res = await fetch(`${getApiBase()}/razorpay/sync?batch_id=${batchId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ count }),
@@ -121,7 +139,7 @@ export async function triggerRazorpaySync(count: number = 100, batchId: string =
 }
 
 export async function seedDemoData(count: number = 60, batchId: string = "default"): Promise<any> {
-  const res = await fetch(`${API_BASE}/demo/seed?count=${count}&batch_id=${batchId}`, {
+  const res = await fetch(`${getApiBase()}/demo/seed?count=${count}&batch_id=${batchId}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to seed demo data");
@@ -130,7 +148,7 @@ export async function seedDemoData(count: number = 60, batchId: string = "defaul
 }
 
 export async function resetDemoData(batchId: string = "default"): Promise<any> {
-  const res = await fetch(`${API_BASE}/demo/reset?batch_id=${batchId}`, {
+  const res = await fetch(`${getApiBase()}/demo/reset?batch_id=${batchId}`, {
     method: "POST",
   });
   if (!res.ok) throw new Error("Failed to reset demo data");
@@ -144,7 +162,7 @@ export async function askQaAgent(
   contextRecordId?: string | null,
   history?: Array<{ role: string; content: string }>
 ): Promise<QaAskResponse> {
-  const res = await fetch(`${API_BASE}/qa/ask`, {
+  const res = await fetch(`${getApiBase()}/qa/ask`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
