@@ -125,13 +125,15 @@ class RazorpayClient:
             else:
                 updated_count += 1
 
-        # Trigger reconciliation on active bank batch
+        # Trigger reconciliation on active bank batch using all DB settlements
+        # (so reconciliation still runs even if the API returned no new records)
         bank_txs = await self.bank_repo.get_all_by_batch(batch_id)
+        all_db_settlements = list(await self.settlement_repo.get_all())
         reconciliation_triggered = False
-        if bank_txs and all_settlements:
+        if bank_txs and all_db_settlements:
             await self.engine.reconcile_batch(
                 bank_transactions=bank_txs,
-                settlements=all_settlements,
+                settlements=all_db_settlements,
                 batch_id=batch_id,
             )
             reconciliation_triggered = True

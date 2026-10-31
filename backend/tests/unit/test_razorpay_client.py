@@ -69,6 +69,8 @@ async def test_sync_settlements_pagination_and_upsert():
         (mock_setl2, False),  # updated
         (mock_setl3, True),   # newly inserted
     ])
+    # get_all now supplies the complete set used for reconciliation
+    client.settlement_repo.get_all = AsyncMock(return_value=[mock_setl1, mock_setl2, mock_setl3])
 
     bank_tx = BankTransaction(id="b1", amount=Decimal("49100.00"), date=datetime.now(UTC), row_hash="h1")
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[bank_tx])
@@ -105,3 +107,46 @@ async def test_sync_settlements_fetch_exception_handled():
             res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
             assert res.fetched_count == 0
             assert res.reconciliation_triggered is False
+
+
+@pytest.mark.asyncio
+async def test_sync_settlements_reconciles_existing_db_settlements_when_api_returns_empty():
+    """Regression: reconciliation must run against existing DB settlements even if API returns 0 new records."""
+    session = AsyncMock()
+    client = RazorpayClient(session)
+
+    existing_settlement = RazorpaySettlement(
+        id="s_existing",
+        settlement_id="setl_existing",
+        amount=Decimal("10000.00"),
+        settlement_created_at=datetime.now(UTC),
+    )
+    bank_tx = BankTransaction(
+        id="b1",
+        amount=Decimal("10000.00"),
+        date=datetime.now(UTC),
+        row_hash="h1",
+    )
+
+    # API returns no new items
+    client.settlement_repo.get_all = AsyncMock(return_value=[existing_settlement])
+    client.bank_repo.get_all_by_batch = AsyncMock(return_value=[bank_tx])
+    client.engine.reconcile_batch = AsyncMock()
+
+    with patch.object(settings, "RAZORPAY_KEY_ID", "rzp_live_testkey"):
+        with patch.object(
+            client,
+            "_fetch_settlements_page",
+            AsyncMock(return_value={"items": []}),
+        ):
+            res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
+
+    assert res.fetched_count == 0
+    assert res.newly_inserted == 0
+    assert res.updated_count == 0
+    assert res.reconciliation_triggered is True
+    client.engine.reconcile_batch.assert_awaited_once()
+    called_kwargs = client.engine.reconcile_batch.await_args.kwargs
+    assert called_kwargs["settlements"] == [existing_settlement]
+    assert called_kwargs["bank_transactions"] == [bank_tx]
+    assert called_kwargs["batch_id"] == "batch_test"
