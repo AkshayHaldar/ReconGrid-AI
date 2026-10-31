@@ -4,9 +4,11 @@ Provides natural language narration of already-computed reconciliation facts.
 Strictly auditable, deterministic retrieval, and guarded output.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 import httpx
+
 from app.core.config import settings
 from app.core.logging import logger
 from app.models.reconciliation_log import ReconciliationLog
@@ -165,7 +167,7 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
 def answer_project_overview_question(query: str, summary: dict | None = None) -> str | None:
     """Answers general architecture, KPI metric, and domain questions about ReconGrid AI."""
     q = query.lower().strip()
-    
+
     # Specific Conflict Resolution Guide
     if any(k in q for k in ("resolve conflict", "resolve conflicts", "how do i resolve conflict", "how to resolve conflict", "conflict resolution")):
         return (
@@ -381,7 +383,7 @@ class SettlementQaAgent:
     ) -> QaAskResponse:
         """Processes natural language CA query with multi-turn memory, deterministic retrieval, and guardrailed narration."""
         clean_query = query.strip()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # 0. Fetch live dashboard metrics for context
         summary_metrics = None
@@ -642,16 +644,16 @@ class SettlementQaAgent:
             f"- Bank Amount: {log.bank_transaction.amount if log.bank_transaction else 'N/A'}\n"
             f"- Settlement ID: {log.rzp_settlement.settlement_id if log.rzp_settlement else 'N/A'}\n"
         )
-        
+
         messages = [{"role": "system", "content": system_prompt}]
-        
+
         if history:
             for item in history[-6:]:  # last 6 turns
                 role = item.role if hasattr(item, "role") else item.get("role", "user")
                 content = item.content if hasattr(item, "content") else item.get("content", "")
                 if role in ("user", "assistant") and content:
                     messages.append({"role": role, "content": content})
-                    
+
         messages.append({"role": "user", "content": query})
 
         async with httpx.AsyncClient(timeout=15.0) as client:

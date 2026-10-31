@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal, Optional
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -10,7 +11,7 @@ class BankTransactionBase(BaseModel):
     date: datetime
     amount: Decimal = Field(..., decimal_places=2, max_digits=18)
     direction: Literal["CREDIT", "DEBIT"] = "CREDIT"
-    utr: Optional[str] = None
+    utr: str | None = None
     description: str = ""
     raw_csv_row: dict[str, Any] = Field(default_factory=dict)
 

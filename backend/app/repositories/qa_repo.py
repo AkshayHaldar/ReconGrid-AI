@@ -1,13 +1,15 @@
 """QA repository for deterministic fact lookup and audit interaction logging."""
 
-from typing import Sequence
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
 from app.models.bank_transaction import BankTransaction
+from app.models.qa_interaction_log import QaInteractionLog
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
-from app.models.qa_interaction_log import QaInteractionLog
 
 
 class QaRepository:
@@ -24,7 +26,7 @@ class QaRepository:
         import re
         stop_words = {"WHY", "DID", "NOT", "SETTLE", "CORRECTLY", "HAVE", "FEE", "DEDUCTION", "WHAT", "HOW", "ABOUT", "THE", "THIS", "TRANSACTION", "RECORD", "SHOW", "WHERE", "ORDER", "TXN"}
         raw_tokens = re.findall(r"[A-Za-z0-9_\-#]{2,}", clean_term)
-        
+
         # Prioritize tokens that contain digits or specific gateway prefixes
         specific_tokens = [
             t.lstrip("#") for t in raw_tokens
@@ -47,7 +49,7 @@ class QaRepository:
                 )
                 .where(
                     RazorpaySettlement.settlement_id.ilike(f"%{st}%"),
-                    ReconciliationLog.superseded == False,  # noqa: E712
+                    ReconciliationLog.superseded == False,
                 )
             )
             res1 = await self.session.execute(stmt1)
@@ -69,7 +71,7 @@ class QaRepository:
                     | (BankTransaction.description.ilike(f"%{st}%"))
                     | (RazorpaySettlement.utr.ilike(f"%{st}%"))
                     | (ReconciliationLog.diagnostic_note.ilike(f"%{st}%")),
-                    ReconciliationLog.superseded == False,  # noqa: E712
+                    ReconciliationLog.superseded == False,
                 )
             )
             res2 = await self.session.execute(stmt2)

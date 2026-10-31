@@ -3,19 +3,19 @@
 age-based eligibility window, and retry-on-sync transitions.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.config import settings
+
 from app.main import app
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, to_decimal
+from app.utils.money import calculate_standard_fees
 
 
 @pytest.mark.asyncio
@@ -24,7 +24,7 @@ async def test_pending_settlement_within_window_becomes_pending(db_session: Asyn
 
     must be classified as PENDING_SETTLEMENT_DATA (not EXCEPTION).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
@@ -67,7 +67,7 @@ async def test_pending_row_transitions_to_matched_on_later_sync(db_session: Asyn
 
     when a subsequent sync brings the missing settlement, writing an append-only log.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
@@ -131,7 +131,7 @@ async def test_pending_row_transitions_to_exception_after_window_expires(db_sess
 
     the recency window without a settlement transitions to EXCEPTION on next sync pass.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
@@ -178,7 +178,7 @@ async def test_older_row_goes_straight_to_exception(db_session: AsyncSession):
 
     (e.g. 8 days ago) goes straight to EXCEPTION without ever being PENDING_SETTLEMENT_DATA.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
@@ -211,7 +211,7 @@ async def test_api_filter_by_pending_settlement_data(db_session: AsyncSession):
 
     filters and returns pending records.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 

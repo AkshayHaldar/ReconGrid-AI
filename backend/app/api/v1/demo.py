@@ -2,21 +2,22 @@
 
 import csv
 import io
-import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.core.database import get_db
+from app.models.bank_transaction import BankTransaction
+from app.models.razorpay_settlement import RazorpaySettlement
+from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
-from sqlalchemy import delete
-from app.models.bank_transaction import BankTransaction
-from app.models.reconciliation_log import ReconciliationLog
-from app.models.razorpay_settlement import RazorpaySettlement
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import calculate_standard_fees, to_decimal
 
@@ -73,7 +74,7 @@ async def seed_demo_dataset(
     recon_repo = ReconciliationRepository(db)
     engine = ReconciliationEngine(recon_repo)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 1. Generate Razorpay settlements using standard 2% MDR + 18% GST fee formula
     s1_fee, s1_tax, s1_net = calculate_standard_fees(Decimal("100000.00"))
@@ -490,7 +491,7 @@ async def download_sample_csv(
     """Generates a downloadable sample bank statement CSV for live testing (HDFC / ICICI / SBI)."""
     output = io.StringIO()
     writer = csv.writer(output)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if bank.upper() == "ICICI":
         writer.writerow(["Transaction Date", "Transaction Reference Number", "Transaction Remarks", "Deposit Amount (INR )", "Withdrawal Amount (INR )"])

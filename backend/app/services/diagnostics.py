@@ -7,8 +7,9 @@ Evaluates monetary deltas deterministically against:
 4. Debit Reversals / Chargebacks
 """
 
-from decimal import Decimal, ROUND_HALF_UP
-from typing import NamedTuple, Optional
+from decimal import ROUND_HALF_UP, Decimal
+from typing import NamedTuple
+
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement

@@ -3,6 +3,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
+
 from app.core.config import Settings, settings
 from app.main import app
 

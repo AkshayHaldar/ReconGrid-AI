@@ -1,23 +1,21 @@
 """Unit tests for the repository query layer (Bank, Settlement, Reconciliation, QA)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.bank_repo import BankRepository
-from app.repositories.settlement_repo import SettlementRepository
-from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.qa_repo import QaRepository
+from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 
 
 @pytest.mark.asyncio
 async def test_bank_repository_crud(db_session: AsyncSession):
     repo = BankRepository(db_session)
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Upsert new transaction
     tx_data = {
@@ -64,7 +62,7 @@ async def test_bank_repository_crud(db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_settlement_repository_crud(db_session: AsyncSession):
     repo = SettlementRepository(db_session)
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     setl_data = {
         "settlement_id": "setl_repo_test_001",
@@ -112,7 +110,7 @@ async def test_reconciliation_repository_ledger_and_metrics(db_session: AsyncSes
     setl_repo = SettlementRepository(db_session)
     recon_repo = ReconciliationRepository(db_session)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # 1. Create bank tx & settlement
     bank_tx, _ = await bank_repo.upsert_transaction({
@@ -186,7 +184,7 @@ async def test_qa_repository_and_retrieval(db_session: AsyncSession):
     recon_repo = ReconciliationRepository(db_session)
     qa_repo = QaRepository(db_session)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     bank_tx, _ = await bank_repo.upsert_transaction({
         "batch_id": "batch_qa_test",

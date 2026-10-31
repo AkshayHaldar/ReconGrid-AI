@@ -1,6 +1,6 @@
 """Unit tests for fuzzy descriptor matching."""
 
-from app.utils.fuzzy import compute_string_similarity, is_fuzzy_match, normalize_descriptor
+from app.utils.fuzzy import is_fuzzy_match, normalize_descriptor
 
 
 def test_normalize_descriptor():

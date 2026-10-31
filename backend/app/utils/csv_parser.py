@@ -2,17 +2,16 @@
 
 import csv
 import hashlib
-import io
 import re
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Iterator, Literal, Optional, Tuple
+from typing import Any, Literal
 
 from app.core.logging import logger
 from app.utils.money import (
     UnscaledPaiseAmountError,
     parse_amount_and_direction,
-    to_decimal,
     validate_raw_amount_format,
 )
 
@@ -161,7 +160,7 @@ def parse_flexible_date(date_str: str) -> datetime:
     for fmt in date_formats:
         try:
             dt = datetime.strptime(clean_date, fmt)
-            return dt.replace(tzinfo=timezone.utc)
+            return dt.replace(tzinfo=UTC)
         except ValueError:
             continue
 
@@ -172,7 +171,7 @@ def parse_flexible_date(date_str: str) -> datetime:
         for fmt in ["%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d.%m.%Y", "%d-%m-%y", "%d/%m/%y"]:
             try:
                 dt = datetime.strptime(sub_date, fmt)
-                return dt.replace(tzinfo=timezone.utc)
+                return dt.replace(tzinfo=UTC)
             except ValueError:
                 continue
 
@@ -240,7 +239,7 @@ class BankCsvParser:
         return mapping
 
     @classmethod
-    def _find_header_and_data_lines(cls, lines: list[str]) -> Tuple[list[str], list[str]]:
+    def _find_header_and_data_lines(cls, lines: list[str]) -> tuple[list[str], list[str]]:
         """Scans lines to detect and skip preamble metadata, returning (header_row, data_lines)."""
         best_header_idx = -1
         best_header_fields: list[str] = []
@@ -308,7 +307,7 @@ class BankCsvParser:
                 # Extract Date
                 date_col = header_map.get("date")
                 raw_date = str(row.get(date_col, "")).strip() if date_col else ""
-                parsed_date = parse_flexible_date(raw_date) if raw_date else datetime.now(timezone.utc)
+                parsed_date = parse_flexible_date(raw_date) if raw_date else datetime.now(UTC)
 
                 # Extract Description / Narration
                 desc_col = header_map.get("narration")
@@ -387,7 +386,7 @@ class BankCsvParser:
                 logger.warning("csv_row_value_error", row_index=row_idx, error=str(ex))
                 yield {
                     "row_index": row_idx,
-                    "validation_error": f"Row {row_idx}: {str(ex)}",
+                    "validation_error": f"Row {row_idx}: {ex!s}",
                     "raw_csv_row": row,
                 }
                 continue
@@ -395,7 +394,7 @@ class BankCsvParser:
                 logger.error("csv_row_unexpected_error", row_index=row_idx, error=str(ex))
                 yield {
                     "row_index": row_idx,
-                    "validation_error": f"Row {row_idx}: Unexpected error parsing row: {str(ex)}",
+                    "validation_error": f"Row {row_idx}: Unexpected error parsing row: {ex!s}",
                     "raw_csv_row": row,
                 }
                 continue

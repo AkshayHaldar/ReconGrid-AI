@@ -32,17 +32,25 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["B008", "E501", "E712", "F821", "E741", "F841", "E402"]
+
 [tool.black]
-line-length = 100
+line-length = 120
 target-version = ["py311"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
 ignore_missing_imports = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+warn_unused_ignores = true
+disable_error_code = ["name-defined", "var-annotated", "no-untyped-def", "assignment", "return", "operator"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -1,9 +1,10 @@
 """Unit tests for BankPdfParser and PDF Ingestion."""
 
 import io
-from decimal import Decimal
-import pytest
+
 import pypdf
+import pytest
+
 from app.utils.pdf_parser import (
     BANK_PASSWORD_FORMATS,
     BankPdfParser,
@@ -17,10 +18,10 @@ def create_mock_pdf(text_content: str, password: str | None = None) -> bytes:
     # Create a basic valid PDF using pypdf
     writer = pypdf.PdfWriter()
     page = writer.add_blank_page(width=612, height=792)
-    
+
     if password:
         writer.encrypt(user_password=password, owner_password=password + "_owner")
-    
+
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()

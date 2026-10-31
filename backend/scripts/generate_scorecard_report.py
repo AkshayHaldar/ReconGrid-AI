@@ -6,12 +6,12 @@ and writes the regenerable docs/SCORECARD.md report.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 import json
-from pathlib import Path
 import sys
 import time
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
 
 # Ensure backend root is on sys.path
 backend_dir = Path(__file__).resolve().parent.parent
@@ -23,7 +23,7 @@ from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, format_inr, to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 
 async def run_scorecard_generation():
@@ -35,10 +35,11 @@ async def run_scorecard_generation():
         fixture_data = json.load(f)
 
     batch_id = "golden_scorecard_batch"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     async with async_session_factory() as session:
         from sqlalchemy import delete
+
         from app.models.reconciliation_log import ReconciliationLog
         await session.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
         await session.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
@@ -205,7 +206,7 @@ $$\\sum (\\text{{Tier 0}} + \\text{{Tier 1}} + \\text{{Tier 2}} + \\text{{Tier 3
         amt_str = f"₹ {exc['amount']:,.2f}"
         md_content += f"| `{exc['bank_transaction_id'][:8]}...` | {dt_str} | {amt_str} | `{exc['reason_code']}` | {exc['description']} | {exc['diagnostic_note']} |\n"
 
-    md_content += f"\n*Report generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')} by `scripts/generate_scorecard_report.py`.*\n"
+    md_content += f"\n*Report generated on {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S UTC')} by `scripts/generate_scorecard_report.py`.*\n"
 
     with open(scorecard_path, "w", encoding="utf-8") as f:
         f.write(md_content)

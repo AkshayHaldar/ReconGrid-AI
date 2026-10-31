@@ -1,30 +1,28 @@
 """Razorpay REST Client with cursor pagination, tenacity backoff, and idempotency."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any
+
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.razorpay import RazorpaySyncResponse
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import paise_to_rupees, to_decimal
+from app.utils.money import paise_to_rupees
 
 
 class RazorpayFetchError(Exception):
     """Base exception for Razorpay fetch errors."""
-    pass
 
 
 class RazorpayFetchExhausted(Exception):
     """Raised when maximum retries are exceeded."""
-    pass
 
 
 class RazorpayClient:
@@ -93,9 +91,9 @@ class RazorpayClient:
 
                             created_ts = item.get("created_at")
                             dt = (
-                                datetime.fromtimestamp(created_ts, timezone.utc)
+                                datetime.fromtimestamp(created_ts, UTC)
                                 if created_ts
-                                else datetime.now(timezone.utc)
+                                else datetime.now(UTC)
                             )
 
                             settlement_records.append({

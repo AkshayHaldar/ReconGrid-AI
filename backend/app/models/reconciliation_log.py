@@ -1,10 +1,12 @@
 """Immutable Append-Only ReconciliationLog ORM Model."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Optional
+
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 
@@ -45,7 +47,7 @@ class ReconciliationLog(Base, UUIDMixin, TimestampMixin):
 
     matched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     # Immutability tracking: true when a newer record supersedes this decision

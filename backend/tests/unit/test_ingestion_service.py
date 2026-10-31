@@ -1,10 +1,11 @@
 """Unit tests for Bank Ingestion Service."""
 
 import io
-from decimal import Decimal
-from fastapi import UploadFile
+
 import pytest
+from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.ingestion import IngestionService
 
 
@@ -13,10 +14,10 @@ async def test_ingestion_service_hdfc_csv(db_session: AsyncSession):
     service = IngestionService(db_session)
 
     csv_content = (
-        "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
-        "24/08/2026,CMS002938491801,CMS/002938491801/HDFC/RAZORPAY,98200.00,0.00\n"
-        "24/08/2026,CMS002938491802,CMS/002938491802/HDFC/RAZORPAY,45000.00,0.00\n"
-    ).encode("utf-8")
+        b"Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
+        b"24/08/2026,CMS002938491801,CMS/002938491801/HDFC/RAZORPAY,98200.00,0.00\n"
+        b"24/08/2026,CMS002938491802,CMS/002938491802/HDFC/RAZORPAY,45000.00,0.00\n"
+    )
 
     file = UploadFile(
         filename="hdfc_statement.csv",

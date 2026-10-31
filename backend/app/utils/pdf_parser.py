@@ -3,9 +3,8 @@
 import base64
 import io
 import re
-from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Iterator, List, Optional
+from typing import Any
 
 import httpx
 import pdfplumber
@@ -63,12 +62,10 @@ BANK_PASSWORD_FORMATS = [
 
 class PdfPasswordRequiredError(Exception):
     """Raised when a PDF is encrypted and requires a password to open."""
-    pass
 
 
 class PdfInvalidPasswordError(Exception):
     """Raised when the provided password fails to decrypt the PDF."""
-    pass
 
 
 class BankPdfParser:
@@ -88,20 +85,20 @@ class BankPdfParser:
     )
 
     @classmethod
-    def decrypt_pdf_bytes(cls, pdf_bytes: bytes, password: Optional[str] = None) -> bytes:
+    def decrypt_pdf_bytes(cls, pdf_bytes: bytes, password: str | None = None) -> bytes:
         """Attempts to decrypt PDF bytes using PyPDF and returns decrypted PDF bytes."""
         input_stream = io.BytesIO(pdf_bytes)
         try:
             reader = pypdf.PdfReader(input_stream)
         except Exception as e:
-            raise ValueError(f"Failed to read PDF file: {str(e)}")
+            raise ValueError(f"Failed to read PDF file: {e!s}")
 
         if not reader.is_encrypted:
             return pdf_bytes
 
         # PDF is encrypted. Try empty password first if none provided
         pwd = password.strip() if password else ""
-        
+
         # Check if empty string can decrypt
         if not pwd:
             try:
@@ -129,7 +126,7 @@ class BankPdfParser:
         except PdfInvalidPasswordError:
             raise
         except Exception as ex:
-            raise PdfInvalidPasswordError(f"Password decryption failed: {str(ex)}")
+            raise PdfInvalidPasswordError(f"Password decryption failed: {ex!s}")
 
         # Create unencrypted PDF bytes in memory
         out_stream = io.BytesIO()
@@ -143,12 +140,12 @@ class BankPdfParser:
     def parse_pdf(
         cls,
         pdf_bytes: bytes,
-        password: Optional[str] = None,
-    ) -> List[dict[str, Any]]:
+        password: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Parses multi-page PDF bank statement, handling decryption and tables/text."""
         decrypted_bytes = cls.decrypt_pdf_bytes(pdf_bytes, password=password)
 
-        parsed_rows: List[dict[str, Any]] = []
+        parsed_rows: list[dict[str, Any]] = []
 
         try:
             with pdfplumber.open(io.BytesIO(decrypted_bytes)) as pdf:
@@ -176,14 +173,14 @@ class BankPdfParser:
             raise
         except Exception as e:
             logger.error("pdf_parse_error", error=str(e))
-            raise ValueError(f"Failed to extract bank transactions from PDF: {str(e)}")
+            raise ValueError(f"Failed to extract bank transactions from PDF: {e!s}")
 
         return parsed_rows
 
     @classmethod
-    def _extract_tables_from_page(cls, page: pdfplumber.page.Page, page_idx: int) -> List[dict[str, Any]]:
+    def _extract_tables_from_page(cls, page: pdfplumber.page.Page, page_idx: int) -> list[dict[str, Any]]:
         """Extracts and normalizes transactions from tables on a PDF page."""
-        results: List[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         tables = page.extract_tables()
         if not tables:
             return results
@@ -278,7 +275,7 @@ class BankPdfParser:
         return results
 
     @classmethod
-    def _map_table_headers(cls, headers: List[str]) -> dict[str, int]:
+    def _map_table_headers(cls, headers: list[str]) -> dict[str, int]:
         """Maps column indices to canonical fields based on regex matching."""
         mapping: dict[str, int] = {}
         for idx, text in enumerate(headers):
@@ -299,9 +296,9 @@ class BankPdfParser:
         return mapping
 
     @classmethod
-    def _extract_from_text_lines(cls, text: str, page_idx: int) -> List[dict[str, Any]]:
+    def _extract_from_text_lines(cls, text: str, page_idx: int) -> list[dict[str, Any]]:
         """Fallback line-based parser using regex for non-standard or borderless PDF layouts."""
-        results: List[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         lines = text.splitlines()
 
         for line in lines:
@@ -379,9 +376,9 @@ class BankPdfParser:
         return results
 
     @classmethod
-    def _extract_via_ocr(cls, pdf: pdfplumber.PDF) -> List[dict[str, Any]]:
+    def _extract_via_ocr(cls, pdf: pdfplumber.PDF) -> list[dict[str, Any]]:
         """Extracts transactions from scanned PDF pages via LLM Vision / OCR."""
-        results: List[dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         api_key = settings.GEMINI_API_KEY or settings.OCR_API_KEY or settings.LLM_API_KEY
         if not api_key:
             return results

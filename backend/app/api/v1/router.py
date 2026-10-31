@@ -1,6 +1,7 @@
 """API v1 router aggregator."""
 
 from fastapi import APIRouter
+
 from app.api.v1.bank import router as bank_router
 from app.api.v1.demo import router as demo_router
 from app.api.v1.qa import router as qa_router

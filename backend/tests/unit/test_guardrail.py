@@ -1,7 +1,8 @@
 """Unit tests for the Settlement Q&A Numeric Token Guardrail."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
@@ -22,7 +23,7 @@ def test_guardrail_passes_valid_narration():
     bank = BankTransaction(
         id="bank_1",
         row_hash="hash_1",
-        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        date=datetime(2026, 8, 24, tzinfo=UTC),
         amount=Decimal("49100.00"),
         direction="CREDIT",
         utr="CMS002938491805",
@@ -63,7 +64,7 @@ def test_guardrail_rejects_hallucinated_numbers():
     bank = BankTransaction(
         id="bank_1",
         row_hash="hash_1",
-        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        date=datetime(2026, 8, 24, tzinfo=UTC),
         amount=Decimal("49100.00"),
         direction="CREDIT",
         utr="CMS002938491805",
@@ -105,7 +106,7 @@ def test_guardrail_rejects_arbitrary_invented_digit_tokens():
     bank = BankTransaction(
         id="bank_test_digits",
         row_hash="hash_digits",
-        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        date=datetime(2026, 8, 24, tzinfo=UTC),
         amount=Decimal("10000.00"),
         direction="CREDIT",
         utr="CMS112233445566",
@@ -139,7 +140,7 @@ def test_guardrail_word_based_number_limitation_documentation():
     bank = BankTransaction(
         id="bank_test_words",
         row_hash="hash_words",
-        date=datetime(2026, 8, 24, tzinfo=timezone.utc),
+        date=datetime(2026, 8, 24, tzinfo=UTC),
         amount=Decimal("10000.00"),
         direction="CREDIT",
         utr="CMS112233445577",

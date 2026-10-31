@@ -1,8 +1,14 @@
 """Unit tests for strict Decimal financial utilities."""
 
 from decimal import Decimal
-import pytest
-from app.utils.money import format_inr, is_amount_matching, paise_to_rupees, rupees_to_paise, to_decimal
+
+from app.utils.money import (
+    format_inr,
+    is_amount_matching,
+    paise_to_rupees,
+    rupees_to_paise,
+    to_decimal,
+)
 
 
 def test_to_decimal_precision():

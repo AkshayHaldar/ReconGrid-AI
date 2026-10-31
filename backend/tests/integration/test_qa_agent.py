@@ -1,15 +1,10 @@
 """Integration tests for Settlement Q&A Agent."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.main import app
-from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
-from app.repositories.reconciliation_repo import ReconciliationRepository
 
 
 @pytest.mark.asyncio

@@ -1,16 +1,18 @@
 """Integration test running the full reconciliation pipeline on the 50+ golden synthetic dataset."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, format_inr, to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 
 @pytest.mark.asyncio
@@ -21,7 +23,7 @@ async def test_golden_synthetic_batch(db_session: AsyncSession):
     with open(fixture_path, "r", encoding="utf-8") as f:
         fixture_data = json.load(f)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 

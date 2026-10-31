@@ -1,10 +1,12 @@
 """Unit tests for RazorpayClient pagination, error handling, retries, and batch sync."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
 import pytest
+
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
@@ -58,9 +60,9 @@ async def test_sync_settlements_pagination_and_upsert():
         {"id": "setl_3", "amount": 10000000, "fees": 0, "tax": 0, "utr": "CMS3", "created_at": None, "status": "processed"},
     ]
 
-    mock_setl1 = RazorpaySettlement(id="s1", settlement_id="setl_1", amount=Decimal("49100.00"), settlement_created_at=datetime.now(timezone.utc))
-    mock_setl2 = RazorpaySettlement(id="s2", settlement_id="setl_2", amount=Decimal("98200.00"), settlement_created_at=datetime.now(timezone.utc))
-    mock_setl3 = RazorpaySettlement(id="s3", settlement_id="setl_3", amount=Decimal("100000.00"), settlement_created_at=datetime.now(timezone.utc))
+    mock_setl1 = RazorpaySettlement(id="s1", settlement_id="setl_1", amount=Decimal("49100.00"), settlement_created_at=datetime.now(UTC))
+    mock_setl2 = RazorpaySettlement(id="s2", settlement_id="setl_2", amount=Decimal("98200.00"), settlement_created_at=datetime.now(UTC))
+    mock_setl3 = RazorpaySettlement(id="s3", settlement_id="setl_3", amount=Decimal("100000.00"), settlement_created_at=datetime.now(UTC))
 
     client.settlement_repo.upsert_settlement = AsyncMock(side_effect=[
         (mock_setl1, True),   # newly inserted
@@ -68,7 +70,7 @@ async def test_sync_settlements_pagination_and_upsert():
         (mock_setl3, True),   # newly inserted
     ])
 
-    bank_tx = BankTransaction(id="b1", amount=Decimal("49100.00"), date=datetime.now(timezone.utc), row_hash="h1")
+    bank_tx = BankTransaction(id="b1", amount=Decimal("49100.00"), date=datetime.now(UTC), row_hash="h1")
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[bank_tx])
     client.engine.reconcile_batch = AsyncMock()
 

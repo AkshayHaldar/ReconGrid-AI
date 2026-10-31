@@ -1,9 +1,11 @@
 """Unit tests for Settlement Q&A Agent and template fallback generation."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
@@ -12,7 +14,7 @@ from app.services.settlement_qa import SettlementQaAgent, generate_template_fall
 
 
 def test_generate_template_fallback_branches():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bank = BankTransaction(
         id="bank_1",
         row_hash="h1",
@@ -216,7 +218,7 @@ async def test_qa_agent_not_found():
 
 @pytest.mark.asyncio
 async def test_qa_agent_with_llm_approved():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bank = BankTransaction(
         id="b1",
         amount=Decimal("49100.00"),
@@ -268,7 +270,7 @@ async def test_qa_agent_with_llm_approved():
 
 @pytest.mark.asyncio
 async def test_qa_agent_with_llm_hallucination_rejected():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bank = BankTransaction(
         id="b1",
         amount=Decimal("49100.00"),
@@ -309,7 +311,7 @@ async def test_qa_agent_with_llm_hallucination_rejected():
 
 @pytest.mark.asyncio
 async def test_qa_agent_with_llm_api_failure():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bank = BankTransaction(
         id="b1",
         amount=Decimal("49100.00"),
@@ -335,20 +337,19 @@ async def test_qa_agent_with_llm_api_failure():
     repo.find_reconciliation_record.return_value = log
     agent = SettlementQaAgent(repo)
 
-    with patch.object(settings, "LLM_API_KEY", "test_key"):
-        with patch.object(
-            agent,
-            "_call_llm_narration",
-            AsyncMock(side_effect=RuntimeError("LLM API 500 Internal Error")),
-        ):
-            res = await agent.answer_query("order #123456")
-            assert "unresolved EXCEPTION" in res.answer
+    with patch.object(settings, "LLM_API_KEY", "test_key"), patch.object(
+        agent,
+        "_call_llm_narration",
+        AsyncMock(side_effect=RuntimeError("LLM API 500 Internal Error")),
+    ):
+        res = await agent.answer_query("order #123456")
+        assert "unresolved EXCEPTION" in res.answer
 
 
 @pytest.mark.asyncio
 async def test_call_llm_narration_live_mock():
     agent = SettlementQaAgent(AsyncMock())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     log = ReconciliationLog(
         id="l1",
         bank_tx_id="b1",
@@ -422,7 +423,7 @@ async def test_qa_general_query_not_hijacked_by_active_context_record():
 @pytest.mark.asyncio
 async def test_qa_followup_verification_guidance_for_conflict():
     """Ensures 'how i verfie' on a conflict record returns actionable conflict resolution steps."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     bank = BankTransaction(id="b1", amount=Decimal("50000.00"), date=now, direction="CREDIT", utr="CMS123456", description="CMS/123", row_hash="h1")
     rzp = RazorpaySettlement(id="r1", settlement_id="setl_Kjs9283jkd911", amount=Decimal("50000.00"), gross_amount=Decimal("50000.00"), fees=Decimal("0.00"), tax=Decimal("0.00"), utr="CMS123456", settlement_created_at=now)
     log_conflict = ReconciliationLog(

@@ -1,17 +1,18 @@
 """Unit tests ensuring all Decimal monetary fields in Pydantic schemas explicitly reject raw floats."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 import pytest
 from pydantic import ValidationError
 
 from app.schemas.bank import BankTransactionBase, BankTransactionCreate, BankTransactionResponse
-from app.schemas.razorpay import RazorpaySettlementBase, RazorpaySettlementCreate, RazorpaySettlementResponse
+from app.schemas.razorpay import RazorpaySettlementBase
 from app.schemas.reconciliation import ReconciliationRecordItem, ReconciliationStatusResponse
 
 
 def test_reconciliation_record_item_rejects_float_bank_amount():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     with pytest.raises(ValidationError) as exc_info:
         ReconciliationRecordItem(
             id="rec_1",
@@ -30,7 +31,7 @@ def test_reconciliation_record_item_rejects_float_bank_amount():
 
 
 def test_reconciliation_record_item_rejects_float_optional_fields():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base_kwargs = dict(
         id="rec_1",
         batch_id="batch_1",
@@ -67,7 +68,7 @@ def test_reconciliation_record_item_rejects_float_optional_fields():
 
 
 def test_reconciliation_record_item_accepts_valid_types():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Decimal
     item1 = ReconciliationRecordItem(
         id="rec_1",
@@ -158,7 +159,7 @@ def test_reconciliation_status_response_rejects_floats():
 
 
 def test_bank_transaction_schemas_reject_floats():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # BankTransactionBase float rejection
     with pytest.raises(ValidationError):
         BankTransactionBase(date=now, amount=1234.56)
@@ -188,7 +189,7 @@ def test_bank_transaction_schemas_reject_floats():
 
 
 def test_razorpay_settlement_schemas_reject_floats():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # RazorpaySettlementBase float rejection on amount
     with pytest.raises(ValidationError):
         RazorpaySettlementBase(

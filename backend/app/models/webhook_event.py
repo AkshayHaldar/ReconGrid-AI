@@ -1,9 +1,11 @@
 """Webhook Event ORM Model for Idempotency."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-from sqlalchemy import DateTime, JSON, String
+
+from sqlalchemy import JSON, DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
+
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 
@@ -22,6 +24,6 @@ class ProcessedWebhookEvent(Base, UUIDMixin, TimestampMixin):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )

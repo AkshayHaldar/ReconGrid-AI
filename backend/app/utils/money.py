@@ -4,15 +4,14 @@ Zero float usage permitted across money handling.
 """
 
 import re
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from typing import Any, Optional, Tuple, Union
-
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from typing import Any
 
 # Regex to strip non-numeric currency noise while preserving negative signs and decimals
 CURRENCY_CLEAN_REGEX = re.compile(r"[^\d.\-()+]", re.IGNORECASE)
 
 
-def to_decimal(val: Union[str, int, float, Decimal, None]) -> Decimal:
+def to_decimal(val: str | float | Decimal | None) -> Decimal:
     """Converts a value safely to Decimal without intermediate float precision loss.
 
     Handles Indian currency notation (₹, INR, Rs., Cr/Dr suffixes, commas, parentheses).
@@ -54,7 +53,7 @@ def to_decimal(val: Union[str, int, float, Decimal, None]) -> Decimal:
             .replace("dr", "")
             .replace(",", "")
             .replace(" ", "")  # NBSP
-            .replace("​", "")  # Zero-width space
+            .replace("\u200b", "")  # Zero-width space
             .strip()
         )
 
@@ -72,7 +71,7 @@ def to_decimal(val: Union[str, int, float, Decimal, None]) -> Decimal:
     raise TypeError(f"Cannot convert type {type(val)} to Decimal")
 
 
-def parse_amount_and_direction(raw_val: Any) -> Tuple[Decimal, str]:
+def parse_amount_and_direction(raw_val: Any) -> tuple[Decimal, str]:
     """Parses raw amount string and extracts absolute Decimal amount and direction (CREDIT/DEBIT)."""
     if raw_val is None:
         return Decimal("0.00"), "CREDIT"
@@ -94,16 +93,16 @@ def parse_amount_and_direction(raw_val: Any) -> Tuple[Decimal, str]:
     return amount, direction
 
 
-def paise_to_rupees(paise: Union[int, str, Decimal]) -> Decimal:
+def paise_to_rupees(paise: int | str | Decimal) -> Decimal:
     """Converts Razorpay paise (integer) to INR Rupees Decimal with 2 decimal places."""
     dec_paise = to_decimal(paise)
-    return (dec_paise / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return (dec_paise / Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def rupees_to_paise(rupees: Union[str, Decimal, int]) -> int:
+def rupees_to_paise(rupees: str | Decimal | int) -> int:
     """Converts INR Rupees Decimal to Razorpay paise integer."""
     dec_rupees = to_decimal(rupees)
-    return int((dec_rupees * Decimal("100")).to_integral_value(rounding=ROUND_HALF_UP))
+    return int((dec_rupees * Decimal(100)).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 def is_amount_matching(
@@ -143,12 +142,11 @@ def format_inr(amount: Decimal) -> str:
 
 class UnscaledPaiseAmountError(ValueError):
     """Raised when an amount string appears to be unscaled paise instead of INR rupees."""
-    pass
 
 
 def validate_raw_amount_format(raw_val: Any, col_name: str = "", row_idx: int = 1) -> None:
     """Validates that a raw amount string is not an unscaled integer paise amount.
-    
+
     Heuristic:
     - If raw value is an unscaled integer (no decimal point) AND >= 100,000 OR column name indicates paise,
       it is rejected as unscaled paise.
@@ -191,17 +189,17 @@ def validate_raw_amount_format(raw_val: Any, col_name: str = "", row_idx: int = 
 
 
 def calculate_standard_fees(
-    gross_amount: Union[str, int, float, Decimal],
+    gross_amount: str | float | Decimal,
     mdr_rate: Decimal = Decimal("0.02"),
     gst_rate: Decimal = Decimal("0.18"),
 ) -> tuple[Decimal, Decimal, Decimal]:
     """Calculates standard Razorpay fees (2% MDR + 18% GST on MDR) and net settlement payout.
-    
+
     Formula:
         fee = (gross * 0.02) rounded to 2 decimal places (ROUND_HALF_UP)
         gst = (fee * 0.18) rounded to 2 decimal places (ROUND_HALF_UP)
         net = gross - fee - gst
-    
+
     Returns: (fees, gst_tax, net_amount) as quantized Decimals.
     """
     gross = to_decimal(gross_amount)

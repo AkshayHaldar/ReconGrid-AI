@@ -2,17 +2,14 @@
 
 import io
 from decimal import Decimal
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.main import app
-from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpaySettlement
-from app.repositories.reconciliation_repo import ReconciliationRepository
-from app.services.diagnostics import DiagnosticsService
 from app.services.ingestion import IngestionService
-from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, to_decimal
+from app.utils.money import calculate_standard_fees
 
 
 @pytest.mark.asyncio
@@ -25,11 +22,11 @@ async def test_paise_row_ingestion_validation_and_batch_resilience(db_session: A
 
     # CSV with 1 legitimate row (₹5,000.00), 1 unscaled paise row (500000), and 1 legitimate large row (₹5,00,000.00)
     csv_content = (
-        "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
-        "24/08/2026,CMS002938491801,CMS/002938491801/HDFC/LEGIT_1,5000.00,0.00\n"
-        "24/08/2026,CMS002938491802,CMS/002938491802/HDFC/PAISE_ROW,500000,0.00\n"
-        "24/08/2026,CMS002938491803,CMS/002938491803/HDFC/LARGE_LEGIT,500000.00,0.00\n"
-    ).encode("utf-8")
+        b"Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
+        b"24/08/2026,CMS002938491801,CMS/002938491801/HDFC/LEGIT_1,5000.00,0.00\n"
+        b"24/08/2026,CMS002938491802,CMS/002938491802/HDFC/PAISE_ROW,500000,0.00\n"
+        b"24/08/2026,CMS002938491803,CMS/002938491803/HDFC/LARGE_LEGIT,500000.00,0.00\n"
+    )
 
     file = UploadFile_wrapper = pytest.importorskip("fastapi").UploadFile(
         filename="mixed_statement.csv",

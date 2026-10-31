@@ -3,8 +3,10 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
-from sqlalchemy import DateTime, JSON, Numeric, String, Text
+
+from sqlalchemy import JSON, DateTime, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 

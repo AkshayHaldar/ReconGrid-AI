@@ -1,20 +1,20 @@
 """Deep edge-case testing for 98%+ code coverage across all core modules."""
 
-from datetime import datetime, timezone
-from decimal import Decimal
 import io
+from datetime import UTC, datetime
+from decimal import Decimal
+
 import pytest
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpayRefund, RazorpaySettlement
+from app.models.razorpay_settlement import RazorpayRefund
 from app.repositories.bank_repo import BankRepository
-from app.repositories.settlement_repo import SettlementRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 from app.services.ingestion import IngestionService
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.fuzzy import compute_string_similarity, is_fuzzy_match, normalize_descriptor
+from app.utils.fuzzy import compute_string_similarity, is_fuzzy_match
 from app.utils.money import to_decimal
 
 
@@ -26,7 +26,7 @@ async def test_reconciliation_utr_match_with_amount_delta_tier3(db_session: Asyn
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Bank row has UTR and received net 49100.00
     tx, _ = await bank_repo.upsert_transaction({
@@ -94,7 +94,7 @@ async def test_summary_metrics_human_action_branches(db_session: AsyncSession):
     setl_repo = SettlementRepository(db_session)
     recon_repo = ReconciliationRepository(db_session)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Suggested & Approved record
     tx1, _ = await bank_repo.upsert_transaction({
@@ -155,7 +155,7 @@ async def test_summary_metrics_human_action_branches(db_session: AsyncSession):
 async def test_settlement_refunds_relation(db_session: AsyncSession):
     """Tests get_refunds_for_settlement repository method."""
     repo = SettlementRepository(db_session)
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     setl, _ = await repo.upsert_settlement({
         "settlement_id": "setl_with_refund_01",

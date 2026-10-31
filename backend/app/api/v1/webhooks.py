@@ -1,10 +1,12 @@
 """Razorpay Webhook receiver API Route."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.core.logging import logger
 from app.core.security import razorpay_webhook_guard
@@ -50,7 +52,7 @@ async def handle_razorpay_webhook(
         event_type=event_type,
         processing_status="PROCESSED",
         payload=payload,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )
     db.add(event_record)
     await db.flush()
@@ -66,9 +68,9 @@ async def handle_razorpay_webhook(
 
             created_ts = setl_data.get("created_at")
             dt = (
-                datetime.fromtimestamp(created_ts, timezone.utc)
+                datetime.fromtimestamp(created_ts, UTC)
                 if created_ts
-                else datetime.now(timezone.utc)
+                else datetime.now(UTC)
             )
 
             settlement_repo = SettlementRepository(db)

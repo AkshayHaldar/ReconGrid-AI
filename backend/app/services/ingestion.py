@@ -1,7 +1,5 @@
 """Bank statement CSV and PDF ingestion service with password decryption and OCR support."""
 
-import io
-from typing import Optional
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +31,7 @@ class IngestionService:
         self,
         file: UploadFile,
         batch_id: str = "default",
-        password: Optional[str] = None,
+        password: str | None = None,
     ) -> BankUploadResponse:
         """Parses bank statement (CSV or PDF), records transactions, and runs reconciliation."""
         filename = file.filename or "statement.csv"
@@ -106,7 +104,7 @@ class IngestionService:
             except Exception as ex:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Failed to parse bank statement PDF: {str(ex)}",
+                    detail=f"Failed to parse bank statement PDF: {ex!s}",
                 )
         else:
             # Parse CSV

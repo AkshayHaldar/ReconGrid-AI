@@ -1,9 +1,11 @@
 """RazorpaySettlement repository layer."""
 
-from typing import Sequence
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.razorpay_settlement import RazorpaySettlement, RazorpayRefund
+
+from app.models.razorpay_settlement import RazorpayRefund, RazorpaySettlement
 
 
 class SettlementRepository:

@@ -2,10 +2,15 @@
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.database import get_db
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
-from app.schemas.razorpay import RazorpaySettlementResponse, RazorpaySyncRequest, RazorpaySyncResponse
+from app.schemas.razorpay import (
+    RazorpaySettlementResponse,
+    RazorpaySyncRequest,
+    RazorpaySyncResponse,
+)
 from app.services.razorpay_client import RazorpayClient
 
 router = APIRouter(prefix="/razorpay", tags=["Razorpay"])

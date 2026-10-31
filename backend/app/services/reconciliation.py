@@ -5,9 +5,10 @@ No LLM involvement — pure deterministic rules and Decimal arithmetic.
 
 import re
 import time
-from datetime import date, datetime, timedelta, timezone
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Sequence
+
 from app.core.config import settings
 from app.core.logging import logger
 from app.models.bank_transaction import BankTransaction
@@ -43,9 +44,9 @@ def _to_utc_timestamp(dt: datetime | date | None) -> float:
     if not dt:
         return 0.0
     if isinstance(dt, date) and not isinstance(dt, datetime):
-        return datetime.combine(dt, datetime.min.time(), tzinfo=timezone.utc).timestamp()
+        return datetime.combine(dt, datetime.min.time(), tzinfo=UTC).timestamp()
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc).timestamp()
+        return dt.replace(tzinfo=UTC).timestamp()
     return dt.timestamp()
 
 
@@ -57,7 +58,7 @@ def _diff_seconds(dt1: datetime | date | None, dt2: datetime | date | None) -> f
 
 
 class _SettlementEntry:
-    __slots__ = ("s", "settlement_id", "utr", "norm_utr", "ts", "amount", "gross", "norm_desc", "desc_tokens")
+    __slots__ = ("amount", "desc_tokens", "gross", "norm_desc", "norm_utr", "s", "settlement_id", "ts", "utr")
 
     def __init__(self, s: RazorpaySettlement):
         self.s = s
@@ -126,7 +127,7 @@ class ReconciliationEngine:
         results: list[dict] = []
         matched_settlement_ids: set[str] = set()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         now_ts = now.timestamp()
         pending_window_seconds = float(settings.SETTLEMENT_PENDING_WINDOW_DAYS * 86400)
 
@@ -377,7 +378,7 @@ class ReconciliationEngine:
             if not candidate:
                 tx_dt = bank_tx.date
                 if isinstance(tx_dt, datetime):
-                    tx_aware = tx_dt if tx_dt.tzinfo else tx_dt.replace(tzinfo=timezone.utc)
+                    tx_aware = tx_dt if tx_dt.tzinfo else tx_dt.replace(tzinfo=UTC)
                     age_seconds = (now - tx_aware).total_seconds()
                 elif hasattr(tx_dt, "year"):
                     age_seconds = float((now.date() - tx_dt).days * 86400)
@@ -423,7 +424,7 @@ class ReconciliationEngine:
                 "delta_amount": delta,
                 "diagnostic_type": diagnostic_type,
                 "diagnostic_note": note,
-                "matched_at": datetime.now(timezone.utc),
+                "matched_at": datetime.now(UTC),
                 "superseded": False,
             })
 

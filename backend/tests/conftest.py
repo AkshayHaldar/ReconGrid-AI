@@ -2,11 +2,20 @@
 
 import asyncio
 import os
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from app.core.database import Base, get_db, engine_args
+
+from app.core.config import settings
+from app.core.database import Base, engine_args, get_db
 from app.main import app
+
+# Ensure testing feature flags and webhook secrets are initialized for the test suite
+settings.ENABLE_DEMO = True
+settings.IS_TEST_MODE = True
+if not settings.RAZORPAY_WEBHOOK_SECRET:
+    settings.RAZORPAY_WEBHOOK_SECRET = "test_webhook_secret_key"
 
 DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./test_recongrid.db"
 DEFAULT_POSTGRES_URL = "postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid"

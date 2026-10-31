@@ -1,16 +1,18 @@
 """Unit and Integration tests for Reconciliation Scorecard API and conservation proof."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.main import app
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.reconciliation_repo import ReconciliationRepository
-from app.schemas.reconciliation import ScorecardExceptionItem, ScorecardResponse
+from app.schemas.reconciliation import ScorecardResponse
 from app.services.reconciliation import ReconciliationEngine
 
 
@@ -20,7 +22,7 @@ async def test_scorecard_api_endpoint_and_record_conservation(db_session: AsyncS
 
     measured throughput, zero-float Decimal types, and satisfies mathematical conservation.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 

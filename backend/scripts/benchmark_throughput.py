@@ -7,13 +7,12 @@ and mathematical conservation.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-import os
-from pathlib import Path
 import sys
 import time
 import tracemalloc
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from pathlib import Path
 
 # Ensure backend root is on sys.path
 backend_dir = Path(__file__).resolve().parent.parent
@@ -26,12 +25,12 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, format_inr, to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 
 async def run_single_benchmark(batch_size: int) -> dict:
     batch_id = f"bench_batch_{batch_size}"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     tracemalloc.start()
     mem_before, _ = tracemalloc.get_traced_memory()

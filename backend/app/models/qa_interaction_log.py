@@ -1,8 +1,10 @@
 """Auditable QA Interaction Log ORM Model."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 
@@ -22,7 +24,7 @@ class QaInteractionLog(Base, UUIDMixin, TimestampMixin):
     guardrail_rejected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     asked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
 

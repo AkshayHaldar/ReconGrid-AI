@@ -12,10 +12,10 @@ at the LLM system prompt layer to ensure all financial figures remain machine-ve
 import re
 from decimal import Decimal
 from typing import Any
+
 from app.core.config import settings
 from app.models.reconciliation_log import ReconciliationLog
 from app.utils.money import to_decimal
-
 
 # Regex to extract numeric tokens from natural language text (integers, floats, currency values)
 NUMERIC_TOKEN_REGEX = re.compile(r"\b(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\b")
@@ -95,7 +95,7 @@ def extract_record_numbers(log: ReconciliationLog) -> set[str]:
     # Explicit GST rate addition ONLY for relevant diagnostic types
     diag_type = getattr(log, "diagnostic_type", None)
     if diag_type in ("FEE_DEDUCTION", "TDS_194O_DEDUCTION"):
-        gst_pct = settings.GST_RATE * Decimal("100") if isinstance(settings.GST_RATE, Decimal) else Decimal(str(settings.GST_RATE)) * Decimal("100")
+        gst_pct = settings.GST_RATE * Decimal(100) if isinstance(settings.GST_RATE, Decimal) else Decimal(str(settings.GST_RATE)) * Decimal(100)
         add_num(gst_pct)
 
     return allowed

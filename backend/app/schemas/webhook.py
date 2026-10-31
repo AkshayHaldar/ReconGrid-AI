@@ -1,6 +1,7 @@
 """Webhook payload schemas."""
 
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -15,5 +16,5 @@ class RazorpayWebhookPayload(BaseModel):
 
 class WebhookAckResponse(BaseModel):
     status: str = "ok"
-    event_id: Optional[str] = None
+    event_id: str | None = None
     action_taken: str

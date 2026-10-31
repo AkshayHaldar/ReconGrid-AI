@@ -1,8 +1,14 @@
 """Comprehensive unit tests for multi-bank streaming CSV parser covering all supported dialects and edge cases."""
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
-from app.utils.csv_parser import BankCsvParser, extract_utr_from_text, parse_flexible_date, compute_row_hash
+
+from app.utils.csv_parser import (
+    BankCsvParser,
+    compute_row_hash,
+    extract_utr_from_text,
+    parse_flexible_date,
+)
 
 
 def test_extract_utr_from_text():
@@ -33,7 +39,7 @@ def test_parse_flexible_dates():
 
 
 def test_compute_row_hash_deterministic():
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
     h1 = compute_row_hash(dt, Decimal("98200.00"), "CREDIT", "CMS002938491801", "CMS/002938491801/HDFC")
     h2 = compute_row_hash(dt, Decimal("98200.00"), "CREDIT", "CMS002938491801", "CMS/002938491801/HDFC")
     assert h1 == h2

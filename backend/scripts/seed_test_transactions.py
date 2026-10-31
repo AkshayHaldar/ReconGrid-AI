@@ -2,7 +2,7 @@
 
 import argparse
 import asyncio
-from decimal import Decimal
+
 import httpx
 
 

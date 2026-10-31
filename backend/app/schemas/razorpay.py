@@ -2,7 +2,8 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
@@ -12,7 +13,7 @@ class RazorpaySettlementBase(BaseModel):
     gross_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2, max_digits=18)
     fees: Decimal = Field(default=Decimal("0.00"), decimal_places=2, max_digits=18)
     tax: Decimal = Field(default=Decimal("0.00"), decimal_places=2, max_digits=18)
-    utr: Optional[str] = None
+    utr: str | None = None
     status: str = "processed"
     settlement_created_at: datetime
     raw_payload: dict[str, Any] = Field(default_factory=dict)

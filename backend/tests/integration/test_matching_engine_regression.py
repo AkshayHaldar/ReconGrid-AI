@@ -10,24 +10,26 @@ Verifies through HTTP API endpoints and direct service calls that:
 7. Precision is preserved and true exceptions are never artificially converted to false matches.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.main import app
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
-from app.utils.money import calculate_standard_fees, to_decimal
+from app.utils.money import calculate_standard_fees
 
 
 @pytest.mark.asyncio
 async def test_matching_engine_all_six_categories_regression(db_session: AsyncSession):
     """End-to-end regression test validating all 6 root cause categories."""
     batch_id = "test_matching_regression_batch"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # 1. Category (a): Refund adjustment (Net 45k, gross 50k, fee 1000, tax 180, refund 3820)
     gross_a = Decimal("50000.00")

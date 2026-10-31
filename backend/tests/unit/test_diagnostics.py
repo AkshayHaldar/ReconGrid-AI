@@ -1,7 +1,8 @@
 """Unit tests for Tier 3 deterministic discrepancy diagnostics."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.services.diagnostics import DiagnosticsService
@@ -9,7 +10,7 @@ from app.services.diagnostics import DiagnosticsService
 
 def test_diagnostics_exact_match():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("98200.00"),
         direction="CREDIT",
         description="CMS/RAZORPAY",
@@ -30,7 +31,7 @@ def test_diagnostics_exact_match():
 
 def test_diagnostics_fee_gst_deduction():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("49100.00"),
         direction="CREDIT",
         description="CMS/RAZORPAY",
@@ -52,7 +53,7 @@ def test_diagnostics_fee_gst_deduction():
 
 def test_diagnostics_refund_adjustment():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("68500.00"),
         direction="CREDIT",
         description="CMS/REFUND",
@@ -74,7 +75,7 @@ def test_diagnostics_refund_adjustment():
 
 def test_diagnostics_debit_reversal():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("15000.00"),
         direction="DEBIT",
         description="DR/REVERSAL",
@@ -92,7 +93,7 @@ def test_diagnostics_debit_reversal():
 
 def test_diagnostics_fx_adjustment():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("82150.00"),
         direction="CREDIT",
         description="CMS/FX",
@@ -114,7 +115,7 @@ def test_diagnostics_fx_adjustment():
 
 def test_diagnostics_unresolved_delta():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("10000.00"),
         direction="CREDIT",
         description="CMS/UNMATCHED",
@@ -135,7 +136,7 @@ def test_diagnostics_unresolved_delta():
 
 def test_diagnostics_mdr_2percent_estimation():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("97640.00"),  # 100000 - 2000 (2%) - 360 (18% GST on 2000) = 97640
         direction="CREDIT",
         description="CMS/RAZORPAY",
@@ -156,7 +157,7 @@ def test_diagnostics_mdr_2percent_estimation():
 
 def test_diagnostics_tds_194o_deduction():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("97200.00"),  # 100000 - 1000 TDS 1% - 1525.42 fee - 274.58 tax = 97200
         direction="CREDIT",
         description="CMS/RAZORPAY/194O",
@@ -177,7 +178,7 @@ def test_diagnostics_tds_194o_deduction():
 
 def test_diagnostics_tds_194o_estimated_fee():
     bank = BankTransaction(
-        date=datetime.now(timezone.utc),
+        date=datetime.now(UTC),
         amount=Decimal("96640.00"),  # 100000 - 1000 TDS - 2000 (2% fee) - 360 (18% GST) = 96640
         direction="CREDIT",
         description="CMS/RAZORPAY/194O_EST",

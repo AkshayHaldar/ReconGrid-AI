@@ -1,6 +1,7 @@
 """SQLAlchemy asynchronous database session and engine setup."""
 
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+
 from app.core.config import settings
 
 
@@ -18,6 +20,7 @@ class Base(DeclarativeBase):
 import json
 from datetime import date, datetime
 from decimal import Decimal
+
 
 def _custom_json_serializer(obj):
     if isinstance(obj, Decimal):

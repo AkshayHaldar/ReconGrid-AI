@@ -2,8 +2,9 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class ReconciliationStatusResponse(BaseModel):
@@ -26,7 +27,7 @@ class ReconciliationStatusResponse(BaseModel):
     total_conflict_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
     total_unresolved_variance: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
     is_in_balance: bool = False
-    last_reconciled_at: Optional[datetime] = None
+    last_reconciled_at: datetime | None = None
 
     @field_validator(
         "total_ingested_amount",
@@ -53,24 +54,24 @@ class ReconciliationRecordItem(BaseModel):
     batch_id: str
     bank_tx_id: str
     date: datetime
-    bank_utr: Optional[str] = None
+    bank_utr: str | None = None
     bank_description: str
     bank_amount: Decimal = Field(..., decimal_places=2)
     bank_direction: Literal["CREDIT", "DEBIT"] = "CREDIT"
 
     # Matched Settlement info
-    rzp_settlement_db_id: Optional[str] = None
-    rzp_settlement_id: Optional[str] = None
-    rzp_amount: Optional[Decimal] = Field(default=None, decimal_places=2)
-    rzp_gross_amount: Optional[Decimal] = Field(default=None, decimal_places=2)
-    rzp_fees: Optional[Decimal] = Field(default=None, decimal_places=2)
-    rzp_tax: Optional[Decimal] = Field(default=None, decimal_places=2)
-    rzp_utr: Optional[str] = None
+    rzp_settlement_db_id: str | None = None
+    rzp_settlement_id: str | None = None
+    rzp_amount: Decimal | None = Field(default=None, decimal_places=2)
+    rzp_gross_amount: Decimal | None = Field(default=None, decimal_places=2)
+    rzp_fees: Decimal | None = Field(default=None, decimal_places=2)
+    rzp_tax: Decimal | None = Field(default=None, decimal_places=2)
+    rzp_utr: str | None = None
 
     # Status & Tier
     match_status: Literal["MATCHED", "SUGGESTED", "CONFLICT", "EXCEPTION", "PENDING_SETTLEMENT_DATA"]
     match_tier: Literal["TIER_0", "TIER_1", "TIER_2", "TIER_3", "MANUAL"]
-    confidence_score: Optional[float] = None
+    confidence_score: float | None = None
     delta_amount: Decimal = Field(default=Decimal("0.00"), decimal_places=2)
     diagnostic_type: Literal[
         "EXACT_MATCH",
@@ -87,9 +88,9 @@ class ReconciliationRecordItem(BaseModel):
     ]
     diagnostic_note: str
     matched_at: datetime
-    human_action: Optional[str] = None
-    raw_csv_row: Optional[dict[str, Any]] = None
-    raw_rzp_payload: Optional[dict[str, Any]] = None
+    human_action: str | None = None
+    raw_csv_row: dict[str, Any] | None = None
+    raw_rzp_payload: dict[str, Any] | None = None
 
     @field_validator(
         "bank_amount",
@@ -116,12 +117,12 @@ class ReconciliationRecordListResponse(BaseModel):
 
 
 class ActionRequest(BaseModel):
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class ConflictResolveRequest(BaseModel):
     chosen_settlement_id: str
-    note: Optional[str] = None
+    note: str | None = None
 
 
 class ScorecardExceptionItem(BaseModel):
@@ -130,7 +131,7 @@ class ScorecardExceptionItem(BaseModel):
     amount: Decimal = Field(..., decimal_places=2)
     reason_code: str
     diagnostic_note: str
-    utr: Optional[str] = None
+    utr: str | None = None
     description: str
 
     @field_validator("amount", mode="before")

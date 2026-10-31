@@ -1,8 +1,10 @@
 """BankTransaction repository layer."""
 
-from typing import Sequence
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.bank_transaction import BankTransaction
 
 

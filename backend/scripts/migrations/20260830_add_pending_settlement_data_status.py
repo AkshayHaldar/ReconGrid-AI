@@ -10,8 +10,6 @@ Description:
   as a valid match_status and 'PENDING_SETTLEMENT' as a valid diagnostic_type.
 """
 
-from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "20260830_add_pending_settlement_data"
@@ -33,9 +31,7 @@ def upgrade() -> None:
     #     'reconciliation_logs',
     #     "match_status IN ('MATCHED', 'SUGGESTED', 'CONFLICT', 'EXCEPTION', 'PENDING_SETTLEMENT_DATA')"
     # )
-    pass
 
 
 def downgrade() -> None:
     """Downgrade path."""
-    pass

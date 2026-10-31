@@ -1,7 +1,8 @@
 """Settlement Q&A Agent schemas."""
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -12,18 +13,18 @@ class MessageHistoryItem(BaseModel):
 
 class QaAskRequest(BaseModel):
     query: str
-    context_record_id: Optional[str] = None
-    history: Optional[list[MessageHistoryItem]] = None
+    context_record_id: str | None = None
+    history: list[MessageHistoryItem] | None = None
 
 
 class QaAskResponse(BaseModel):
     query: str
     answer: str
-    source_record_id: Optional[str] = None
-    source_settlement_id: Optional[str] = None
-    source_bank_utr: Optional[str] = None
+    source_record_id: str | None = None
+    source_settlement_id: str | None = None
+    source_bank_utr: str | None = None
     guardrail_rejected: bool = False
-    retrieved_data: Optional[dict[str, Any]] = None
+    retrieved_data: dict[str, Any] | None = None
     asked_at: datetime
 
 
@@ -33,6 +34,6 @@ class QaHistoryItem(BaseModel):
     id: str
     query_text: str
     final_response: str
-    reconciliation_log_id: Optional[str] = None
+    reconciliation_log_id: str | None = None
     guardrail_rejected: bool
     asked_at: datetime

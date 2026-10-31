@@ -1,10 +1,13 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
+from collections.abc import Sequence
+from datetime import UTC
 from decimal import Decimal
-from typing import Optional, Sequence
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
@@ -37,7 +40,7 @@ class ReconciliationRepository:
             update(ReconciliationLog)
             .where(
                 ReconciliationLog.bank_tx_id == bank_tx_id,
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
             .values(superseded=True)
         )
@@ -52,7 +55,7 @@ class ReconciliationRepository:
             update(ReconciliationLog)
             .where(
                 ReconciliationLog.bank_tx_id.in_(bank_tx_ids),
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
             .values(superseded=True)
         )
@@ -77,7 +80,7 @@ class ReconciliationRepository:
             select(ReconciliationLog.bank_tx_id, ReconciliationLog.match_status)
             .where(
                 ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
         )
         result = await self.session.execute(stmt)
@@ -87,7 +90,7 @@ class ReconciliationRepository:
         self,
         batch_id: str,
         settlement_db_id: str,
-        exclude_log_id: Optional[str] = None,
+        exclude_log_id: str | None = None,
     ) -> Sequence[ReconciliationLog]:
         """Finds all active conflict logs in the batch that were competing for the same settlement."""
         stmt = (
@@ -100,7 +103,7 @@ class ReconciliationRepository:
                 ReconciliationLog.batch_id == batch_id,
                 ReconciliationLog.rzp_settlement_id == settlement_db_id,
                 ReconciliationLog.match_status == "CONFLICT",
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
         )
         if exclude_log_id:
@@ -111,8 +114,8 @@ class ReconciliationRepository:
     async def get_active_logs(
         self,
         batch_id: str = "default",
-        status_filter: Optional[str] = None,
-        search: Optional[str] = None,
+        status_filter: str | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 100,
     ) -> tuple[Sequence[ReconciliationLog], int]:
@@ -127,7 +130,7 @@ class ReconciliationRepository:
             )
             .where(
                 ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
         )
 
@@ -167,7 +170,7 @@ class ReconciliationRepository:
             )
             .where(
                 ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
         )
         result = await self.session.execute(stmt)
@@ -206,8 +209,7 @@ class ReconciliationRepository:
             else:
                 def _to_utc_naive(dt):
                     if dt.tzinfo is not None:
-                        from datetime import timezone
-                        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+                        return dt.astimezone(UTC).replace(tzinfo=None)
                     return dt
 
                 if _to_utc_naive(log.matched_at) > _to_utc_naive(last_reconciled_at):
@@ -282,7 +284,7 @@ class ReconciliationRepository:
     async def get_scorecard_metrics(
         self,
         batch_id: str = "default",
-        processing_time_seconds: Optional[Decimal] = None,
+        processing_time_seconds: Decimal | None = None,
     ) -> dict:
         """Computes audit-grade scorecard metrics with separate per-tier counts, throughput,
 
@@ -296,7 +298,7 @@ class ReconciliationRepository:
             )
             .where(
                 ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.superseded == False,  # noqa: E712
+                ReconciliationLog.superseded == False,
             )
         )
         result = await self.session.execute(stmt)
@@ -383,7 +385,7 @@ class ReconciliationRepository:
                 tier_3_count += 1
 
         def _calc_pct(count: int) -> Decimal:
-            if dec_total <= Decimal("0"):
+            if dec_total <= Decimal(0):
                 return Decimal("0.00")
             return ((Decimal(str(count)) / dec_total) * Decimal("100.00")).quantize(
                 Decimal("0.01"), rounding="ROUND_HALF_UP"

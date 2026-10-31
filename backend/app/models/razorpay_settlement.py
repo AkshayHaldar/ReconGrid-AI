@@ -1,10 +1,12 @@
 """Razorpay Settlement and Related Financial Entities ORM Models."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
-from sqlalchemy import Boolean, DateTime, JSON, Numeric, String, Text
+
+from sqlalchemy import JSON, Boolean, DateTime, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.core.database import Base
 from app.models.base import TimestampMixin, UUIDMixin
 
@@ -21,7 +23,7 @@ class RazorpaySettlement(Base, UUIDMixin, TimestampMixin):
     status: Mapped[str] = mapped_column(String(32), default="processed", nullable=False)
     settlement_created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
         index=True,
     )

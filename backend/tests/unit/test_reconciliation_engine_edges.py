@@ -1,15 +1,14 @@
 """Unit tests for edge cases and multi-tier mechanics in ReconciliationEngine."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.bank_repo import BankRepository
-from app.repositories.settlement_repo import SettlementRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 from app.services.reconciliation import ReconciliationEngine
 
 
@@ -20,7 +19,7 @@ async def test_reconciliation_conflict_detection(db_session: AsyncSession):
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Two separate bank rows with the exact same UTR & amount
     tx1, _ = await bank_repo.upsert_transaction({
@@ -69,7 +68,7 @@ async def test_reconciliation_tier_0_fallback_missing_utr(db_session: AsyncSessi
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Bank row without UTR
     tx, _ = await bank_repo.upsert_transaction({
@@ -109,7 +108,7 @@ async def test_reconciliation_batched_settlement_subset_sum(db_session: AsyncSes
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # 1 Bank row for sum of 2 settlements: 20000 + 30000 = 50000
     tx, _ = await bank_repo.upsert_transaction({
@@ -158,7 +157,7 @@ async def test_competing_conflict_logs_retrieval(db_session: AsyncSession):
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     tx1, _ = await bank_repo.upsert_transaction({
         "batch_id": "comp_conflict_batch",
@@ -213,7 +212,7 @@ async def test_reconciliation_batched_triplet_subset_sum(db_session: AsyncSessio
     recon_repo = ReconciliationRepository(db_session)
     engine = ReconciliationEngine(recon_repo)
 
-    dt = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # 1 Bank row for sum of 3 settlements: 15k + 25k + 35k = 75k
     tx, _ = await bank_repo.upsert_transaction({
@@ -275,7 +274,7 @@ async def test_reconciliation_batched_no_valid_subset_fallthrough(db_session: As
     engine = ReconciliationEngine(recon_repo)
 
     # Bank date > 5 days ago to avoid PENDING_SETTLEMENT_DATA
-    dt = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 10, tzinfo=UTC)
 
     # Bank row 90,000.00
     tx, _ = await bank_repo.upsert_transaction({
@@ -325,7 +324,7 @@ async def test_reconciliation_batched_candidate_cap_boundary(db_session: AsyncSe
     engine = ReconciliationEngine(recon_repo)
 
     # Bank date > 5 days ago to avoid PENDING_SETTLEMENT_DATA
-    dt = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    dt = datetime(2026, 8, 10, tzinfo=UTC)
 
     # Bank row 60,000.00
     tx, _ = await bank_repo.upsert_transaction({
