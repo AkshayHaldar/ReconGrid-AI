@@ -10,7 +10,10 @@ dependencies = [
     "pydantic>=2.6.0,<3.0.0",
     "pydantic-settings>=2.2.0,<3.0.0",
     "python-multipart>=0.0.9",
+    "structlog>=24.1.0",
     "sqlalchemy>=2.0.28,<3.0.0",
+    "greenlet>=3.0.3",
+    "alembic>=1.13.0",
     "aiosqlite>=0.20.0",
     "asyncpg>=0.29.0",
     "httpx>=0.27.0",
@@ -21,6 +24,9 @@ dependencies = [
     "python-Levenshtein>=0.25.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.1.0",
@@ -30,6 +36,9 @@ dev = [
     "black>=24.2.0",
     "mypy>=1.9.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.ruff]
 line-length = 120
@@ -45,12 +54,17 @@ target-version = ["py311"]
 
 [tool.mypy]
 python_version = "3.11"
+exclude = ["^tests/"]
 ignore_missing_imports = true
 check_untyped_defs = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 warn_unused_ignores = true
 disable_error_code = ["name-defined", "var-annotated", "no-untyped-def", "assignment", "return", "operator"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -2,16 +2,17 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: recongrid-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-recongrid}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recongrid}
       POSTGRES_DB: ${POSTGRES_DB:-recongrid}
     ports:
-      - "5433:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recongrid}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recongrid} -d ${POSTGRES_DB:-recongrid}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -19,6 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: recongrid-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
 
@@ -27,14 +29,16 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: recongrid-backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://recongrid:recongrid@postgres:5432/recongrid}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-recongrid}:${POSTGRES_PASSWORD:-recongrid}@postgres:5432/${POSTGRES_DB:-recongrid}}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - ENV=${ENV:-development}
       - IS_TEST_MODE=${IS_TEST_MODE:-false}
       - ENABLE_DEMO=${ENABLE_DEMO:-false}
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,6 +50,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: recongrid-frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -55,4 +60,3 @@ services:
 
 volumes:
   postgres_data:
-

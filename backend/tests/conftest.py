@@ -1,6 +1,5 @@
 """Pytest async configuration and test database fixtures."""
 
-import asyncio
 import os
 from collections.abc import AsyncGenerator
 
@@ -22,12 +21,15 @@ DEFAULT_POSTGRES_URL = "postgresql+asyncpg://recongrid:recongrid@localhost:5432/
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption(
-        "--postgres",
-        action="store_true",
-        default=False,
-        help="Run test suite against PostgreSQL database instead of SQLite",
-    )
+    try:
+        parser.addoption(
+            "--postgres",
+            action="store_true",
+            default=False,
+            help="Run test suite against PostgreSQL database instead of SQLite",
+        )
+    except ValueError:
+        pass
 
 
 def get_test_database_url(pytestconfig: pytest.Config | None = None) -> str:
@@ -45,13 +47,6 @@ def get_engine_args_for_url(db_url: str) -> dict:
     else:
         args.pop("connect_args", None)
     return args
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest.fixture(autouse=True)
