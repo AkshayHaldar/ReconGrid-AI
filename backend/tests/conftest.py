@@ -47,13 +47,6 @@ def get_engine_args_for_url(db_url: str) -> dict:
     return args
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest.fixture(autouse=True)
 async def setup_test_database(pytestconfig: pytest.Config):
     test_db_url = get_test_database_url(pytestconfig)
