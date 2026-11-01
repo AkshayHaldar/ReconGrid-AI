@@ -2,17 +2,18 @@
 
 import os
 import sys
-from sqlite3 import Connection as SQLite3Connection
-import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import IntegrityError
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import create_async_engine
+
 from app.core.database import set_sqlite_pragma  # noqa: F401 - ensures listener is registered
 
 
@@ -42,6 +43,18 @@ def test_sqlite_foreign_keys_enforced():
             )
 
 
+@pytest.mark.asyncio
+async def test_async_sqlite_foreign_keys_enforced():
+    """Verify PRAGMA foreign_keys=ON is active on async SQLite connections (aiosqlite)."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    try:
+        async with engine.connect() as conn:
+            res = (await conn.execute(text("PRAGMA foreign_keys;"))).scalar()
+            assert res == 1, f"Expected async PRAGMA foreign_keys=1, got {res}"
+    finally:
+        await engine.dispose()
+
+
 def test_alembic_initial_migration_exists():
     """Verify that Alembic configuration and initial migration 0001 are valid."""
     alembic_ini_path = os.path.join(backend_dir, "alembic.ini")
@@ -57,7 +70,10 @@ def test_alembic_initial_migration_exists():
 
 
 if __name__ == "__main__":
+    import asyncio
     test_sqlite_foreign_keys_enforced()
     print("test_sqlite_foreign_keys_enforced passed!")
+    asyncio.run(test_async_sqlite_foreign_keys_enforced())
+    print("test_async_sqlite_foreign_keys_enforced passed!")
     test_alembic_initial_migration_exists()
     print("test_alembic_initial_migration_exists passed!")

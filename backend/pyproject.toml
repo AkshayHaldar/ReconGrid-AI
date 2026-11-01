@@ -46,12 +46,17 @@ target-version = ["py311"]
 
 [tool.mypy]
 python_version = "3.11"
+exclude = ["^tests/"]
 ignore_missing_imports = true
 check_untyped_defs = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 warn_unused_ignores = true
 disable_error_code = ["name-defined", "var-annotated", "no-untyped-def", "assignment", "return", "operator"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

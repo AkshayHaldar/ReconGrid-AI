@@ -1,9 +1,9 @@
 """SQLAlchemy asynchronous database session and engine setup."""
 
+import json
 from collections.abc import AsyncGenerator
 from datetime import date, datetime
 from decimal import Decimal
-import json
 from sqlite3 import Connection as SQLite3Connection
 
 from sqlalchemy import Engine, event
@@ -24,11 +24,18 @@ class Base(DeclarativeBase):
 
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Ensure SQLite connection strings in local dev enforce foreign keys."""
+    """Ensure SQLite connections (both sync sqlite3 and async aiosqlite) enforce foreign keys."""
     if isinstance(dbapi_connection, SQLite3Connection):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+    elif hasattr(dbapi_connection, "cursor"):
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+        except Exception:
+            pass
 
 
 def _custom_json_serializer(obj):

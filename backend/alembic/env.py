@@ -1,7 +1,7 @@
 import asyncio
-from logging.config import fileConfig
 import os
 import sys
+from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -12,9 +12,9 @@ from alembic import context
 # Ensure backend root is on sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import app.models  # noqa: F401 - ensure all ORM models are registered with Base.metadata
 from app.core.config import settings
 from app.core.database import Base
-import app.models  # noqa: F401 - ensure all ORM models are registered with Base.metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -28,11 +28,16 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    """Return database URL from env or settings if not explicitly customized in alembic.ini."""
+    """Return database URL prioritizing DATABASE_URL from env, then settings, then alembic.ini."""
+    env_url = os.environ.get("DATABASE_URL")
+    if env_url:
+        return env_url
+    if settings.DATABASE_URL and not settings.DATABASE_URL.startswith("driver://"):
+        return settings.DATABASE_URL
     ini_url = config.get_main_option("sqlalchemy.url")
     if ini_url and not ini_url.startswith("driver://"):
         return ini_url
-    return os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+    return "postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid"
 
 
 def do_run_migrations(connection: Connection) -> None:
