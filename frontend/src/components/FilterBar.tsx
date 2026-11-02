@@ -5,7 +5,6 @@ import {
   CheckCheck,
   Filter,
   SlidersHorizontal,
-  Sparkles,
   X,
   Layers,
   ArrowDownLeft,
@@ -92,30 +91,30 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     <div className="flex flex-col gap-2.5 mb-3.5">
       <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-2.5">
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1 bg-[#090e18] border border-[#162438] p-1 rounded-xl overflow-x-auto text-xs touch-scroll scrollbar-none shadow-xs">
+        <div className="flex items-center gap-1 bg-[#111318] border border-[#1e222d] p-1 rounded-lg overflow-x-auto text-xs touch-scroll scrollbar-none shadow-xs">
           {tabs.map((t) => {
             const isActive = activeTab === t.id;
             return (
               <button
                 key={t.id}
                 onClick={() => onTabChange(t.id)}
-                className={`px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5 whitespace-nowrap text-xs shrink-0 ${
+                className={`px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5 whitespace-nowrap text-xs shrink-0 cursor-pointer ${
                   isActive
-                    ? "bg-[#121c2e] text-blue-300 border border-[#1e3458] shadow-xs"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-[#0e1626]"
+                    ? "bg-neutral-800 text-neutral-100 border border-neutral-700 shadow-xs"
+                    : "text-neutral-400 hover:text-neutral-200 hover:bg-[#151820]"
                 }`}
               >
                 <span>{t.label}</span>
                 <span
-                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-tabular ${
+                  className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-tabular ${
                     isActive
-                      ? "bg-blue-950 text-blue-300 border border-blue-800"
-                      : "bg-[#060a12] text-slate-400"
+                      ? "bg-neutral-900 text-neutral-200 border border-neutral-700"
+                      : "bg-[#090a0f] text-neutral-400"
                   }`}
                 >
                   {t.count}
                 </span>
-                <span className="hidden md:inline text-[9px] font-mono opacity-50 text-slate-400">
+                <span className="hidden md:inline text-[9px] font-mono opacity-50 text-neutral-400">
                   [{t.shortcut}]
                 </span>
               </button>
@@ -127,39 +126,39 @@ export const FilterBar: React.FC<FilterBarProps> = ({
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
           {/* Diagnostic Sub-Filter */}
           {onDiagnosticChange && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#090e18] border border-[#162438] hover:border-[#223550] rounded-xl text-xs text-slate-300 flex-1 sm:flex-initial min-w-0 transition shadow-xs">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 flex-1 sm:flex-initial min-w-0 transition shadow-xs">
+              <SlidersHorizontal className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
               <select
                 value={selectedDiagnostic}
                 onChange={(e) => onDiagnosticChange(e.target.value)}
-                className="bg-transparent border-none text-[11px] sm:text-xs text-slate-200 focus:outline-none cursor-pointer font-sans w-full truncate pr-1"
+                className="bg-transparent border-none text-[11px] sm:text-xs text-neutral-200 focus:outline-none cursor-pointer font-sans w-full truncate pr-1"
                 aria-label="Filter by Diagnostic Sub-Type"
               >
-                <option value="ALL" className="bg-[#0c121e] text-slate-200">
+                <option value="ALL" className="bg-[#111318] text-neutral-200">
                   All Diagnostics
                 </option>
-                <option value="FEE_DEDUCTION" className="bg-[#0c121e] text-slate-200">
+                <option value="FEE_DEDUCTION" className="bg-[#111318] text-neutral-200">
                   MDR Fee Deductions (2% + 18% GST)
                 </option>
-                <option value="TDS_194O_DEDUCTION" className="bg-[#0c121e] text-slate-200">
+                <option value="TDS_194O_DEDUCTION" className="bg-[#111318] text-neutral-200">
                   Section 194-O TDS (1%)
                 </option>
-                <option value="BATCHED_SETTLEMENT" className="bg-[#0c121e] text-slate-200">
+                <option value="BATCHED_SETTLEMENT" className="bg-[#111318] text-neutral-200">
                   Batched Settlements
                 </option>
-                <option value="REFUND_ADJUSTED" className="bg-[#0c121e] text-slate-200">
+                <option value="REFUND_ADJUSTED" className="bg-[#111318] text-neutral-200">
                   Customer Refund Adjustments
                 </option>
-                <option value="FX_ADJUSTED" className="bg-[#0c121e] text-slate-200">
+                <option value="FX_ADJUSTED" className="bg-[#111318] text-neutral-200">
                   FX Conversion Adjustments
                 </option>
-                <option value="REVERSAL" className="bg-[#0c121e] text-slate-200">
+                <option value="REVERSAL" className="bg-[#111318] text-neutral-200">
                   Direct Debit Reversals
                 </option>
-                <option value="PENDING_SETTLEMENT" className="bg-[#0c121e] text-slate-200">
+                <option value="PENDING_SETTLEMENT" className="bg-[#111318] text-neutral-200">
                   In-Transit Pending Settlements
                 </option>
-                <option value="UNRESOLVED" className="bg-[#0c121e] text-slate-200">
+                <option value="UNRESOLVED" className="bg-[#111318] text-neutral-200">
                   Unresolved Exceptions
                 </option>
               </select>
@@ -168,24 +167,24 @@ export const FilterBar: React.FC<FilterBarProps> = ({
 
           {/* Search Box */}
           <div className="relative w-full sm:w-52 md:w-60 shrink-0">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               id="ledger-search-input"
               placeholder="Search UTR, Order, Settlement..."
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
-              className="w-full pl-8 pr-8 py-1.5 bg-[#090e18] border border-[#162438] hover:border-[#223550] rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition font-mono shadow-xs"
+              className="w-full pl-8 pr-8 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-neutral-500 transition font-mono shadow-xs"
             />
             {searchQuery ? (
               <button
                 onClick={() => onSearchChange("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-0.5"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200 p-0.5 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             ) : (
-              <span className="hidden sm:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono text-slate-400 bg-[#060a12] px-1.5 py-0.2 rounded border border-[#152132]">
+              <span className="hidden sm:inline absolute right-2.5 top-1/2 -translate-y-1/2 text-[9px] font-mono text-neutral-400 bg-neutral-900 px-1.5 py-0.2 rounded border border-neutral-800">
                 /
               </span>
             )}
@@ -196,7 +195,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
             <button
               onClick={onBatchApprove}
               disabled={batchApproveLoading || highConfidenceCandidates === 0}
-              className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-950 to-teal-950 hover:from-emerald-900 hover:to-teal-900 border border-emerald-700/80 text-emerald-300 hover:text-emerald-100 rounded-xl text-xs font-semibold transition disabled:opacity-50 whitespace-nowrap shadow-xs shrink-0"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/80 text-emerald-300 hover:text-emerald-100 rounded-md text-xs font-semibold transition disabled:opacity-50 whitespace-nowrap shadow-xs shrink-0 cursor-pointer"
               title="Batch approve all suggestions with confidence ≥ 90%"
             >
               <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
@@ -209,10 +208,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           {/* Export CA Audit CSV */}
           <button
             onClick={onExportCsv}
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#090e18] hover:bg-[#121c2d] border border-[#162438] hover:border-slate-500 rounded-xl text-xs font-medium text-slate-200 transition shrink-0 whitespace-nowrap shadow-xs"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs font-medium text-neutral-200 transition shrink-0 whitespace-nowrap shadow-xs cursor-pointer"
             title="Download full CA-Ready Audit CSV with GST and Settlement Logs"
           >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+            <FileSpreadsheet className="w-3.5 h-3.5 text-neutral-400" />
             <span className="hidden sm:inline">Export Audit CSV</span>
             <span className="sm:hidden">CSV</span>
           </button>

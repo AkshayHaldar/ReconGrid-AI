@@ -10,7 +10,7 @@ import { DemoSyncModal } from "@/components/DemoSyncModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
-import { CheckCircle2, RotateCcw, X, AlertTriangle, Sparkles } from "lucide-react";
+import { CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react";
 import {
   ReconciliationRecordItem,
   ReconciliationStatus,
@@ -269,7 +269,7 @@ export default function DashboardPage() {
   });
 
   return (
-    <div className="min-h-screen bg-[#060913] text-slate-100 flex flex-col font-sans selection:bg-blue-600/90 selection:text-white">
+    <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-white">
       {/* Header Navigation */}
       <Header
         selectedBank={selectedBank}
@@ -359,26 +359,26 @@ export default function DashboardPage() {
 
       {/* Optimistic Action Undo Toast Snackbar */}
       {toast && (
-        <div className="fixed bottom-5 left-5 sm:left-6 z-50 flex items-center gap-3.5 bg-[#0b1220] border border-[#1e3250] shadow-2xl rounded-xl px-4 py-3 text-xs text-slate-200 animate-in fade-in slide-in-from-bottom-3 duration-200">
+        <div className="fixed bottom-5 left-5 sm:left-6 z-50 flex items-center gap-3.5 bg-[#151820] border border-[#282e3d] shadow-2xl rounded-lg px-4 py-3 text-xs text-neutral-200 animate-in fade-in slide-in-from-bottom-3 duration-200">
           <div className="flex items-center gap-2.5">
             {toast.type === "approve" ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             ) : (
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
             )}
-            <span className="font-medium text-slate-200">{toast.message}</span>
+            <span className="font-medium text-neutral-200">{toast.message}</span>
           </div>
-          <div className="flex items-center gap-2 pl-3 border-l border-[#19273c]">
+          <div className="flex items-center gap-2 pl-3 border-l border-[#282e3d]">
             <button
               onClick={handleUndo}
-              className="px-2.5 py-1 bg-[#121f35] hover:bg-[#1a2d4e] text-blue-300 hover:text-blue-200 rounded-lg text-[11px] font-mono flex items-center gap-1.5 transition font-semibold"
+              className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-[11px] font-mono flex items-center gap-1.5 transition font-semibold cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Undo</span>
             </button>
             <button
               onClick={() => setToast(null)}
-              className="p-1 text-slate-400 hover:text-slate-200 rounded-lg transition"
+              className="p-1 text-neutral-400 hover:text-neutral-200 rounded transition cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
             </button>
