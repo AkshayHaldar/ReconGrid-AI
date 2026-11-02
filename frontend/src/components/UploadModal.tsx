@@ -12,7 +12,6 @@ import {
   HelpCircle,
   ChevronDown,
   ChevronUp,
-  Sparkles,
   Layers,
   KeyRound,
 } from "lucide-react";
@@ -173,29 +172,29 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-4">
-      <div className="bg-[#070b14] border border-[#18263a] rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-3 sm:p-4">
+      <div className="bg-[#0c0e12] border border-[#1e222d] rounded-xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col">
         {/* Header */}
-        <div className="p-4 bg-[#0a101d] border-b border-[#18263a] flex items-center justify-between shrink-0">
+        <div className="p-4 bg-[#111318] border-b border-[#1e222d] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-              <UploadCloud className="w-5 h-5 text-blue-400 shrink-0" />
+            <div className="p-2 bg-[#151820] border border-[#282e3d] rounded-md text-neutral-300">
+              <UploadCloud className="w-4 h-4 shrink-0" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-100 font-sans flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-neutral-100 font-sans flex items-center gap-2">
                 Upload Bank Statement
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-950 text-blue-300 border border-blue-800">
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-neutral-900 text-neutral-300 border border-neutral-800">
                   PDF & CSV
                 </span>
               </h3>
-              <p className="text-[11px] text-slate-400 font-mono">
+              <p className="text-[11px] text-neutral-400 font-mono">
                 Multi-page statement parsing, auto-decryption & OCR enabled
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800/50 transition"
+            className="text-neutral-400 hover:text-neutral-200 p-1.5 rounded-md hover:bg-neutral-800 transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
@@ -229,9 +228,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     ({(file.size / 1024).toFixed(1)} KB)
                   </span>
                 </div>
-                <div className="flex items-center justify-center gap-2 text-[10px] text-slate-400">
-                  <span className="inline-flex items-center gap-1 text-blue-400">
-                    <Sparkles className="w-3 h-3" /> {isPdf ? "Multi-Page PDF Engine" : "Streaming CSV Parser"}
+                <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-400">
+                  <span className="inline-flex items-center gap-1 text-neutral-300">
+                    <Layers className="w-3 h-3 text-neutral-400" /> {isPdf ? "Multi-Page PDF Engine" : "Streaming CSV Parser"}
                   </span>
                   <span>•</span>
                   <span>Click or drag to replace file</span>
@@ -365,26 +364,26 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-[#0a101d] border-t border-[#18263a] flex flex-col-reverse sm:flex-row justify-end gap-2 text-xs font-sans shrink-0">
+        <div className="p-4 bg-[#111318] border-t border-[#1e222d] flex flex-col-reverse sm:flex-row justify-end gap-2 text-xs font-sans shrink-0">
           <button
             onClick={onClose}
-            className="w-full sm:w-auto px-4 py-2 bg-[#0e1626] hover:bg-[#162338] border border-[#18263a] text-slate-300 rounded-xl transition text-center"
+            className="w-full sm:w-auto px-4 py-2 bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 rounded-md transition text-center cursor-pointer"
           >
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={!file || uploading}
-            className="w-full sm:w-auto px-5 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 disabled:opacity-50 text-white font-bold rounded-xl shadow-md shadow-blue-600/25 transition flex items-center justify-center gap-2 text-center"
+            className="w-full sm:w-auto px-5 py-2 bg-neutral-100 hover:bg-white disabled:opacity-40 text-neutral-900 font-semibold rounded-md shadow-xs transition flex items-center justify-center gap-2 text-center cursor-pointer"
           >
             {uploading ? (
               <>
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
                 <span>Parsing & Reconciling...</span>
               </>
             ) : (
               <>
-                <CheckCircle2 className="w-4 h-4" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 <span>Upload & Reconcile</span>
               </>
             )}
