@@ -10,11 +10,6 @@ on:
       - ".github/workflows/docker-scan.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "backend/Dockerfile"
-      - "frontend/Dockerfile"
-      - "docker-compose.yml"
-      - ".github/workflows/docker-scan.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,7 +17,7 @@ concurrency:
 
 jobs:
   build-and-scan-backend:
-    name: Build & Scan Backend Image
+    name: Backend Docker build
     runs-on: ubuntu-latest
 
     steps:
@@ -42,7 +37,7 @@ jobs:
           severity: CRITICAL,HIGH
 
   build-and-scan-frontend:
-    name: Build & Scan Frontend Image
+    name: Frontend Docker build
     runs-on: ubuntu-latest
 
     steps:

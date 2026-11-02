@@ -24,9 +24,6 @@ dependencies = [
     "python-Levenshtein>=0.25.0",
 ]
 
-[tool.setuptools.packages.find]
-include = ["app*"]
-
 [project.optional-dependencies]
 dev = [
     "pytest>=8.1.0",
@@ -71,3 +68,11 @@ pythonpath = ["."]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true

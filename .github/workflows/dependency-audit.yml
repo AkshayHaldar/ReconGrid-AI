@@ -9,16 +9,12 @@ on:
       - ".github/workflows/dependency-audit.yml"
   pull_request:
     branches: [main]
-    paths:
-      - "frontend/package-lock.json"
-      - "package-lock.json"
-      - ".github/workflows/dependency-audit.yml"
   schedule:
     - cron: "0 6 * * 1"
 
 jobs:
   audit-frontend:
-    name: Audit Frontend Dependencies
+    name: Security audit
     runs-on: ubuntu-latest
     defaults:
       run:
