@@ -4,8 +4,10 @@
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11+-brightgreen.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-teal.svg)](https://fastapi.tiangolo.com)
 [![Next.js 14](https://img.shields.io/badge/Next.js-14.2-black.svg)](https://nextjs.org)
-[![Razorpay Buildathon Track 04](https://img.shields.io/badge/Razorpay_Buildathon-Track_04:_AI_Finance_Controller-blue)](https://razorpay.com)
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-green.svg)](./contribution.md)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-316192.svg?logo=postgresql&logoColor=white)](https://www.postgresql.org)
+[![Alembic](https://img.shields.io/badge/Alembic-Migrations-red.svg)](https://alembic.sqlalchemy.org)
+[![Backend CI](https://github.com/AkshayHaldar/ReconGrid-AI/actions/workflows/backend-ci.yml/badge.svg)](https://github.com/AkshayHaldar/ReconGrid-AI/actions/workflows/backend-ci.yml)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-green.svg)](./CONTRIBUTING.md)
 
 An open-source settlement reconciliation and discrepancy diagnostic engine with an audited Q&A agent for Razorpay merchants and finance teams.
 
@@ -117,8 +119,10 @@ Users can ask questions like:
 
 ## Tech Stack
 
-- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.0 (async), SQLite (dev/test) / PostgreSQL (prod)
+- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy 2.0 (async), Alembic (migrations)
+- **Database:** SQLite with `aiosqlite` (local dev/testing) / PostgreSQL 15 with `asyncpg` (production & Docker)
 - **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS, Lucide icons
+- **Cache & Services:** Redis 7, Docker & Docker Compose
 - **Payment Gateway:** Razorpay REST API (settlements, payments, refunds, HMAC-SHA256 webhooks)
 - **AI / LLM:** NVIDIA NIM (LLaMA 3.3 70B) for read-only explanations with strict regex guardrail
 
@@ -130,6 +134,7 @@ Users can ask questions like:
 - Python 3.11+
 - Node.js 18+
 - Git
+- (Optional) Docker & Docker Compose
 
 ### 1. Clone the Repository
 ```bash
@@ -149,7 +154,17 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 cp .env.example .env
+
+# Run database migrations with Alembic
+alembic upgrade head
 ```
+
+> **Note on Database Configuration:**
+> By default, `DATABASE_URL` in `.env` is configured for SQLite (`sqlite+aiosqlite:///./recongrid.db`). To use PostgreSQL locally, ensure Postgres is running and configure:
+> ```env
+> DATABASE_URL=postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid
+> ```
+> Then run `alembic upgrade head`.
 
 Start the API server:
 ```bash
@@ -166,11 +181,15 @@ npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) to view the reconciliation dashboard.
 
-### 4. (Optional) Run with Docker Compose
-If you prefer running PostgreSQL 15 and Redis locally:
+### 4. (Alternative) Run Full Stack with Docker Compose
+To run the complete production-like stack (PostgreSQL 15, Redis 7, FastAPI with automated migrations, and Next.js frontend):
 ```bash
-docker compose up -d
+docker compose up --build -d
 ```
+- Frontend: [http://localhost:3000](http://localhost:3000)
+- Backend Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
+- PostgreSQL: `localhost:5432` (user/pass/db: `recongrid`)
+- Redis: `localhost:6379`
 
 ---
 
@@ -195,7 +214,39 @@ pytest tests/unit/test_schema_float_rejection.py -v
 
 # Run throughput benchmark
 python scripts/benchmark_throughput.py
+
+# Linting & Formatting checks (CI parity)
+ruff check .
+ruff format --check .
+
+# Static type checking
+mypy app
 ```
+
+### Generating Test Coverage Locally
+Backend test coverage is measured using `pytest-cov` targeting the `app` package:
+
+```bash
+cd backend
+pip install -e ".[dev]"
+pytest --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html:htmlcov
+```
+
+Open `backend/htmlcov/index.html` in a browser to inspect line-by-line coverage locally. In CI, coverage summaries are published directly to the **GitHub Actions Job Summary** and downloadable via the `backend-coverage-report` workflow artifact.
+
+### Required CI Checks
+All pull requests targeting `main` must pass the following 10 required status checks before merging:
+
+- Backend pytest
+- Ruff
+- mypy
+- Frontend typecheck
+- Frontend lint
+- Frontend production build
+- Security audit
+- Backend Docker build
+- Frontend Docker build
+- PostgreSQL integration tests
 
 ---
 
@@ -263,7 +314,7 @@ All routes are under `/api/v1`:
 
 We are opening this project up to the community to make it the standard open-source reconciliation engine for businesses, developers, and finance teams.
 
-If you want to contribute, please check [contribution.md](./contribution.md).
+If you want to contribute, please check [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ### Roadmap & Ideas to Work On
 
@@ -285,24 +336,32 @@ If you want to contribute, please check [contribution.md](./contribution.md).
 
 ```
 ReconGrid-AI/
+├── .github/
+│   └── workflows/          # GitHub Actions (Backend CI, Frontend CI, Docker & Trivy scan)
 ├── backend/
+│   ├── alembic/            # Database schema migration versions
+│   │   └── versions/
 │   ├── app/
 │   │   ├── api/v1/         # Route handlers (bank, razorpay, reconciliation, qa, webhooks)
-│   │   ├── core/           # Config, database, security (HMAC), logging
+│   │   ├── core/           # Config, database engine, security (HMAC), logging
 │   │   ├── models/         # SQLAlchemy async models
 │   │   ├── schemas/        # Pydantic v2 validation models
 │   │   ├── services/       # Ingestion, matching engine, diagnostics, Q&A agent
 │   │   └── utils/          # Decimal money helpers, CSV streaming, fuzzy string logic
 │   ├── scripts/            # Benchmarks, synthetic data seeder, scorecard CLI
-│   └── tests/              # Unit, integration, and messy fixture test suites
+│   ├── tests/              # Unit, integration, and messy fixture test suites
+│   ├── alembic.ini         # Alembic migration configuration
+│   ├── Dockerfile          # Backend container image definition
+│   └── requirements.txt    # Production & dev dependencies
 ├── frontend/
 │   ├── src/
 │   │   ├── app/            # Next.js App Router (dashboard page and layout)
 │   │   ├── components/     # Table, drawers, summary cards, Q&A slide-out
 │   │   └── lib/            # Typed API client, currency formatters
+│   └── Dockerfile          # Frontend container image definition
 ├── docs/                   # Deep dives on architecture, system design, Razorpay setup
 ├── sample_data/            # Sample statement fixtures (HDFC, ICICI, SBI)
-└── docker-compose.yml      # PostgreSQL 15 & Redis 7 services
+└── docker-compose.yml      # PostgreSQL 15, Redis 7, Backend & Frontend services
 ```
 
 ---
