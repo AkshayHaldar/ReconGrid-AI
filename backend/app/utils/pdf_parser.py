@@ -219,7 +219,10 @@ class BankPdfParser:
                 if not raw_date or not cls.DATE_LINE_REGEX.match(raw_date):
                     continue
 
-                parsed_date = parse_flexible_date(raw_date)
+                try:
+                    parsed_date = parse_flexible_date(raw_date)
+                except ValueError:
+                    continue
 
                 desc_idx = header_map.get("narration")
                 description = clean_cells[desc_idx] if (desc_idx is not None and desc_idx < len(clean_cells)) else ""
@@ -311,7 +314,10 @@ class BankPdfParser:
                 continue
 
             raw_date = match.group(1)
-            parsed_date = parse_flexible_date(raw_date)
+            try:
+                parsed_date = parse_flexible_date(raw_date)
+            except ValueError:
+                continue
 
             # Find numerical tokens at the end of the line (amounts / balance)
             tokens = line_str[len(raw_date) :].strip().split()
