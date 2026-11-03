@@ -93,8 +93,8 @@ export async function uploadBankStatement(
   const formData = new FormData();
   formData.append("file", file);
   formData.append("batch_id", batchId);
-  if (password && password.trim()) {
-    formData.append("password", password.trim());
+  if (password) {
+    formData.append("password", password);
   }
 
   const res = await fetch(`${getApiBase()}/bank/upload`, {
