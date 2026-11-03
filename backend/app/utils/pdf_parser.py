@@ -246,7 +246,8 @@ class BankPdfParser:
                     amount = to_decimal(raw_wdr)
                     direction = "DEBIT"
                 elif raw_amt:
-                    amount, direction = parse_amount_and_direction(raw_amt)
+                    amount_text = re.sub(r"(DR|CR)\.$", r"\1", raw_amt, flags=re.IGNORECASE)
+                    amount, direction = parse_amount_and_direction(amount_text)
                 else:
                     continue
 
