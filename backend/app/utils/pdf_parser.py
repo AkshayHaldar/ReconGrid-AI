@@ -81,7 +81,7 @@ class BankPdfParser:
     BALANCE_HEADER = re.compile(r"(balance|bal|closing\s*balance)", re.IGNORECASE)
 
     DATE_LINE_REGEX = re.compile(
-        r"^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
+        r"^(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
     )
 
     @classmethod
