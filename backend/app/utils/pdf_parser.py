@@ -97,7 +97,7 @@ class BankPdfParser:
             return pdf_bytes
 
         # PDF is encrypted. Try empty password first if none provided
-        pwd = password.strip() if password else ""
+        pwd = password if password is not None else ""
 
         # Check if empty string can decrypt
         if not pwd:
