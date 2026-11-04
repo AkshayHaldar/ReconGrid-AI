@@ -57,6 +57,9 @@ module.exports = {
         mono: ['"JetBrains Mono"', '"Fira Code"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
       },
+      boxShadow: {
+        xs: "0 1px 2px 0 rgba(0, 0, 0, 0.25)",
+      },
     },
   },
   plugins: [],
