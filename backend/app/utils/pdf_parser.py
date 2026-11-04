@@ -13,7 +13,7 @@ import pypdf
 from app.core.config import settings
 from app.core.logging import logger
 from app.utils.csv_parser import compute_row_hash, extract_utr_from_text, parse_flexible_date
-from app.utils.money import to_decimal
+from app.utils.money import parse_amount_and_direction, to_decimal
 
 # Known Indian Bank Password Formats / Patterns Guide
 BANK_PASSWORD_FORMATS = [
@@ -246,9 +246,8 @@ class BankPdfParser:
                     amount = to_decimal(raw_wdr)
                     direction = "DEBIT"
                 elif raw_amt:
-                    parsed_amt = to_decimal(raw_amt)
-                    amount = abs(parsed_amt)
-                    direction = "DEBIT" if parsed_amt < Decimal("0.00") else "CREDIT"
+                    amount_text = re.sub(r"(DR|CR)\.$", r"\1", raw_amt, flags=re.IGNORECASE)
+                    amount, direction = parse_amount_and_direction(amount_text)
                 else:
                     continue
 
