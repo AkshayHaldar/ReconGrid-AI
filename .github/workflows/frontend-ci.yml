@@ -37,6 +37,9 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: API unit tests
+        run: npm test
+
   lint:
     name: Frontend lint
     runs-on: ubuntu-latest
