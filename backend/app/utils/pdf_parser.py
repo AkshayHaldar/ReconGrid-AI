@@ -81,7 +81,7 @@ class BankPdfParser:
     BALANCE_HEADER = re.compile(r"(balance|bal|closing\s*balance)", re.IGNORECASE)
 
     DATE_LINE_REGEX = re.compile(
-        r"^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
+        r"^(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
     )
 
     @classmethod
@@ -219,7 +219,10 @@ class BankPdfParser:
                 if not raw_date or not cls.DATE_LINE_REGEX.match(raw_date):
                     continue
 
-                parsed_date = parse_flexible_date(raw_date)
+                try:
+                    parsed_date = parse_flexible_date(raw_date)
+                except ValueError:
+                    continue
 
                 desc_idx = header_map.get("narration")
                 description = clean_cells[desc_idx] if (desc_idx is not None and desc_idx < len(clean_cells)) else ""
@@ -311,7 +314,10 @@ class BankPdfParser:
                 continue
 
             raw_date = match.group(1)
-            parsed_date = parse_flexible_date(raw_date)
+            try:
+                parsed_date = parse_flexible_date(raw_date)
+            except ValueError:
+                continue
 
             # Find numerical tokens at the end of the line (amounts / balance)
             tokens = line_str[len(raw_date) :].strip().split()
