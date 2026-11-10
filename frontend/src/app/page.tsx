@@ -267,7 +267,7 @@ export default function DashboardPage() {
     if (selectedDiagnostic === "ALL") return true;
     return r.diagnostic_type === selectedDiagnostic;
   });
-
+  const isEmpty = Boolean(status && status.total_records === 0);
   return (
     <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-white">
       {/* Header Navigation */}
@@ -281,8 +281,7 @@ export default function DashboardPage() {
       />
 
       {/* Main Financial Workspace */}
-      <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5">
-        {/* Executive Summary Metric Cards & Trial Balance Control */}
+      <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
         <SummaryCards
           status={status}
           onOpenUpload={() => setIsUploadOpen(true)}
@@ -293,35 +292,36 @@ export default function DashboardPage() {
           }}
         />
 
-        {/* Filter and Action Bar */}
-        <FilterBar
-          activeTab={activeTab}
-          onTabChange={(tab) => {
-            setActiveTab(tab);
-            setSelectedDiagnostic("ALL");
-          }}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          status={status}
-          onExportCsv={handleExportCsv}
-          selectedDiagnostic={selectedDiagnostic}
-          onDiagnosticChange={setSelectedDiagnostic}
-          onBatchApprove={handleBatchApprove}
-          batchApproveLoading={batchApproveLoading}
-        />
+        {!isEmpty && (
+          <>
+            <FilterBar
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                setActiveTab(tab);
+                setSelectedDiagnostic("ALL");
+             }}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              status={status}
+              onExportCsv={handleExportCsv}
+              selectedDiagnostic={selectedDiagnostic}
+              onDiagnosticChange={setSelectedDiagnostic}
+              onBatchApprove={handleBatchApprove}
+              batchApproveLoading={batchApproveLoading}
+            />
 
-        {/* High-Density Reconciliation Ledger Table */}
-        <ReconciliationTable
-          records={displayedRecords}
-          highlightedRecordId={highlightedId}
-          onApprove={handleApprove}
-          onDeny={handleDeny}
-          onOpenConflict={(r) => setConflictTarget(r)}
-          onOpenException={(r) => setExceptionTarget(r)}
-          loading={loading}
-        />
+             <ReconciliationTable
+                records={displayedRecords}
+                highlightedRecordId={highlightedId}
+                onApprove={handleApprove}
+                onDeny={handleDeny}
+                onOpenConflict={(r) => setConflictTarget(r)}
+                onOpenException={(r) => setExceptionTarget(r)}
+                loading={loading}
+              />
+            </>
+         )}
       </main>
-
       {/* Slide-out Settlement Q&A Copilot Panel */}
       <SettlementQaPanel
         isOpen={isQaOpen}
