@@ -267,7 +267,7 @@ export default function DashboardPage() {
     if (selectedDiagnostic === "ALL") return true;
     return r.diagnostic_type === selectedDiagnostic;
   });
-  const isEmpty = !status || status.total_records === 0 || records.length === 0;
+  const isEmpty = Boolean(status && status.total_records === 0);
   return (
     <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-white">
       {/* Header Navigation */}
