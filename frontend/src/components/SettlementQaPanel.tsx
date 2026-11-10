@@ -47,7 +47,6 @@ const createInitialTab = (tabNum: number): ChatTab => ({
       id: `welcome-${Date.now()}`,
       sender: "agent",
       text: "Welcome to ReconGrid Audit Assistant. Inquire about general accounting rules (MDR fees, GST, Section 194-O TDS) or enter specific transaction UTRs and settlement IDs for audited explanations verified against deterministic ledger records.",
-      text: "Welcome to ReconGrid Audit Assistant. Ask any question regarding UTR matches, 2% MDR fee + 18% GST deductions, Section 194-O TDS calculations, batched settlements, or specific transaction IDs to get an audited explanation narrated directly from deterministic log records.",
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     },
   ],
