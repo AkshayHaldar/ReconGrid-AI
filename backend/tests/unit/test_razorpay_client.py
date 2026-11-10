@@ -70,6 +70,8 @@ async def test_sync_settlements_pagination_and_upsert():
         (mock_setl3, True),   # newly inserted
     ])
 
+    # Mock the DB get_all() to simulate returning the full list of historical settlements
+    client.settlement_repo.get_all = AsyncMock(return_value=[mock_setl1, mock_setl2, mock_setl3])
     bank_tx = BankTransaction(id="b1", amount=Decimal("49100.00"), date=datetime.now(UTC), row_hash="h1")
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[bank_tx])
     client.engine.reconcile_batch = AsyncMock()
@@ -100,8 +102,42 @@ async def test_sync_settlements_fetch_exception_handled():
     client = RazorpayClient(session)
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[])
 
+    # Mock the DB get_all() because our new logic calls it even when API fails
+    client.settlement_repo.get_all = AsyncMock(return_value=[])
     with patch.object(settings, "RAZORPAY_KEY_ID", "rzp_live_testkey"):
         with patch.object(client, "_fetch_settlements_page", AsyncMock(side_effect=Exception("Network failure"))):
             res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
             assert res.fetched_count == 0
             assert res.reconciliation_triggered is False
+
+@pytest.mark.asyncio
+async def test_sync_settlements_reconciles_existing_db_data_when_api_is_empty():
+    """
+    Tests that even if the Razorpay API returns 0 new records,
+    the system still fetches existing settlements from the DB and triggers reconciliation.
+    """
+    session = AsyncMock()
+    client = RazorpayClient(session)
+
+    # Mock the DB to return historical settlements
+    mock_setl = RazorpaySettlement(
+        id="s_hist_1", settlement_id="setl_hist_1", amount=Decimal("10000.00"), settlement_created_at=datetime.now(UTC)
+    )
+    client.settlement_repo.get_all = AsyncMock(return_value=[mock_setl])
+
+    # Mock active bank transactions
+    bank_tx = BankTransaction(id="b1", amount=Decimal("10000.00"), date=datetime.now(UTC), row_hash="h1")
+    client.bank_repo.get_all_by_batch = AsyncMock(return_value=[bank_tx])
+
+    # Mock the engine
+    client.engine.reconcile_batch = AsyncMock()
+
+    with patch.object(settings, "RAZORPAY_KEY_ID", "rzp_live_testkey"):
+        # Mock the API to return an empty list
+        with patch.object(client, "_fetch_settlements_page", AsyncMock(return_value={"items": []})):
+            res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
+
+            # Assertions
+            assert res.fetched_count == 0
+            assert res.reconciliation_triggered is True
+            client.engine.reconcile_batch.assert_awaited_once()

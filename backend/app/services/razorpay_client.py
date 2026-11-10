@@ -116,14 +116,15 @@ class RazorpayClient:
                 logger.error("razorpay_fetch_failed_using_cached_or_test", error=str(ex))
 
         # Save to database
-        all_settlements = []
         for s_data in settlement_records:
             setl, created = await self.settlement_repo.upsert_settlement(s_data)
-            all_settlements.append(setl)
             if created:
                 newly_inserted += 1
             else:
                 updated_count += 1
+
+        # Fetch full list of settlements from DB instead of only using newly fetched data.
+        all_settlements = await self.settlement_repo.get_all()
 
         # Trigger reconciliation on active bank batch
         bank_txs = await self.bank_repo.get_all_by_batch(batch_id)

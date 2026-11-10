@@ -13,7 +13,7 @@ import pypdf
 from app.core.config import settings
 from app.core.logging import logger
 from app.utils.csv_parser import compute_row_hash, extract_utr_from_text, parse_flexible_date
-from app.utils.money import to_decimal
+from app.utils.money import parse_amount_and_direction, to_decimal
 
 # Known Indian Bank Password Formats / Patterns Guide
 BANK_PASSWORD_FORMATS = [
@@ -81,7 +81,7 @@ class BankPdfParser:
     BALANCE_HEADER = re.compile(r"(balance|bal|closing\s*balance)", re.IGNORECASE)
 
     DATE_LINE_REGEX = re.compile(
-        r"^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
+        r"^(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}|\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{1,2}\s+[A-Za-z]{3}\s+\d{2,4})"
     )
 
     @classmethod
@@ -97,7 +97,7 @@ class BankPdfParser:
             return pdf_bytes
 
         # PDF is encrypted. Try empty password first if none provided
-        pwd = password.strip() if password else ""
+        pwd = password if password is not None else ""
 
         # Check if empty string can decrypt
         if not pwd:
@@ -219,7 +219,10 @@ class BankPdfParser:
                 if not raw_date or not cls.DATE_LINE_REGEX.match(raw_date):
                     continue
 
-                parsed_date = parse_flexible_date(raw_date)
+                try:
+                    parsed_date = parse_flexible_date(raw_date)
+                except ValueError:
+                    continue
 
                 desc_idx = header_map.get("narration")
                 description = clean_cells[desc_idx] if (desc_idx is not None and desc_idx < len(clean_cells)) else ""
@@ -246,9 +249,8 @@ class BankPdfParser:
                     amount = to_decimal(raw_wdr)
                     direction = "DEBIT"
                 elif raw_amt:
-                    parsed_amt = to_decimal(raw_amt)
-                    amount = abs(parsed_amt)
-                    direction = "DEBIT" if parsed_amt < Decimal("0.00") else "CREDIT"
+                    amount_text = re.sub(r"(DR|CR)\.$", r"\1", raw_amt, flags=re.IGNORECASE)
+                    amount, direction = parse_amount_and_direction(amount_text)
                 else:
                     continue
 
@@ -311,7 +313,10 @@ class BankPdfParser:
                 continue
 
             raw_date = match.group(1)
-            parsed_date = parse_flexible_date(raw_date)
+            try:
+                parsed_date = parse_flexible_date(raw_date)
+            except ValueError:
+                continue
 
             # Find numerical tokens at the end of the line (amounts / balance)
             tokens = line_str[len(raw_date) :].strip().split()
