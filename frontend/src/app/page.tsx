@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/Header";
 import { SummaryCards } from "@/components/SummaryCards";
 import { FilterBar } from "@/components/FilterBar";
@@ -23,6 +24,11 @@ import {
   denyRecord,
   resolveConflict,
 } from "@/lib/api";
+import {
+  buildFilterSearchParams,
+  filterReconciliationRecords,
+  parseFilterSearchParams,
+} from "@/lib/filters";
 
 interface ToastAction {
   id: string;
@@ -32,16 +38,70 @@ interface ToastAction {
   previousRecord: ReconciliationRecordItem;
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
   const [records, setRecords] = useState<ReconciliationRecordItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("ALL");
-  const [selectedDiagnostic, setSelectedDiagnostic] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState(
+    () => parseFilterSearchParams(searchParams).status
+  );
+  const [selectedDiagnostic, setSelectedDiagnostic] = useState(
+    () => parseFilterSearchParams(searchParams).diagnostic
+  );
+  const [searchQuery, setSearchQuery] = useState(
+    () => parseFilterSearchParams(searchParams).q
+  );
+  const [startDate, setStartDate] = useState(
+    () => parseFilterSearchParams(searchParams).startDate
+  );
+  const [endDate, setEndDate] = useState(
+    () => parseFilterSearchParams(searchParams).endDate
+  );
+  const [minAmount, setMinAmount] = useState(
+    () => parseFilterSearchParams(searchParams).minAmount
+  );
+  const [maxAmount, setMaxAmount] = useState(
+    () => parseFilterSearchParams(searchParams).maxAmount
+  );
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
+
+  // Sync active filters to URL search params for shareable auditor views
+  const lastSyncedQueryRef = useRef<string>(searchParams.toString());
+
+  useEffect(() => {
+    const nextParams = buildFilterSearchParams({
+      status: activeTab,
+      q: searchQuery,
+      diagnostic: selectedDiagnostic,
+      startDate,
+      endDate,
+      minAmount,
+      maxAmount,
+    });
+    const nextQuery = nextParams.toString();
+
+    if (nextQuery === lastSyncedQueryRef.current) return;
+
+    lastSyncedQueryRef.current = nextQuery;
+    const targetUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    router.replace(targetUrl, { scroll: false });
+  }, [
+    activeTab,
+    searchQuery,
+    selectedDiagnostic,
+    startDate,
+    endDate,
+    minAmount,
+    maxAmount,
+    pathname,
+    router,
+  ]);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -250,6 +310,11 @@ export default function DashboardPage() {
     setHighlightedId(recordId);
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
+    setSearchQuery("");
+    setStartDate("");
+    setEndDate("");
+    setMinAmount("");
+    setMaxAmount("");
     setTimeout(() => {
       const el = document.getElementById(`record-${recordId}`);
       if (el) {
@@ -258,15 +323,33 @@ export default function DashboardPage() {
     }, 150);
   };
 
+  const handleClearFilters = useCallback(() => {
+    setSelectedDiagnostic("ALL");
+    setSearchQuery("");
+    setStartDate("");
+    setEndDate("");
+    setMinAmount("");
+    setMaxAmount("");
+  }, []);
+
   const handleExportCsv = () => {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
 
-  // Filter records by diagnostic sub-type if selected
-  const displayedRecords = records.filter((r) => {
-    if (selectedDiagnostic === "ALL") return true;
-    return r.diagnostic_type === selectedDiagnostic;
-  });
+  // Filter records reactively by diagnostic sub-type, date range (r.date), and amount range (r.bank_amount)
+  const displayedRecords = useMemo(
+    () =>
+      filterReconciliationRecords(records, {
+        diagnostic: selectedDiagnostic,
+        startDate,
+        endDate,
+        minAmount,
+        maxAmount,
+      }),
+    [records, selectedDiagnostic, startDate, endDate, minAmount, maxAmount]
+  );
+
+  const tableFilterKey = `${activeTab}|${selectedDiagnostic}|${searchQuery}|${startDate}|${endDate}|${minAmount}|${maxAmount}`;
   const isEmpty = Boolean(status && status.total_records === 0);
   return (
     <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-white">
@@ -299,13 +382,24 @@ export default function DashboardPage() {
               onTabChange={(tab) => {
                 setActiveTab(tab);
                 setSelectedDiagnostic("ALL");
-             }}
+              }}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               status={status}
               onExportCsv={handleExportCsv}
               selectedDiagnostic={selectedDiagnostic}
               onDiagnosticChange={setSelectedDiagnostic}
+              startDate={startDate}
+              onStartDateChange={setStartDate}
+              endDate={endDate}
+              onEndDateChange={setEndDate}
+              minAmount={minAmount}
+              onMinAmountChange={setMinAmount}
+              maxAmount={maxAmount}
+              onMaxAmountChange={setMaxAmount}
+              onClearFilters={handleClearFilters}
+              filteredCount={displayedRecords.length}
+              totalLoadedCount={records.length}
               onBatchApprove={handleBatchApprove}
               batchApproveLoading={batchApproveLoading}
             />
@@ -318,6 +412,7 @@ export default function DashboardPage() {
                 onOpenConflict={(r) => setConflictTarget(r)}
                 onOpenException={(r) => setExceptionTarget(r)}
                 loading={loading}
+                filterKey={tableFilterKey}
               />
             </>
          )}
@@ -386,5 +481,21 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex items-center justify-center">
+          <div className="text-xs font-mono text-neutral-400">
+            Loading settlement reconciliation console...
+          </div>
+        </div>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }

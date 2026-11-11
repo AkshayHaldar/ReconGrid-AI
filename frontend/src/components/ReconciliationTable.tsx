@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Check,
   X,
@@ -31,6 +31,7 @@ interface ReconciliationTableProps {
   onOpenConflict: (record: ReconciliationRecordItem) => void;
   onOpenException: (record: ReconciliationRecordItem) => void;
   loading: boolean;
+  filterKey?: string;
 }
 
 type SortField = "date" | "bank_amount" | "rzp_amount" | "delta_amount" | "bank_utr";
@@ -44,6 +45,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   onOpenConflict,
   onOpenException,
   loading,
+  filterKey,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -51,6 +53,10 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterKey]);
 
   const handleCopy = (text: string, id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -91,10 +97,18 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   }, [records, sortField, sortOrder]);
 
   const totalPages = Math.ceil(sortedRecords.length / pageSize) || 1;
+  const safePage = Math.min(currentPage, totalPages);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
+    const start = (safePage - 1) * pageSize;
     return sortedRecords.slice(start, start + pageSize);
-  }, [sortedRecords, currentPage, pageSize]);
+  }, [sortedRecords, safePage, pageSize]);
 
   if (loading && records.length === 0) {
     return (
@@ -508,24 +522,24 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
       {/* Pagination Footer */}
       <div className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] flex items-center justify-between text-xs font-mono text-neutral-400">
         <div>
-          Showing {(currentPage - 1) * pageSize + 1} to{" "}
-          {Math.min(currentPage * pageSize, sortedRecords.length)} of {sortedRecords.length} records
+          Showing {(safePage - 1) * pageSize + 1} to{" "}
+          {Math.min(safePage * pageSize, sortedRecords.length)} of {sortedRecords.length} records
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            disabled={currentPage === 1}
+            onClick={() => setCurrentPage((p) => Math.max(Math.min(p, totalPages) - 1, 1))}
+            disabled={safePage === 1}
             className="p-1 rounded bg-[#151820] hover:bg-[#1d212c] border border-[#1e222d] disabled:opacity-40 transition cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
           <span>
-            Page {currentPage} of {totalPages}
+            Page {safePage} of {totalPages}
           </span>
           <button
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            disabled={currentPage === totalPages}
+            onClick={() => setCurrentPage((p) => Math.min(Math.min(p, totalPages) + 1, totalPages))}
+            disabled={safePage === totalPages}
             className="p-1 rounded bg-[#151820] hover:bg-[#1d212c] border border-[#1e222d] disabled:opacity-40 transition cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
