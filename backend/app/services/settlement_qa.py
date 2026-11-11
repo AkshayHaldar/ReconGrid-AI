@@ -4,6 +4,8 @@ Provides natural language narration of already-computed reconciliation facts.
 Strictly auditable, deterministic retrieval, and guarded output.
 """
 
+import re
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -371,6 +373,225 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     return None
 
 
+# ─── Tool registry ───────────────────────────────────────────────────────────
+# Each tool is a deterministic function over verified database values. Nothing here calls an LLM
+# and no number is produced that did not come from a repository record or live summary metric.
+
+_UTR_RE = re.compile(r"\b[A-Za-z]{3,5}\d{5,}[A-Za-z0-9]*\b")
+_SETTLEMENT_RE = re.compile(r"\bsetl_[A-Za-z0-9]+\b", re.IGNORECASE)
+_TDS_RATE = Decimal("0.01")
+
+_DIAGNOSTIC_EXPLANATIONS: dict[str, str] = {
+    "FEE_DEDUCTION": (
+        "The settlement was credited short because Razorpay deducted its gateway fee and 18% GST on that fee "
+        "before paying out. The engine recomputes both from the gross amount and confirms the delta is zero."
+    ),
+    "REFUND_ADJUSTED": (
+        "Customer refunds issued in the settlement window were netted off the payout. The engine adds the "
+        "refund total back and confirms the bank credit equals gross minus fees, GST and refunds."
+    ),
+    "BATCHED_SETTLEMENT": (
+        "One bank credit covers several Razorpay settlements. The batching solver searches a ±2 day window and "
+        "binds them together when their sum equals the credit."
+    ),
+    "REVERSAL": (
+        "A previously credited amount was reversed or clawed back by the gateway or bank, so the bank "
+        "statement shows an outflow tied to an earlier settlement."
+    ),
+    "TDS_194O_DEDUCTION": (
+        "Section 194-O TDS of 1% on gross e-commerce sales was withheld in addition to the gateway fee and GST."
+    ),
+}
+
+# Spelled-out names a person would type, mapped to the diagnostic they mean.
+_DIAGNOSTIC_ALIASES: dict[str, tuple[str, ...]] = {
+    "FEE_DEDUCTION": ("fee_deduction", "fee deduction", "short settlement", "settled short", "paid short"),
+    "REFUND_ADJUSTED": ("refund_adjusted", "refund adjusted", "refund adjustment", "refund clawback"),
+    "BATCHED_SETTLEMENT": ("batched_settlement", "batched settlement", "batched", "combined settlement", "clubbed"),
+    "REVERSAL": ("reversal", "reversed", "clawback", "charged back"),
+    "TDS_194O_DEDUCTION": ("tds_194o", "194-o", "194o"),
+}
+
+_INSPECT_WORDS = ("fee", "fees", "gst", "tax", "tds", "breakdown", "break down", "deduction", "deductions",
+                  "charge", "charges", "mdr", "commission", "forensic", "split")
+_BALANCE_WORDS = ("variance", "trial balance", "in balance", "out of balance", "balance sheet", "conservation",
+                  "books tally", "tally", "mismatch", "unreconciled", "difference between bank", "off by",
+                  "shortfall", "discrepancy total")
+_SUMMARY_WORDS = ("batch summary", "summary", "statistics", "stats", "how many", "match count", "matched count",
+                  "number of matched", "totals", "overall status", "reconciliation status")
+
+
+@dataclass(frozen=True)
+class ParsedQuery:
+    """What a question is asking for, extracted without any model call."""
+
+    intent: str | None
+    utr: str | None = None
+    settlement_id: str | None = None
+    diagnostic_type: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    tool: str
+    answer: str
+    data: dict = field(default_factory=dict)
+
+
+def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(p) + r"(?![a-z0-9])", text) for p in phrases)
+
+
+def parse_query(query: str) -> ParsedQuery:
+    """Extract UTR / settlement id entities and one intent from natural phrasing."""
+    text = (query or "").strip()
+    q = text.lower()
+
+    settlement = _SETTLEMENT_RE.search(text)
+    utr = next((m.group(0) for m in _UTR_RE.finditer(text) if not m.group(0).lower().startswith("setl")), None)
+
+    diagnostic = next(
+        (name for name, aliases in _DIAGNOSTIC_ALIASES.items() if _contains_any(q, aliases)), None
+    )
+
+    has_entity = bool(settlement or utr)
+    if has_entity and _contains_any(q, _INSPECT_WORDS):
+        intent = "inspect_record"
+    elif diagnostic and not has_entity and _contains_any(q, ("why", "what", "explain", "mean", "means", "reason")):
+        intent = "explain_diagnostic"
+    elif not has_entity and _contains_any(q, _BALANCE_WORDS):
+        intent = "audit_trial_balance"
+    elif not has_entity and _contains_any(q, _SUMMARY_WORDS):
+        intent = "get_batch_summary"
+    else:
+        intent = None
+
+    return ParsedQuery(intent, utr, settlement.group(0) if settlement else None, diagnostic)
+
+
+def get_batch_summary_tool(summary: dict | None) -> ToolResult | None:
+    """Match statistics, totals and variance straight from the live dashboard metrics."""
+    if not summary:
+        return None
+    rows = [
+        ("Total records", summary.get("total_records", 0)),
+        ("Auto-reconciled", summary.get("matched_count", 0)),
+        ("Suggested (CA review)", summary.get("suggested_count", 0)),
+        ("Conflicts", summary.get("conflict_count", 0)),
+        ("Exceptions", summary.get("exception_count", 0)),
+    ]
+    reconciled = format_inr(to_decimal(summary.get("total_reconciled_amount", 0)))
+    ingested = format_inr(to_decimal(summary.get("total_ingested_amount", 0)))
+    variance = format_inr(to_decimal(summary.get("total_unresolved_variance", 0)))
+    lines = [f"• **{label}**: {value}" for label, value in rows]
+    answer = (
+        "📊 **Batch Summary**\n\n"
+        + "\n".join(lines)
+        + f"\n• **Match rate**: {summary.get('match_rate_percentage', 'N/A')}%\n"
+        f"• **Total ingested**: {ingested}\n"
+        f"• **Auto-reconciled amount**: {reconciled}\n"
+        f"• **Unresolved variance**: {variance}"
+    )
+    return ToolResult("get_batch_summary_tool", answer, {"type": "tool", "tool": "get_batch_summary_tool", "summary": summary})
+
+
+def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
+    """Full forensic fee, GST and TDS breakdown for one reconciliation record."""
+    setl = log.rzp_settlement
+    setl_id = setl.settlement_id if setl else "Unlinked"
+    utr = log.bank_transaction.utr if log.bank_transaction else (setl.utr if setl else "N/A")
+    gross = to_decimal(setl.gross_amount) if setl else Decimal("0.00")
+    fee = to_decimal(setl.fees) if setl else Decimal("0.00")
+    gst = to_decimal(setl.tax) if setl else Decimal("0.00")
+    tds = (gross * _TDS_RATE).quantize(Decimal("0.01")) if log.diagnostic_type == "TDS_194O_DEDUCTION" else Decimal("0.00")
+    net = gross - fee - gst - tds
+    delta = to_decimal(log.delta_amount)
+
+    answer = (
+        f"💰 **Fee, GST & TDS Breakdown for {setl_id}** (UTR `{utr}`)\n\n"
+        f"• **Gross amount**: {format_inr(gross)}\n"
+        f"• **Gateway fee**: {format_inr(fee)}\n"
+        f"• **GST on fee**: {format_inr(gst)}\n"
+        f"• **Section 194-O TDS (1%)**: {format_inr(tds)}\n"
+        f"• **Expected net payout**: {format_inr(net)}\n"
+        f"• **Variance (delta)**: {format_inr(delta)}\n"
+        f"• **Classification**: `{log.diagnostic_type}`\n\n"
+        "$$\\text{Net} = \\text{Gross} - \\text{Fee} - \\text{GST} - \\text{TDS}"
+        f" = {format_inr(gross)} - {format_inr(fee)} - {format_inr(gst)} - {format_inr(tds)}"
+        f" = {format_inr(net)}$$"
+    )
+    data = {
+        "type": "tool",
+        "tool": "inspect_record_tool",
+        "settlement_id": setl.settlement_id if setl else None,
+        "utr": utr,
+        "gross": str(gross),
+        "fee": str(fee),
+        "gst": str(gst),
+        "tds": str(tds),
+        "net": str(net),
+        "delta_amount": str(delta),
+        "diagnostic_type": log.diagnostic_type,
+    }
+    return ToolResult("inspect_record_tool", answer, data)
+
+
+def audit_trial_balance_tool(summary: dict | None) -> ToolResult | None:
+    """Conservation check: the buckets must add up to what was ingested."""
+    if not summary:
+        return None
+    ingested = to_decimal(summary.get("total_ingested_amount", 0))
+    parts = {
+        "Auto-reconciled": to_decimal(summary.get("total_reconciled_amount", 0)),
+        "CA review": to_decimal(summary.get("total_suggested_amount", 0)) + to_decimal(summary.get("total_conflict_amount", 0)),
+        "In-transit": to_decimal(summary.get("total_pending_amount", 0)),
+        "Exceptions": to_decimal(summary.get("total_exception_amount", 0)),
+    }
+    accounted = sum(parts.values(), Decimal("0.00"))
+    variance = to_decimal(summary.get("total_unresolved_variance", 0))
+    balanced = bool(summary.get("is_in_balance", False))
+    status = "✅ **In balance**" if balanced else f"⚠️ **Active variance: {format_inr(variance)}**"
+    lines = "\n".join(f"• **{name}**: {format_inr(value)}" for name, value in parts.items())
+    answer = (
+        f"🚨 **Trial Balance Audit**\n\n{status}\n\n"
+        f"• **Total ingested**: {format_inr(ingested)}\n{lines}\n"
+        f"• **Sum of buckets**: {format_inr(accounted)}\n\n"
+        "$$\\sum \\text{Bank} \\equiv \\sum \\text{Ledger}$$"
+    )
+    data = {
+        "type": "tool",
+        "tool": "audit_trial_balance_tool",
+        "is_in_balance": balanced,
+        "total_unresolved_variance": str(variance),
+        "total_ingested_amount": str(ingested),
+        "bucket_sum": str(accounted),
+    }
+    return ToolResult("audit_trial_balance_tool", answer, data)
+
+
+def explain_diagnostic_tool(diagnostic_type: str | None) -> ToolResult | None:
+    """What a diagnostic classification means. Pure text, no figures."""
+    explanation = _DIAGNOSTIC_EXPLANATIONS.get(diagnostic_type or "")
+    if not explanation:
+        return None
+    answer = f"🔍 **{diagnostic_type}**\n\n{explanation}"
+    return ToolResult("explain_diagnostic_tool", answer, {"type": "tool", "tool": "explain_diagnostic_tool", "diagnostic_type": diagnostic_type})
+
+
+TOOL_REGISTRY = {
+    "get_batch_summary": get_batch_summary_tool,
+    "audit_trial_balance": audit_trial_balance_tool,
+}
+
+
+def route_query(parsed: ParsedQuery, summary: dict | None) -> ToolResult | None:
+    """Run the tool that fits a question that names no record. None means no tool applies."""
+    if parsed.intent == "explain_diagnostic":
+        return explain_diagnostic_tool(parsed.diagnostic_type)
+    tool = TOOL_REGISTRY.get(parsed.intent or "")
+    return tool(summary) if tool else None
+
+
 class SettlementQaAgent:
     def __init__(self, qa_repo: QaRepository):
         self.qa_repo = qa_repo
@@ -398,6 +619,34 @@ class SettlementQaAgent:
 
         # 1. Deterministic Retrieval Step for Specific Record Lookups in Current Query
         source_log = await self.qa_repo.find_reconciliation_record(clean_query)
+
+        # 1b. Tool registry: deterministic answers built only from repository values
+        parsed = parse_query(clean_query)
+        if source_log and parsed.intent == "inspect_record":
+            tool_result = inspect_record_tool(source_log)
+        elif not source_log:
+            tool_result = route_query(parsed, summary_metrics)
+        else:
+            tool_result = None
+        if tool_result:
+            await self.qa_repo.log_interaction({
+                "reconciliation_log_id": source_log.id if source_log else None,
+                "query_text": clean_query,
+                "raw_llm_output": tool_result.answer,
+                "final_response": tool_result.answer,
+                "guardrail_rejected": False,
+                "asked_at": now,
+            })
+            return QaAskResponse(
+                query=clean_query,
+                answer=tool_result.answer,
+                source_record_id=source_log.id if source_log else None,
+                source_settlement_id=source_log.rzp_settlement.settlement_id if source_log and source_log.rzp_settlement else None,
+                source_bank_utr=source_log.bank_transaction.utr if source_log and source_log.bank_transaction else None,
+                guardrail_rejected=False,
+                retrieved_data=tool_result.data,
+                asked_at=now,
+            )
 
         # 2. General Project / Metric / Architecture Inquiry (Checked BEFORE falling back to unrelated active record)
         if not source_log:
