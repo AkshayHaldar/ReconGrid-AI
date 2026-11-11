@@ -2,8 +2,13 @@ name: PR Gatekeeper & Label Mirror
 
 on:
   pull_request_target:
-    types: [opened, edited, synchronize, reopened]
-  workflow_dispatch: # Allows manual trigger from the Actions tab to backfill closed PRs
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Specific PR number to backfill (leave blank to backfill all recent closed PRs)'
+        required: false
+        type: string
 
 permissions:
   pull-requests: write
@@ -11,10 +16,11 @@ permissions:
   contents: read
 
 jobs:
-  mirror-labels:
+  gatekeeper:
+    name: Verify & Mirror NSoC Tags
     runs-on: ubuntu-latest
     steps:
-      - name: Mirror labels from linked issue to PR
+      - name: Run Gatekeeper Script
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -22,66 +28,165 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(?:https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)(\d+)/gi;
+            // 1. Comprehensive regex for detecting linked issues
+            const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)[:\s]+(?:https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)(\d+)/gi;
+            const branchIssueRegex = /(?:issue|issue-|\/)(\d+)/i;
 
-            async function syncPrLabels(pr) {
-              const body = pr.body || '';
-              issueRegex.lastIndex = 0;
+            function extractIssueNumbers(body, branchName) {
+              const numbers = new Set();
               let match;
-              const linkedIssueNumbers = new Set();
 
-              while ((match = issueRegex.exec(body)) !== null) {
-                if (match[1]) {
-                  linkedIssueNumbers.add(parseInt(match[1], 10));
+              if (body) {
+                issueRegex.lastIndex = 0;
+                while ((match = issueRegex.exec(body)) !== null) {
+                  if (match[1]) numbers.add(parseInt(match[1], 10));
                 }
               }
 
-              if (linkedIssueNumbers.size === 0) {
-                console.log(`PR #${pr.number}: No linked issues found in description.`);
-                return;
-              }
-
-              for (const issueNumber of linkedIssueNumbers) {
-                try {
-                  const { data: issue } = await github.rest.issues.get({
-                    owner,
-                    repo,
-                    issue_number: issueNumber,
-                  });
-
-                  const issueLabels = issue.labels
-                    .map(label => (typeof label === 'string' ? label : label.name))
-                    .filter(Boolean);
-
-                  if (issueLabels.length > 0) {
-                    console.log(`Adding labels to PR #${pr.number}:`, issueLabels);
-                    await github.rest.issues.addLabels({
-                      owner,
-                      repo,
-                      issue_number: pr.number,
-                      labels: issueLabels,
-                    });
-                  }
-                } catch (err) {
-                  console.error(`Error on PR #${pr.number} for issue #${issueNumber}:`, err.message);
+              // Fallback: check branch name (e.g., 'chore/issue-8-postgres-ci')
+              if (numbers.size === 0 && branchName) {
+                const branchMatch = branchName.match(branchIssueRegex);
+                if (branchMatch && branchMatch[1]) {
+                  numbers.add(parseInt(branchMatch[1], 10));
                 }
               }
+
+              return Array.from(numbers);
             }
 
-            if (context.eventName === 'workflow_dispatch') {
-              // Backfill recent closed PRs
-              console.log('Running backfill for closed PRs...');
-              const { data: closedPrs } = await github.rest.pulls.list({
-                owner,
-                repo,
-                state: 'closed',
-                per_page: 30,
-              });
+            async function syncAndValidatePr(pr) {
+              console.log(`\n==================================================`);
+              console.log(`Processing PR #${pr.number}: ${pr.title}`);
+              console.log(`State: ${pr.state} | Merged: ${Boolean(pr.merged_at)}`);
+              console.log(`==================================================`);
 
-              for (const pr of closedPrs) {
-                console.log(`Backfilling PR #${pr.number}: ${pr.title}`);
-                await syncPrLabels(pr);
+              const branchName = pr.head ? pr.head.ref : '';
+              const linkedIssueNumbers = extractIssueNumbers(pr.body, branchName);
+              const addedLabels = new Set();
+
+              // Fetch existing labels on PR
+              const existingPrLabels = new Set(
+                (pr.labels || []).map(l => (typeof l === 'string' ? l : l.name))
+              );
+
+              if (linkedIssueNumbers.length > 0) {
+                console.log(`Found linked issue(s): #${linkedIssueNumbers.join(', #')}`);
+
+                for (const issueNum of linkedIssueNumbers) {
+                  try {
+                    const { data: issue } = await github.rest.issues.get({
+                      owner,
+                      repo,
+                      issue_number: issueNum,
+                    });
+
+                    const issueLabels = (issue.labels || [])
+                      .map(l => (typeof l === 'string' ? l : l.name))
+                      .filter(Boolean);
+
+                    console.log(`Labels found on Issue #${issueNum}:`, issueLabels);
+
+                    // Sync labels: focus on nsoc26, level*, and domain labels
+                    for (const label of issueLabels) {
+                      if (!existingPrLabels.has(label)) {
+                        addedLabels.add(label);
+                        existingPrLabels.add(label);
+                      }
+                    }
+                  } catch (err) {
+                    console.error(`Could not fetch Issue #${issueNum}: ${err.message}`);
+                  }
+                }
+
+                // Apply new labels if any
+                if (addedLabels.size > 0) {
+                  const labelsToApply = Array.from(addedLabels);
+                  console.log(`Applying labels to PR #${pr.number}:`, labelsToApply);
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    labels: labelsToApply,
+                  });
+                }
+              } else {
+                console.log(`No linked issue detected in description or branch name.`);
+              }
+
+              // Evaluate Compliance for NSoC
+              const hasNsocTag = Array.from(existingPrLabels).some(l => /nsoc26/i.test(l));
+              const hasLevelTag = Array.from(existingPrLabels).some(l => /^level[1-3]$/i.test(l));
+
+              const isCompliant = hasNsocTag && hasLevelTag;
+
+              console.log(`Compliance Check:`);
+              console.log(`- 'nsoc26' tag present: ${hasNsocTag}`);
+              console.log(`- 'level1/2/3' tag present: ${hasLevelTag}`);
+              console.log(`- Overall Status: ${isCompliant ? 'PASS' : 'WARN/FAIL'}`);
+
+              return {
+                prNumber: pr.number,
+                title: pr.title,
+                linkedIssues: linkedIssueNumbers,
+                labels: Array.from(existingPrLabels),
+                hasNsocTag,
+                hasLevelTag,
+                isCompliant,
+              };
+            }
+
+            // 2. Execution Modes
+            const results = [];
+
+            if (context.eventName === 'workflow_dispatch') {
+              const specifiedPr = context.payload.inputs ? context.payload.inputs.pr_number : null;
+
+              if (specifiedPr) {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: parseInt(specifiedPr, 10),
+                });
+                results.push(await syncAndValidatePr(pr));
+              } else {
+                console.log('Backfilling all recent closed PRs...');
+                const { data: closedPrs } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  state: 'closed',
+                  per_page: 30,
+                });
+
+                for (const pr of closedPrs) {
+                  results.push(await syncAndValidatePr(pr));
+                }
               }
             } else if (context.payload.pull_request) {
-              await syncPrLabels(context.payload.pull_request);
+              results.push(await syncAndValidatePr(context.payload.pull_request));
+            }
+
+            // 3. Generate Rich Job Summary for Maintainers
+            let summaryMarkdown = `## 🛡️ NSoC PR Gatekeeper Report\n\n`;
+            summaryMarkdown += `| PR | Linked Issue | Current Labels | NSoC Tag | Level Tag | Status |\n`;
+            summaryMarkdown += `| :--- | :--- | :--- | :---: | :---: | :---: |\n`;
+
+            for (const r of results) {
+              const statusBadge = r.isCompliant ? '✅ READY TO MERGE' : '⚠️ MISSING LABELS';
+              const nsocBadge = r.hasNsocTag ? '✅' : '❌';
+              const levelBadge = r.hasLevelTag ? '✅' : '❌';
+              const issueText = r.linkedIssues.length > 0 ? `#${r.linkedIssues.join(', #')}` : 'None';
+              const labelList = r.labels.length > 0 ? r.labels.join(', ') : 'None';
+
+              summaryMarkdown += `| #${r.prNumber} | ${issueText} | \`${labelList}\` | ${nsocBadge} | ${levelBadge} | **${statusBadge}** |\n`;
+            }
+
+            if (results.some(r => !r.isCompliant && context.payload.pull_request && context.payload.pull_request.state === 'open')) {
+              summaryMarkdown += `\n> ⚠️ **Maintainer Warning**: Do NOT merge unlabelled PRs! Merging without \`nsoc26\` and \`levelX\` tags incurs an automatic **-5 point penalty** on the NSoC leaderboard.\n`;
+            }
+
+            await core.summary.addRaw(summaryMarkdown).write();
+
+            // 4. Fail check on open PRs that violate policy so maintainer is protected
+            if (context.eventName !== 'workflow_dispatch' && results.some(r => !r.isCompliant)) {
+              core.setFailed('Gatekeeper check failed: PR is missing either "nsoc26" or "levelX" label. Please attach labels before merging to avoid leaderboard penalties.');
             }
