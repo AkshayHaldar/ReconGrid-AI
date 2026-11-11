@@ -1,0 +1,75 @@
+name: PR Gatekeeper & Label Mirror
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  mirror-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror labels from linked issue to PR
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Match patterns like "fixes #12", "closes #34", "resolves #56", etc.
+            const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(?:https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)(\d+)/gi;
+            let match;
+            const linkedIssueNumbers = new Set();
+
+            while ((match = issueRegex.exec(body)) !== null) {
+              if (match[1]) {
+                linkedIssueNumbers.add(parseInt(match[1], 10));
+              }
+            }
+
+            if (linkedIssueNumbers.size === 0) {
+              console.log('No linked issues found in PR description.');
+              return;
+            }
+
+            for (const issueNumber of linkedIssueNumbers) {
+              console.log(`Processing linked issue #${issueNumber}...`);
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                });
+
+                // Extract label names
+                const issueLabels = issue.labels
+                  .map(label => (typeof label === 'string' ? label : label.name))
+                  .filter(Boolean);
+
+                if (issueLabels.length === 0) {
+                  console.log(`Issue #${issueNumber} has no labels.`);
+                  continue;
+                }
+
+                console.log(`Labels found on #${issueNumber}:`, issueLabels);
+
+                // Add all issue labels to the PR
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  labels: issueLabels,
+                });
+
+                console.log(`Successfully mirrored labels to PR #${pr.number}:`, issueLabels);
+              } catch (err) {
+                console.error(`Error processing issue #${issueNumber}:`, err.message);
+              }
+            }
