@@ -3,6 +3,7 @@ name: PR Gatekeeper & Label Mirror
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
+  workflow_dispatch: # Allows manual trigger from the Actions tab to backfill closed PRs
 
 permissions:
   pull-requests: write
@@ -18,59 +19,69 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const pr = context.payload.pull_request;
-            const body = pr.body || '';
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            // Match patterns like "fixes #12", "closes #34", "resolves #56", etc.
             const issueRegex = /(?:close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+(?:https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/|#)(\d+)/gi;
-            let match;
-            const linkedIssueNumbers = new Set();
 
-            while ((match = issueRegex.exec(body)) !== null) {
-              if (match[1]) {
-                linkedIssueNumbers.add(parseInt(match[1], 10));
-              }
-            }
+            async function syncPrLabels(pr) {
+              const body = pr.body || '';
+              issueRegex.lastIndex = 0;
+              let match;
+              const linkedIssueNumbers = new Set();
 
-            if (linkedIssueNumbers.size === 0) {
-              console.log('No linked issues found in PR description.');
-              return;
-            }
-
-            for (const issueNumber of linkedIssueNumbers) {
-              console.log(`Processing linked issue #${issueNumber}...`);
-              try {
-                const { data: issue } = await github.rest.issues.get({
-                  owner,
-                  repo,
-                  issue_number: issueNumber,
-                });
-
-                // Extract label names
-                const issueLabels = issue.labels
-                  .map(label => (typeof label === 'string' ? label : label.name))
-                  .filter(Boolean);
-
-                if (issueLabels.length === 0) {
-                  console.log(`Issue #${issueNumber} has no labels.`);
-                  continue;
+              while ((match = issueRegex.exec(body)) !== null) {
+                if (match[1]) {
+                  linkedIssueNumbers.add(parseInt(match[1], 10));
                 }
+              }
 
-                console.log(`Labels found on #${issueNumber}:`, issueLabels);
+              if (linkedIssueNumbers.size === 0) {
+                console.log(`PR #${pr.number}: No linked issues found in description.`);
+                return;
+              }
 
-                // Add all issue labels to the PR
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number: pr.number,
-                  labels: issueLabels,
-                });
+              for (const issueNumber of linkedIssueNumbers) {
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner,
+                    repo,
+                    issue_number: issueNumber,
+                  });
 
-                console.log(`Successfully mirrored labels to PR #${pr.number}:`, issueLabels);
-              } catch (err) {
-                console.error(`Error processing issue #${issueNumber}:`, err.message);
+                  const issueLabels = issue.labels
+                    .map(label => (typeof label === 'string' ? label : label.name))
+                    .filter(Boolean);
+
+                  if (issueLabels.length > 0) {
+                    console.log(`Adding labels to PR #${pr.number}:`, issueLabels);
+                    await github.rest.issues.addLabels({
+                      owner,
+                      repo,
+                      issue_number: pr.number,
+                      labels: issueLabels,
+                    });
+                  }
+                } catch (err) {
+                  console.error(`Error on PR #${pr.number} for issue #${issueNumber}:`, err.message);
+                }
               }
             }
 
+            if (context.eventName === 'workflow_dispatch') {
+              // Backfill recent closed PRs
+              console.log('Running backfill for closed PRs...');
+              const { data: closedPrs } = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: 'closed',
+                per_page: 30,
+              });
+
+              for (const pr of closedPrs) {
+                console.log(`Backfilling PR #${pr.number}: ${pr.title}`);
+                await syncPrLabels(pr);
+              }
+            } else if (context.payload.pull_request) {
+              await syncPrLabels(context.payload.pull_request);
+            }
