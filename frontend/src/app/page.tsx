@@ -262,6 +262,10 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
 
+  const handleExportTally = () => {
+    window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
+  };
+
   // Filter records by diagnostic sub-type if selected
   const displayedRecords = records.filter((r) => {
     if (selectedDiagnostic === "ALL") return true;
@@ -278,6 +282,7 @@ export default function DashboardPage() {
         onOpenSync={() => setIsSyncOpen(true)}
         onToggleQa={() => setIsQaOpen(!isQaOpen)}
         isQaOpen={isQaOpen}
+        onExportTally={handleExportTally}
       />
 
       {/* Main Financial Workspace */}
