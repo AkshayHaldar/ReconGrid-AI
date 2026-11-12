@@ -75,9 +75,9 @@ pip install -e ".[dev]"
 Copy the environment template and initialize the database:
 
 ```bash
-# Windows: copy .env.example .env
-# macOS/Linux: cp .env.example .env
-cp .env.example .env
+# Windows: copy ..\.env.example .env (or copy .env.example .env)
+# macOS/Linux: cp ../.env.example .env
+cp ../.env.example .env
 
 # Run database migrations to initialize SQLite
 alembic upgrade head
@@ -88,7 +88,7 @@ alembic upgrade head
 In a separate terminal:
 
 ```bash
-cd frontend
+cd ../frontend
 npm install
 ```
 
@@ -115,7 +115,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the reconciliation d
 Run a fast sanity check (under 1 second):
 ```bash
 cd backend
-pytest tests/unit/test_matching_engine.py -v
+pytest tests/unit/test_diagnostics.py -v
 ```
 
 Run all tests:
@@ -237,7 +237,7 @@ To add an adapter for another gateway (e.g., Cashfree, Stripe, PayU):
    - Ensure the client retrieves gross amounts, MDR fees, GST, TDS, refunds, and UTRs.
    - Convert all monetary units to Python `Decimal(18, 2)` rupees (converting gateway integer paise/cents if needed).
 2. **Webhook Verification:**
-   - Implement HMAC signature validation in `backend/app/api/v1/webhooks.py` (or a dedicated route) to reject unauthenticated payloads with HTTP 401.
+   - Implement HMAC signature validation in `backend/app/api/v1/webhooks.py` (or a dedicated route) to reject unauthenticated payloads with HTTP 400 Bad Request.
 3. **Write tests:**
    - Test mocked gateway pagination, retry backoff, and signature verification in `backend/tests/unit/`.
 

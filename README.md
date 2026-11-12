@@ -59,7 +59,7 @@ If you are new to Indian banking and payment gateways, here are the terms used t
 | **GST on MDR** | *18% Goods and Services Tax* | Indian tax applied strictly to the gateway fee (e.g., 18% of ₹200 fee = ₹36 GST). |
 | **Section 194-O TDS** | *Tax Deducted at Source* | Under Indian income tax law, e-commerce operators must withhold 1% tax on gross sales. |
 | **Paise vs. Rupee** | $1\text{ INR} = 100\text{ paise}$ | Razorpay APIs handle money in integer paise (`₹100.00` = `10000` paise) to avoid decimal errors. Bank statements report in rupees. Ingestion normalizes everything to Python `Decimal(18, 2)` rupees. |
-| **Conservation** | Mathematical balance guarantee | $\sum(\text{matched} + \text{suggested} + \text{exceptions} + \text{pending}) = \text{total ingested}$. Zero dropped rows, zero ghost rupees. |
+| **Conservation** | Mathematical balance guarantee | $\sum(\text{matched} + \text{suggested} + \text{conflicts} + \text{exceptions} + \text{pending}) = \text{total ingested}$. Zero dropped rows, zero ghost rupees. |
 
 ---
 
@@ -77,7 +77,7 @@ ReconGrid AI was built specifically to address the mandate of Track 04:
 | **Tiered Match Rates** | Clear classification into Tier 1 (exact UTR), Tier 1.5 (normalized UTR), Tier 2 (fuzzy narration), Tier 0 (date window fallback), and Tier 3 (fee/tax delta diagnostics). | `GET /api/v1/reconciliation/{batch_id}/scorecard`<br>Reports exact per-tier counts rather than an opaque single percentage. |
 | **Honest Anomaly Reporting** | Zero-silent-drop policy. Unmatched transactions remain unresolved with specific diagnostic reason codes (`UNRESOLVED`, `FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `PENDING_SETTLEMENT`). | `python backend/scripts/generate_scorecard_report.py`<br>Outputs the complete unedited exception ledger. |
 | **Closed-Loop Controller** | Move beyond read-only views: CA can approve suggested matches, reject false positives, and resolve multi-row conflicts with automated competitor displacement. | `POST /api/v1/reconciliation/records/{id}/approve`<br>`POST /api/v1/reconciliation/records/{id}/resolve-conflict` |
-| **Zero-Float Conservation** | End-to-end Python `Decimal(18, 2)` arithmetic with schema-level rejection of IEEE 754 floats. Mathematical row conservation guaranteed: $\sum(\text{all tiers} + \text{exceptions} + \text{pending}) = \text{total ingested}$. | `pytest backend/tests/unit/test_schema_float_rejection.py` |
+| **Zero-Float Conservation** | End-to-end Python `Decimal(18, 2)` arithmetic with schema-level rejection of IEEE 754 floats. Mathematical row conservation guaranteed: $\sum(\text{all tiers} + \text{conflicts} + \text{exceptions} + \text{pending}) = \text{total ingested}$. | `pytest backend/tests/unit/test_schema_float_rejection.py` |
 
 ### Throughput Benchmarks
 

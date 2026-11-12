@@ -39,10 +39,13 @@ sequenceDiagram
     Matcher->>DB: Write append-only ReconciliationLogs (MATCHED / SUGGESTED / CONFLICT / EXCEPTION)
 
     Note over Merchant,AI: Phase 4: Verification & Human-in-the-Loop
-    Merchant->>Web: Inspects Scorecard & Suggested Drawer
-    Merchant->>Web: One-click approve or resolve conflict
+    Merchant->>Web: Inspects Scorecard & Review Drawers
+    Merchant->>Web: Resolves multi-row conflict
+    Web->>API: POST /api/v1/reconciliation/records/{id}/resolve-conflict
+    API->>DB: Transitions winner to MATCHED, auto-displaces competitors to EXCEPTION
+    Merchant->>Web: One-click approves suggested match
     Web->>API: POST /api/v1/reconciliation/records/{id}/approve
-    API->>DB: Transition status, auto-displace competing candidates
+    API->>DB: Transitions status to MATCHED
     Merchant->>Web: "Why did order #4521 settle with a delta?"
     Web->>API: POST /api/v1/qa/ask
     API->>DB: Deterministic factual row lookup

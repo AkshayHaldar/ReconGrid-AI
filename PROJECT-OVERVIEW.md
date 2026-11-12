@@ -6,7 +6,7 @@
 
 When you run a reconciliation batch, the engine produces three verifiable outputs:
 1. **Automated Match Rate %** — the exact proportion of records reconciled automatically without human intervention.
-2. **Total ₹ Reconciled with Complete Row Conservation** — every single paisa is accounted for. $\sum(\text{matched} + \text{suggested} + \text{exceptions} + \text{pending}) = \text{total ingested}$.
+2. **Total ₹ Reconciled with Complete Row Conservation** — every single paisa is accounted for. $\sum(\text{matched} + \text{suggested} + \text{conflicts} + \text{exceptions} + \text{pending}) = \text{total ingested}$.
 3. **An Unedited Exception Ledger** — every single row that could not be matched with 100% certainty is preserved verbatim with an audit reason code.
 
 > **Core Philosophy:** This is an audit tool first. Mathematical reconciliation is 100% deterministic code. Generative AI is used strictly for read-only natural language explanations backed by a regex-based anti-hallucination guardrail.
@@ -67,12 +67,13 @@ flowchart TD
     end
 ```
 
-### The 4 Status States of Every Transaction:
+### The 5 Status States of Every Transaction:
 
-1. **`MATCHED`**: 100% verified by Tier 1. Exact UTR and net amount match perfectly. Zero human action required.
-2. **`SUGGESTED`**: Strong mathematical correlation found (e.g. normalized UTR substring, or exact amount within a 3-day window, or fee delta explained). Placed in the CA review queue for one-click confirmation.
-3. **`CONFLICT`**: Two or more bank rows claim the same Razorpay settlement (or vice versa). Both rows are locked until a human reviewer assigns the settlement to the correct row. When approved, the competing candidate is displaced to `EXCEPTION`.
+1. **`MATCHED`**: Verified automatically by Tier 1 (exact UTR and net amount) or Tier 3 / Tier 3b (mathematically explained fee/TDS deltas and batched subset-sum combinations). Zero human action required.
+2. **`SUGGESTED`**: High-probability candidate identified (e.g. normalized UTR substring or date window fallback). Placed in the CA review queue for one-click confirmation via `/approve`.
+3. **`CONFLICT`**: Two or more bank rows claim the same Razorpay settlement (or vice versa). Both rows are locked until a human reviewer assigns the settlement to the correct row via `/resolve-conflict`. When resolved, the winning candidate transitions to `MATCHED` and the competing candidate is auto-displaced to `EXCEPTION`.
 4. **`EXCEPTION`**: Unresolved rows with specific diagnostic reason codes (`FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `UNRESOLVED`). These remain in the permanent ledger for tax audits.
+5. **`PENDING_SETTLEMENT_DATA`**: Recent bank credit rows (≤5 days old) awaiting gateway sync data. Automatically re-evaluated on subsequent settlement sync cycles before flagging as an exception.
 
 ---
 
