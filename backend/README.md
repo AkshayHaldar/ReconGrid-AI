@@ -130,8 +130,8 @@ Open **[http://localhost:8000/docs](http://localhost:8000/docs)** for interactiv
 All tests can be executed directly with `pytest`:
 
 ```bash
-# 1. Quick sanity test (matching engine unit test, runs in < 1 second)
-pytest tests/unit/test_matching_engine.py -v
+# 1. Quick sanity test (diagnostics unit test, runs in < 1 second)
+pytest tests/unit/test_diagnostics.py -v
 
 # 2. Verify schema-level float rejection (Zero-Float Policy)
 pytest tests/unit/test_schema_float_rejection.py -v

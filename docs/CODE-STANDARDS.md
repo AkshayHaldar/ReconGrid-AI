@@ -53,7 +53,7 @@ backend/
 |---|---|---|
 | **Black / Ruff Format** | Code formatting | Line length 120 (defined in `pyproject.toml`) |
 | **Ruff** | Linting & import sorting | Zero warnings before merge |
-| **Mypy** | Static type checking | Strict type checking on `app/` |
+| **Mypy** | Static type checking | Static analysis with `check_untyped_defs = true` on `app/` (clean CI run) |
 | **Pytest** | Testing | ≥90% coverage on reconciliation & diagnostics |
 
 ---
