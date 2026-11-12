@@ -8,9 +8,8 @@
 ## 1. Backend Project Layout
 
 ```
-recongrid-ai-backend/
+backend/
 ├── .env.example
-├── .gitignore
 ├── pyproject.toml              # ruff, black, mypy, pytest configs
 ├── app/
 │   ├── main.py                 # FastAPI application entrypoint
@@ -52,9 +51,9 @@ recongrid-ai-backend/
 
 | Tool | Purpose | Standard |
 |---|---|---|
-| **Black** | Code formatting | Line length 100 |
+| **Black / Ruff Format** | Code formatting | Line length 120 (defined in `pyproject.toml`) |
 | **Ruff** | Linting & import sorting | Zero warnings before merge |
-| **Mypy** | Static type checking | Strict mode on `app/services` and `app/models` |
+| **Mypy** | Static type checking | Strict type checking on `app/` |
 | **Pytest** | Testing | ≥90% coverage on reconciliation & diagnostics |
 
 ---

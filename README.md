@@ -15,20 +15,51 @@ Originally built for the **Razorpay Buildathon 2026 (Track 04: AI Finance Contro
 
 ---
 
-## The Problem
+## Reconciliation in 60 Seconds (Why This Exists)
 
-If you run a business in India accepting payments via Razorpay, your finance team or Chartered Accountant spends hours at month-end cross-checking bank statements against settlement reports.
+If you have never worked in fintech or accounting, here is the problem in plain terms:
 
-The numbers rarely match 1-to-1 because:
-- **Gateway fees:** Razorpay deducts a 2% MDR fee plus 18% GST on each transaction.
-- **Statutory taxes:** E-commerce sales have 1% Section 194-O TDS deducted at source.
-- **Mid-cycle refunds:** Customer refunds get deducted from subsequent settlement batches.
-- **Messy bank exports:** Indian banks (SBI, HDFC, ICICI, Axis) export statements with non-standard preambles, encrypted PDFs, and UTRs buried in long transaction descriptions.
-- **Batched payouts:** Multiple orders are often paid out as a single lump sum in the bank statement.
+Suppose a customer buys a **₹10,000.00** product on your website through Razorpay. You might expect your bank account to show a credit of ₹10,000.00. It never does.
 
-Manual VLOOKUP in Excel is slow, error-prone, and painful. Naive LLM solutions fail because LLMs hallucinate numbers and cannot be trusted with financial math.
+Instead, your bank statement shows a credit of **₹9,664.00**:
 
-ReconGrid AI solves this by keeping a **hard separation**: all math, reconciliation, and ledger operations are 100% deterministic code using Python `Decimal` (zero floats), while AI is used strictly for read-only natural language explanations backed by anti-hallucination guardrails.
+```
+ Gross customer payment:                    ₹ 10,000.00
+  - Gateway fee (2.0% MDR):                 -   ₹ 200.00
+  - 18% GST on that fee (18% of ₹200):      -    ₹ 36.00
+  - E-commerce TDS (Section 194-O, 1%):     -   ₹ 100.00
+────────────────────────────────────────────────────────
+ Net amount credited to your bank:           ₹ 9,664.00
+```
+
+Now multiply that by 5,000 transactions a month. Add in:
+* **Batched payouts:** Razorpay combines 40 customer payments into one single lump-sum bank deposit.
+* **Mid-cycle refunds:** A ₹1,500 customer refund is deducted from tomorrow's settlement batch.
+* **Messy bank exports:** HDFC, SBI, ICICI, and Axis export CSVs and PDFs with non-standard columns, encrypted passwords, and UTRs (Unique Transaction References) buried inside 80-character narration text.
+
+Chartered Accountants (CAs) and finance leads spend 20 to 40 hours every month manually cross-referencing Excel sheets with `VLOOKUP` to find out where missing rupees went.
+
+### The ReconGrid Solution: Deterministic Math + Guardrailed AI
+
+ReconGrid AI enforces a strict architectural boundary:
+1. **100% Deterministic Code for Money:** All matching, fee deductions, tax calculations, and ledger balances run in pure Python using `Decimal` (zero floating-point math). AI never touches, calculates, or decides financial amounts.
+2. **AI Only for Plain-English Explanation:** An LLM is used strictly to answer user questions about pre-computed audit facts (e.g., *"Why did order #4521 have a ₹336 delta?"*).
+3. **Regex Numeric Guardrail:** An anti-hallucination check compares every number in the LLM's answer against the database record. If the LLM invents or alters any number, its text is immediately discarded and replaced with raw database facts.
+
+---
+
+## Key Terms (Fintech Primer)
+
+If you are new to Indian banking and payment gateways, here are the terms used throughout this codebase and documentation:
+
+| Term | What It Means | Why It Matters Here |
+|---|---|---|
+| **UTR** | *Unique Transaction Reference* | The 12-to-22 character alphanumeric ID assigned by the banking system (NEFT / RTGS / IMPS) to identify a money transfer. This is our primary key for matching bank rows to gateway settlements. |
+| **MDR** | *Merchant Discount Rate* | The fee Razorpay charges per transaction (typically ~2%). |
+| **GST on MDR** | *18% Goods and Services Tax* | Indian tax applied strictly to the gateway fee (e.g., 18% of ₹200 fee = ₹36 GST). |
+| **Section 194-O TDS** | *Tax Deducted at Source* | Under Indian income tax law, e-commerce operators must withhold 1% tax on gross sales. |
+| **Paise vs. Rupee** | $1\text{ INR} = 100\text{ paise}$ | Razorpay APIs handle money in integer paise (`₹100.00` = `10000` paise) to avoid decimal errors. Bank statements report in rupees. Ingestion normalizes everything to Python `Decimal(18, 2)` rupees. |
+| **Conservation** | Mathematical balance guarantee | $\sum(\text{matched} + \text{suggested} + \text{exceptions} + \text{pending}) = \text{total ingested}$. Zero dropped rows, zero ghost rupees. |
 
 ---
 
@@ -128,68 +159,110 @@ Users can ask questions like:
 
 ---
 
-## Quickstart
+## Quickstart (Get Running in 3 Minutes)
+
+You do **not** need live Razorpay credentials or bank files to test ReconGrid. The system includes a built-in synthetic test data generator that seeds realistic bank statement rows and Razorpay settlements across all match tiers.
 
 ### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- Git
-- (Optional) Docker & Docker Compose
+- **Python:** 3.11 or newer
+- **Node.js:** 18 or newer
+- **Git**
+- *(Optional)* Docker & Docker Compose if you want PostgreSQL + Redis locally
 
-### 1. Clone the Repository
+---
+
+### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/AkshayHaldar/ReconGrid-AI.git
 cd ReconGrid-AI
 ```
 
-### 2. Backend Setup
+---
+
+### Step 2: Set Up the Backend
+
+Open a terminal in the `backend/` directory:
+
 ```bash
 cd backend
 python -m venv .venv
+```
 
-# On Windows:
-.venv\Scripts\activate
-# On macOS / Linux:
-source .venv/bin/activate
+**Activate your virtual environment:**
+* **Windows (PowerShell):**
+  ```powershell
+  .venv\Scripts\Activate.ps1
+  ```
+  *(If PowerShell blocks scripts, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first)*
+* **macOS / Linux (bash/zsh):**
+  ```bash
+  source .venv/bin/activate
+  ```
 
+**Install dependencies & prepare database:**
+```bash
 pip install -r requirements.txt
+
+# Create your local environment file (defaults to zero-config SQLite)
+# On Windows: copy .env.example .env
+# On macOS/Linux: cp .env.example .env
 cp .env.example .env
 
-# Run database migrations with Alembic
+# Apply database migrations
 alembic upgrade head
-```
 
-> **Note on Database Configuration:**
-> By default, `DATABASE_URL` in `.env` is configured for SQLite (`sqlite+aiosqlite:///./recongrid.db`). To use PostgreSQL locally, ensure Postgres is running and configure:
-> ```env
-> DATABASE_URL=postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid
-> ```
-> Then run `alembic upgrade head`.
-
-Start the API server:
-```bash
+# Start the API server
 uvicorn app.main:app --reload --port 8000
 ```
-Interactive API documentation will be available at [http://localhost:8000/docs](http://localhost:8000/docs).
 
-### 3. Frontend Setup
-In a new terminal:
+> **Database Note:** By default, `.env` runs on SQLite (`sqlite+aiosqlite:///./recongrid.db`) with zero setup. If you prefer PostgreSQL, set `DATABASE_URL=postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid` and run `alembic upgrade head`.
+
+Your interactive Swagger documentation will be live at: **[http://localhost:8000/docs](http://localhost:8000/docs)**.
+
+---
+
+### Step 3: Set Up the Frontend
+
+Open a second terminal in the `frontend/` directory:
+
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) to view the reconciliation dashboard.
 
-### 4. (Alternative) Run Full Stack with Docker Compose
-To run the complete production-like stack (PostgreSQL 15, Redis 7, FastAPI with automated migrations, and Next.js frontend):
+Open your browser to: **[http://localhost:3000](http://localhost:3000)**.
+
+---
+
+### Step 4: Seed Demo Data (See It in Action Immediately)
+
+With both servers running, open a third terminal and run:
+
+```bash
+# Seed 60 synthetic records with exact matches, fee deltas, refunds, and anomalies:
+curl -X POST "http://localhost:8000/api/v1/demo/seed?count=60&batch_id=default"
+```
+
+Refresh **[http://localhost:3000](http://localhost:3000)**. You will see:
+- Real-time match rate calculations (~95-96%)
+- Categorized status badges (`MATCHED`, `SUGGESTED`, `CONFLICT`, `EXCEPTION`)
+- The interactive CA approval drawer for human-in-the-loop verification
+- The Settlement Q&A panel ready for plain-English financial queries
+
+---
+
+### Alternative: Run Everything with Docker Compose
+
+If you have Docker installed and prefer running PostgreSQL 15, Redis 7, Backend, and Frontend in containers:
+
 ```bash
 docker compose up --build -d
 ```
-- Frontend: [http://localhost:3000](http://localhost:3000)
-- Backend Docs: [http://localhost:8000/docs](http://localhost:8000/docs)
-- PostgreSQL: `localhost:5432` (user/pass/db: `recongrid`)
-- Redis: `localhost:6379`
+- **Frontend Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **FastAPI OpenAPI Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+- **PostgreSQL:** Port `5432` (credentials: `recongrid`/`recongrid`)
+- **Redis:** Port `6379`
 
 ---
 
@@ -363,6 +436,22 @@ ReconGrid-AI/
 ├── sample_data/            # Sample statement fixtures (HDFC, ICICI, SBI)
 └── docker-compose.yml      # PostgreSQL 15, Redis 7, Backend & Frontend services
 ```
+
+---
+
+## Documentation Index
+
+Explore the detailed architecture, system design, and developer guides:
+
+| Document | Audience | What It Covers |
+|---|---|---|
+| [PROJECT-OVERVIEW.md](./PROJECT-OVERVIEW.md) | Everyone / CAs / Judges | Business problem, core product principles, financial rules, edge cases, and benchmarks. |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Engineers & Architects | Detailed component design, data flow diagrams, async services, and security boundaries. |
+| [SYSTEM-DESIGN.md](./SYSTEM-DESIGN.md) | Backend / DevOps | Non-functional requirements, queue architecture, rate limits, and failure modes. |
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | Developers | Local development workflow, multi-OS setup, testing guidelines, and PR requirements. |
+| [backend/README.md](./backend/README.md) | Backend Engineers | Deep dive into FastAPI endpoints, Alembic migrations, database models, and test suites. |
+| [docs/REPO_MAP.md](./docs/REPO_MAP.md) | Full Stack Engineers | Comprehensive source file map covering frontend components and backend services. |
+| [docs/RAZORPAY-INTEGRATION.md](./docs/RAZORPAY-INTEGRATION.md) | Integrators | Razorpay REST API settlement sync, webhook HMAC verification, and cursor pagination. |
 
 ---
 

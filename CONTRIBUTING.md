@@ -50,42 +50,61 @@ This starts PostgreSQL and any other required services defined in `docker-compos
 
 ### 3. Set up the backend
 
+Navigate to `backend/` and create your virtual environment:
+
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+```
+
+**Activate your virtual environment:**
+* **Windows (PowerShell):**
+  ```powershell
+  .venv\Scripts\Activate.ps1
+  ```
+* **macOS / Linux:**
+  ```bash
+  source .venv/bin/activate
+  ```
+
+**Install dependencies in editable development mode:**
+```bash
 pip install -e ".[dev]"
 ```
 
-Copy the environment template and fill in your values:
+Copy the environment template and initialize the database:
 
 ```bash
-cp .env.example .env   # create this file if it doesn't exist
-```
+# Windows: copy .env.example .env
+# macOS/Linux: cp .env.example .env
+cp .env.example .env
 
-Required environment variables include database credentials and any API keys referenced in `backend/app/core/config.py`.
+# Run database migrations to initialize SQLite
+alembic upgrade head
+```
 
 ### 4. Set up the frontend
 
+In a separate terminal:
+
 ```bash
-cd ../frontend
-npm ci
-cp .env.local.example .env.local  # if provided
+cd frontend
+npm install
 ```
 
 ### 5. Start the development servers
 
-**Backend** (from `backend/`):
+**Backend** (from `backend/` with `.venv` active):
 ```bash
 uvicorn app.main:app --reload --port 8000
 ```
+Interactive OpenAPI documentation will be live at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 **Frontend** (from `frontend/`):
 ```bash
 npm run dev
 ```
-
-The frontend runs on `http://localhost:3000` and proxies API calls to the backend at `http://localhost:8000`.
+Open [http://localhost:3000](http://localhost:3000) to view the reconciliation dashboard.
 
 ---
 
@@ -93,9 +112,15 @@ The frontend runs on `http://localhost:3000` and proxies API calls to the backen
 
 ### Backend
 
+Run a fast sanity check (under 1 second):
 ```bash
 cd backend
-pytest
+pytest tests/unit/test_matching_engine.py -v
+```
+
+Run all tests:
+```bash
+pytest -v
 ```
 
 With coverage:
@@ -184,31 +209,37 @@ Before opening a PR:
 
 ## Extension Points
 
-### Adding a Bank Parser
+### Adding Support for a New Bank (CSV / PDF)
 
-Bank-specific CSV/PDF parsing logic lives in `backend/app/parsers/`. Each parser is a Python class that:
+Bank-specific statement parsing logic lives in `backend/app/utils/csv_parser.py` and `backend/app/utils/pdf_parser.py`, coordinated by `backend/app/services/ingestion.py`.
 
-1. Inherits from `BaseBankParser`.
-2. Implements `can_parse(filename: str) -> bool` — returns `True` for file names or headers this parser recognises.
-3. Implements `parse(file_content: bytes) -> list[BankTransaction]` — returns a list of normalised `BankTransaction` objects.
+To add support for a new bank (e.g., Kotak, PNB, Bank of Baroda):
 
-Steps:
+1. **Add bank dialect & column mappings:**
+   - In `backend/app/utils/csv_parser.py`, add column headers and preamble-skipping rules for your bank.
+   - Ensure transaction direction (`CREDIT` vs `DEBIT`), date format parsing, and UTR extraction regex handle the bank's narration format.
+2. **Add sample statement fixtures:**
+   - Place a small, anonymized statement in `sample_data/` (e.g., `sample_data/kotak_sample.csv`).
+   - Ensure all amounts, names, and account numbers are synthetic.
+3. **Write tests:**
+   - Add unit tests in `backend/tests/unit/test_csv_parser.py` or integration tests in `backend/tests/integration/test_messy_fixtures_e2e.py` verifying clean extraction of `BankTransaction` records.
 
-1. Create `backend/app/parsers/<bank_name>_parser.py`.
-2. Implement the two required methods.
-3. Register the parser in `backend/app/parsers/__init__.py` by adding it to `REGISTERED_PARSERS`.
-4. Add fixtures to `sample_data/` for your bank's CSV/PDF format.
-5. Write tests in `backend/tests/parsers/test_<bank_name>_parser.py`.
+---
 
-### Adding a Settlement Provider
+### Adding a New Payment Gateway Adapter
 
-Settlement provider integrations live in `backend/app/providers/`. Each provider fetches and normalises settlement data from an external API.
+Payment gateway API interactions are encapsulated in `backend/app/services/razorpay_client.py`.
 
-1. Create `backend/app/providers/<provider_name>_provider.py`.
-2. Implement the `SettlementProvider` protocol: `fetch_settlements(from_date, to_date) -> list[Settlement]`.
-3. Register the provider and update the provider factory.
-4. Store API credentials as environment variables (never hardcode them).
-5. Write tests using mocked HTTP responses.
+To add an adapter for another gateway (e.g., Cashfree, Stripe, PayU):
+
+1. **Implement Gateway Client:**
+   - Create a client class following the async `httpx` + `tenacity` retry pattern in `backend/app/services/`.
+   - Ensure the client retrieves gross amounts, MDR fees, GST, TDS, refunds, and UTRs.
+   - Convert all monetary units to Python `Decimal(18, 2)` rupees (converting gateway integer paise/cents if needed).
+2. **Webhook Verification:**
+   - Implement HMAC signature validation in `backend/app/api/v1/webhooks.py` (or a dedicated route) to reject unauthenticated payloads with HTTP 401.
+3. **Write tests:**
+   - Test mocked gateway pagination, retry backoff, and signature verification in `backend/tests/unit/`.
 
 ---
 

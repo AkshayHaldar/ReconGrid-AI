@@ -1,43 +1,57 @@
-# 🎯 Project Overview — ReconGrid AI
+# Project Overview — ReconGrid AI
 
 ## 1. What Is ReconGrid AI?
 
-**ReconGrid AI** is a settlement reconciliation and discrepancy-diagnostic engine built for finance teams using Razorpay — especially B2B SaaS companies and high-volume D2C brands.
+**ReconGrid AI** is an open-source settlement reconciliation and discrepancy-diagnostic engine designed for Indian businesses and finance teams accepting payments via Razorpay.
 
-Every time you run it, it gives you three clear, verifiable things:
+When you run a reconciliation batch, the engine produces three verifiable outputs:
+1. **Automated Match Rate %** — the exact proportion of records reconciled automatically without human intervention.
+2. **Total ₹ Reconciled with Complete Row Conservation** — every single paisa is accounted for. $\sum(\text{matched} + \text{suggested} + \text{exceptions} + \text{pending}) = \text{total ingested}$.
+3. **An Unedited Exception Ledger** — every single row that could not be matched with 100% certainty is preserved verbatim with an audit reason code.
 
-1. **Automated Match Rate %** — how much was resolved automatically (`(matched + approved suggested) ÷ total records`)
-2. **Total ₹ Reconciled** — the exact amount reconciled, with an audit trail back to every source row
-3. **An Honest Exception List** — every single row that couldn't be resolved, verbatim, with a reason code
-
-This is a **verification and audit tool first**. AI is used only for plain-English explanations of already-computed facts — never for math, matching, or financial decisions.
+> **Core Philosophy:** This is an audit tool first. Mathematical reconciliation is 100% deterministic code. Generative AI is used strictly for read-only natural language explanations backed by a regex-based anti-hallucination guardrail.
 
 ---
 
-## 2. Why This Problem Matters
+## 2. Why Reconciliation Breaks in the Real World
 
-Talk to any SME founder, finance lead, or Chartered Accountant handling Razorpay, and they'll tell you the same things:
+If you sell products or services online in India, your bank balance never matches your gross payment gateway report. A typical month-end disconnect looks like this:
 
-* **Excel Gridlock:** They spend 15–30 hours every month manually comparing bank UTRs against Razorpay payout reports across hundreds or thousands of rows.
-* **The Math Is Never Simple:** Settlement amounts rarely match gross transaction amounts. Platform fees, 18% GST, mid-cycle refunds, chargebacks, and gateway reserves all create deltas that have to be figured out one by one.
-* **Human Error & Delayed Closes:** Doing this manually leads to missed discrepancies, unlocated funds, and delayed month-end closes.
-* **Data Silos:** Bank statement formats vary wildly (HDFC, ICICI, SBI, Axis all format differently), and they don't talk to payment gateway logs.
+### A Real-World Example: The ₹10,000 Order
+
+Suppose a customer pays ₹10,000 for an order on your website:
+
+```
++ Customer Pays via Razorpay:                 ₹ 10,000.00
+- Gateway MDR Fee (2.0%):                     -   ₹ 200.00
+- 18% GST on MDR Fee (18% of ₹200):           -    ₹ 36.00
+- Statutory TDS (Section 194-O, 1% of gross): -   ₹ 100.00
+----------------------------------------------------------
+= Net Settlement Expected in Bank:             ₹ 9,664.00
+```
+
+When this settles into your bank account, you don't receive ₹10,000. You receive ₹9,664.
+
+### Where Manual Excel Workflows Collapse:
+* **Batched Payouts:** Razorpay does not send individual payments one by one. It groups 50 to 500 payments into a single bulk transfer (e.g., ₹4,83,200.00). If two orders in that batch had customer refunds deducted, Excel `VLOOKUP` fails completely.
+* **Messy Bank Formats:** SBI exports multi-line header preambles; HDFC includes encrypted PDFs; ICICI buries the 12-digit UTR in an 80-character narration string (`CMS/CMS2847192847/RZP/NET`).
+* **Silent Dropping:** When overwhelmed finance teams force numbers to balance in spreadsheets, unresolved exceptions are often swept into a generic "Miscellaneous Suspense" bucket, obscuring theft, double fees, or gateway leakage.
 
 ---
 
 ## 3. How ReconGrid AI Solves It
 
-ReconGrid AI enforces a strict architectural boundary: **Deterministic code makes every financial decision; AI is used solely for read-only explanation behind an anti-hallucination guardrail.**
+ReconGrid AI maintains a hard architectural boundary: **Deterministic code makes every financial decision. AI is strictly a read-only narration layer.**
 
 ```mermaid
 flowchart TD
-    subgraph DeterministicCore["Deterministic Financial Engine (Hard Boundary — Zero AI / Zero Float)"]
+    subgraph DeterministicCore["Deterministic Financial Core (Zero AI / Zero Float)"]
         direction TB
-        BankData["Bank Statement CSV / PDF"] --> Ingest["1. Ingestion & Normalization\n(Decimal, BOM Strip, Preamble Skip)"]
-        RzpData["Razorpay API / Webhooks"] --> Sync["2. Gateway Sync & Deduplication\n(HMAC Verified, Idempotent)"]
-        Ingest --> Engine["3. Multi-Tier Reconciliation Engine\n• Tier 1: Exact UTR & Amount (100%)\n• Tier 1.5: Normalized UTR Substring (98%)\n• Tier 2: Fuzzy Descriptor (>=90%)\n• Tier 0: Date Window Fallback (+/-3d)\n• Tier 3: Diagnostic Root-Cause (MDR+GST, TDS, Refunds)\n• Tier 3b: Bounded Subset-Sum Scan"]
+        BankData["Bank Statement (CSV / PDF)"] --> Ingest["1. Ingestion & Sanitization\n(BOM Strip, Preamble Detection, Decimal Parsing)"]
+        RzpData["Razorpay API / Webhooks"] --> Sync["2. Gateway Sync & Deduplication\n(HMAC-SHA256, Idempotency Keys)"]
+        Ingest --> Engine["3. Multi-Tier Reconciliation Engine\n• Tier 1: Exact UTR & Amount (100%)\n• Tier 1.5: Normalized UTR Substring (98%)\n• Tier 2: Fuzzy Description Matching (>=90%)\n• Tier 0: Date Window Fallback (+/-3d)\n• Tier 3: Diagnostic Root-Cause (MDR+GST, TDS, Refunds)\n• Tier 3b: Bounded Subset-Sum Combinations"]
         Sync --> Engine
-        Engine --> AuditLedger[("4. Append-Only Audit Ledger\n(PostgreSQL / SQLite)\n• Status: MATCHED | SUGGESTED | CONFLICT | EXCEPTION\n• Complete Row Conservation & Delta Trace")]
+        Engine --> AuditLedger[("4. Append-Only Audit Ledger\n(PostgreSQL / SQLite)\nStatus: MATCHED | SUGGESTED | CONFLICT | EXCEPTION")]
     end
 
     HumanCA["Chartered Accountant / Human Review"] <-->|One-Click Approvals & Conflict Resolution| AuditLedger
@@ -53,78 +67,69 @@ flowchart TD
     end
 ```
 
-1. **Ingest & Normalize:** Parses bank CSVs and multi-page PDFs into standard records (`date`, `amount`, `utr`, `direction`), with UTF-8 BOM stripping, preamble header detection, and unscaled paise protection.
-2. **Sync Settlements:** Pulls settlements and refunds via Razorpay's REST API (cursor-paginated, with backoff) and listens for real-time webhooks (HMAC-verified, idempotent).
-3. **Multi-Tier Matching Engine:**
-   - **Tier 1 (Exact):** UTR match + exact net amount match → `MATCHED` (100% confidence)
-   - **Tier 1.5 (Normalized UTR):** UTR prefix/suffix match (≥6 chars entropy) → `SUGGESTED` (98% confidence)
-   - **Tier 2 (Fuzzy):** Descriptor string similarity (≥90%) → `SUGGESTED` (human reviews)
-   - **Tier 0 (Fallback):** Date window (±3 days) + exact amount → `SUGGESTED` (human approves)
-   - **Tier 3 (Diagnostics & Subset Sum):** Explains deltas (fees + GST, Section 194-O TDS, refund clawbacks, FX adjustments) or groups batched payouts via two-pointer subset sum.
-4. **Audit & Exception Reporting:** Every decision is written to an append-only log. Every record ends in a clear state (`MATCHED`, `SUGGESTED`, `CONFLICT`, or `EXCEPTION`).
-5. **Settlement Q&A Agent:** Finance users can ask questions in plain English (*"Why didn't order #4521 settle correctly?"*). The system retrieves the exact audit record, has the LLM explain it in plain language, and runs an anti-hallucination regex guardrail to ensure zero invented numbers.
+### The 4 Status States of Every Transaction:
+
+1. **`MATCHED`**: 100% verified by Tier 1. Exact UTR and net amount match perfectly. Zero human action required.
+2. **`SUGGESTED`**: Strong mathematical correlation found (e.g. normalized UTR substring, or exact amount within a 3-day window, or fee delta explained). Placed in the CA review queue for one-click confirmation.
+3. **`CONFLICT`**: Two or more bank rows claim the same Razorpay settlement (or vice versa). Both rows are locked until a human reviewer assigns the settlement to the correct row. When approved, the competing candidate is displaced to `EXCEPTION`.
+4. **`EXCEPTION`**: Unresolved rows with specific diagnostic reason codes (`FEE_DEDUCTION`, `REFUND_ADJUSTED`, `TDS_194O_DEDUCTION`, `UNRESOLVED`). These remain in the permanent ledger for tax audits.
 
 ---
 
-## 4. When the System Stops & Asks a Human
+## 4. Why We Reject IEEE 754 Floating-Point Numbers
 
-The engine **never guesses**. It stops and asks for human review whenever:
+In standard Python:
+```python
+>>> 0.1 + 0.2
+0.30000000000000004
+```
 
-- A discrepancy can't be explained by fees + GST, refund batching, or FX within the ±₹1.00 tolerance
-- A fuzzy match confidence is below 90%
-- One settlement matches more than one bank row (conflict — locked until resolved)
-- A webhook fails signature verification (rejected immediately, logged)
-- Razorpay API retries exceed 5 attempts (halts and alerts rather than looping forever)
+In casual software, an extra `0.00000000000000004` is harmless. In financial accounting across 100,000 transactions, binary floating-point drift creates ghost pennies that violate statutory tax filings and fail bank reconciliation audits.
+
+**ReconGrid AI enforces a Zero-Float Policy:**
+- All money attributes use Python's standard library `Decimal` with explicit `ROUND_HALF_UP` precision: `Decimal('10000.00')`.
+- Pydantic v2 schemas reject any incoming payload with floating-point values at the boundary (`backend/tests/unit/test_schema_float_rejection.py`).
+- Amounts from Razorpay API (reported in integer paise) are converted via integer division: `Decimal(paise_amount) / Decimal(100)`.
 
 ---
 
-## 5. What We'll Show the Judges
+## 5. When the System Stops & Asks a Human
 
-| Output | What It Proves |
-|---|---|
-| **Match rate %** on 50+ record synthetic batch | Meets the Track 04 hackathon requirement (96.00% automated match rate on 50-row batch) |
-| **Total ₹ reconciled vs. ingested** | Shows the financial scale handled with zero-float Decimal mathematical conservation |
-| **Unedited exception list** | Proves the tool is honest and doesn't sweep errors under the rug (e.g. 2 seeded anomalies totaling ₹99,998) |
-| **High-throughput batch processing** | Sub-second execution across 50, 200, 500, and 1,000 transaction batches |
-| **End-to-end audit trail** | Shows one record traced: raw CSV row → matched settlement → diagnostic → log entry |
-| **Q&A Agent demo** | Shows the plain-English explanation layer working with strict anti-hallucination numeric guardrails |
+The engine never guesses. It automatically pauses and routes a transaction to the human review drawer whenever:
+* An amount difference cannot be accounted for by standard formulas (2% MDR + 18% GST, 1% TDS, or documented refunds) within a ±₹1.00 rounding tolerance.
+* A fuzzy narration score is below the 90% confidence threshold.
+* Two transactions compete for the same settlement ID.
+* A webhook signature fails HMAC-SHA256 verification.
+* Razorpay API rate limits or connection retries exceed 5 attempts.
 
-### Measured Batch Processing Benchmarks
+---
 
-Tested with `python backend/scripts/benchmark_throughput.py` on the full multi-tier reconciliation engine and database audit ledger:
+## 6. Real-World Edge Cases Handled
 
-| Batch Size | Wall Time | Throughput (Rows/Sec) | Peak RAM | Match Rate % | Unresolved Exceptions (INR) | Conservation |
+1. **Batched Settlements (Subset-Sum):** A single bank credit of ₹48,200.00 may represent three separate sales batches settled together. The Tier 3b bounded subset-sum scan tests combinations of pending settlements within a ±3-day window to locate exact aggregate matches without exponential CPU blowup.
+2. **Settlement Reversals & Chargebacks:** If a customer dispute results in a clawback days after settlement, the bank statement shows a `DEBIT`, not a `CREDIT`. Ingestion maintains strict credit/debit sign awareness.
+3. **Messy Indian Bank CSV Preambles:** SBI, ICICI, and HDFC prepend bank account summaries, IFSC codes, and empty lines before the actual CSV table. The ingestion parser automatically scans rows until it detects canonical header columns (`Date`, `Narration`, `Withdrawal`, `Deposit`).
+4. **Encrypted Bank PDFs:** Bank statements downloaded by merchants often have passwords (e.g. DOB + PAN or mobile number). The PDF processor accepts passwords and provides per-bank format hints.
+
+---
+
+## 7. Performance Benchmarks
+
+Measured on standard hardware with full database writes and audit logging enabled (`python backend/scripts/benchmark_throughput.py`):
+
+| Batch Size | Execution Time | Throughput | Peak RAM | Match Rate % | Unresolved Exceptions (INR) | Conservation |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **50** | `0.0351s` | **1,424.5 rows/s** | 1.52 MB | 96.00% | 2 (₹ 99,998.00) | PASSED (0 lost) |
-| **200** | `0.1078s` | **1,855.3 rows/s** | 2.68 MB | 95.00% | 10 (₹ 499,990.00) | PASSED (0 lost) |
-| **500** | `0.3136s` | **1,594.4 rows/s** | 6.49 MB | 94.80% | 9 (₹ 449,991.00) | PASSED (0 lost) |
-| **1,000** | `0.9716s` | **1,029.2 rows/s** | 12.88 MB | 94.80% | 17 (₹ 849,983.00) | PASSED (0 lost) |
-| **5,000** | `32.6310s` | **153.2 rows/s** | 67.50 MB | 94.72% | 13 (₹ 649,987.00) | PASSED (0 lost) |
+| **50** | `0.0351s` | **1,424 rows/s** | 1.5 MB | 96.00% | 2 (₹ 99,998.00) | PASSED (0 lost) |
+| **200** | `0.1078s` | **1,855 rows/s** | 2.7 MB | 95.00% | 10 (₹ 499,990.00) | PASSED (0 lost) |
+| **500** | `0.3136s` | **1,594 rows/s** | 6.5 MB | 94.80% | 9 (₹ 449,991.00) | PASSED (0 lost) |
+| **1,000** | `0.9716s` | **1,029 rows/s** | 12.9 MB | 94.80% | 17 (₹ 849,983.00) | PASSED (0 lost) |
+| **5,000** | `32.6310s` | **153 rows/s** | 67.5 MB | 94.72% | 13 (₹ 649,987.00) | PASSED (0 lost) |
 
 ---
 
-## 6. Who This Is For
+## 8. Out of Scope for v1 (Keeping It Honest)
 
-- **SME Founders & Finance Ops:** Need payout and fee visibility without hiring a dedicated reconciliation team
-- **Chartered Accountants & Accounting Firms:** Manage multi-client month-end closes and need GST input-tax-credit verification
-- **D2C & E-Commerce Brands:** High daily transaction volumes, frequent chargebacks, instant refunds
-
----
-
-## 7. Out of Scope for v1 (Keeping It Honest)
-
-To keep the scope realistic for a 14-day buildathon:
-- ❌ Multi-bank-account netting/consolidation across different accounts
-- ❌ Non-INR settlement currencies beyond basic FX-delta detection
-- ❌ Direct GST filing/e-invoicing (we do diagnostics, not filing)
-- ❌ Multi-gateway support (Razorpay only for v1)
-
-**Compliance & PCI Scope:** ReconGrid processes settlement metadata (amounts, UTRs, dates) and never touches card numbers, CVVs, or other PCI-scoped data, so PCI-DSS does not apply.
-
----
-
-## 8. Real-World Edge Cases Handled
-
-1. **Split / Batched Settlements:** A bank credit might bundle multiple Razorpay settlements, or a large settlement might be split across two days. The engine groups candidate settlements by date-window + summed amount before declaring an exception.
-2. **Settlement Reversals:** Razorpay sometimes debits an account days after settlement (chargeback, hold reversal). The bank statement shows a debit, not a credit. Ingestion explicitly tracks `CREDIT` vs `DEBIT` rather than assuming everything is a credit.
-3. **Cross-Currency Settlements:** Foreign transactions have an FX component on top of fees + GST. Tier 3 includes an FX-adjustment check before falling back to unresolved.
+To maintain clean engineering boundaries:
+- **Multi-bank netting:** We reconcile statements one bank account at a time. Multi-account cross-netting is out of scope.
+- **Direct Tax Filing:** We compute GST Input Tax Credit (ITC) deltas and TDS breakdowns, but we do not submit directly to the GSTN or TRACES portals.
+- **Cardholder PCI Data:** ReconGrid only processes settlement metadata (amounts, UTRs, dates). It never handles credit card numbers, CVVs, or cardholder credentials. PCI-DSS compliance is not required.

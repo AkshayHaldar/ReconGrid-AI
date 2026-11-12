@@ -8,107 +8,123 @@
 
 ## 1. How Data Flows Through the System
 
-Here's the big picture — what happens from the moment a CSV is uploaded to the moment a user sees their reconciliation results:
+When a merchant uploads a bank statement or Razorpay fires a settlement webhook, here is the exact sequence of events:
 
-```
-[ Frontend: Next.js + Tailwind ]
-         |
-         |  1. Upload Bank Statement CSV (multipart/form-data)
-         v
-[ FastAPI: /api/v1/bank/upload ]
-         |
-         |  2. Stream-parse + sanitize → canonical BankTransaction records
-         v
-[ PostgreSQL ] <-------------------------------------------+
-         ^                                                  |
-         |  3. Fetch settlements/refunds (paginated, backoff)
-         |                                                  |
-[ Razorpay Fetcher (httpx + tenacity retry) ]              |
-         ^                                                  |
-         |  3b. Real-time settlement.processed webhook      |
-[ FastAPI: /api/v1/webhooks/razorpay ] (HMAC-verified)     |
-         |                                                  |
-         |  4. Load Bank + Razorpay datasets                |
-         v                                                  |
-[ Reconciliation Engine (deterministic, Decimal-based) ] ---+
-         |                                 5. Write matches/exceptions/diagnostics
-         |  6. Serve reconciled data
-         v
-[ FastAPI: /api/v1/reconciliation/* ] --> [ Next.js Dashboard ]
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Merchant as Merchant / CA
+    participant Web as Next.js Dashboard
+    participant API as FastAPI Backend
+    participant Ingest as Ingestion Service
+    participant Matcher as Reconciliation Engine
+    participant DB as PostgreSQL / SQLite
+    participant RZP as Razorpay REST API
+    participant AI as Q&A Agent (LLM + Guardrail)
+
+    Note over Merchant,Web: Phase 1: Ingestion & Normalization
+    Merchant->>Web: Uploads Bank Statement (CSV / PDF)
+    Web->>API: POST /api/v1/bank/upload
+    API->>Ingest: Stream parse, strip BOM, skip preambles
+    Ingest->>DB: Store normalized BankTransaction rows (Decimal)
+
+    Note over API,RZP: Phase 2: Gateway Settlement Sync
+    API->>RZP: Pull settlements (httpx with tenacity retry)
+    RZP-->>API: Return settlement payloads (paise converted to Decimal)
+    API->>DB: Upsert RazorpaySettlements
+
+    Note over DB,Matcher: Phase 3: Multi-Tier Reconciliation
+    Matcher->>DB: Load pending bank rows & settlements
+    Matcher->>Matcher: Tier 1 -> Tier 1.5 -> Tier 2 -> Tier 0 -> Tier 3
+    Matcher->>DB: Write append-only ReconciliationLogs (MATCHED / SUGGESTED / CONFLICT / EXCEPTION)
+
+    Note over Merchant,AI: Phase 4: Verification & Human-in-the-Loop
+    Merchant->>Web: Inspects Scorecard & Suggested Drawer
+    Merchant->>Web: One-click approve or resolve conflict
+    Web->>API: POST /api/v1/reconciliation/records/{id}/approve
+    API->>DB: Transition status, auto-displace competing candidates
+    Merchant->>Web: "Why did order #4521 settle with a delta?"
+    Web->>API: POST /api/v1/qa/ask
+    API->>DB: Deterministic factual row lookup
+    API->>AI: Narrate fact via LLM
+    AI->>AI: Regex Guardrail verifies all numbers
+    AI-->>Web: Verified plain-English explanation
 ```
 
 ---
 
 ## 2. Components — What Each Piece Does
 
-### 2.1 Ingestion Service — `app/services/ingestion.py`
+### 2.1 Ingestion Service — [`backend/app/services/ingestion.py`](./backend/app/services/ingestion.py)
+*Coordinated with [`backend/app/utils/csv_parser.py`](./backend/app/utils/csv_parser.py) and [`backend/app/utils/pdf_parser.py`](./backend/app/utils/pdf_parser.py)*
 
-**Job:** Take a raw bank CSV and turn it into clean, deduplicated records.
-
-What it does:
-- **Streams** CSVs row-by-row (never loads the full file into memory) with auto-detection of delimiters and headers
-- **Normalizes** each row into a standard shape: `date`, `amount` (Decimal), `utr`, `direction` (CREDIT/DEBIT), `description`, plus the original raw row as JSON
-- **Deduplicates** using a SHA-256 hash of `date|amount|utr|raw_row` — uploading the same statement twice is harmless
-- **Rejects** bad files early: wrong MIME type or oversized → structured `400` error, never a silent partial ingest
-
-### 2.2 Razorpay Fetcher — `app/services/razorpay_client.py`
-
-**Job:** Get settlement and refund data from Razorpay, reliably.
+**Core Responsibility:** Transform raw, messy bank files into clean, deduplicated database records.
 
 What it does:
-- Calls `GET /v1/settlements` and `GET /v1/refunds` with cursor pagination (`count=100`, loop until done)
-- Retries with exponential backoff + jitter via `tenacity` — **hard ceiling of 5 attempts**, then raises `RazorpayFetchExhausted` and stops the job loudly (never loops forever)
-- **Upserts** by `settlement_id` — safe to re-run after an interruption
-- Webhook endpoint verifies `X-Razorpay-Signature` via HMAC-SHA256 on the **raw body** *before* any JSON parsing — invalid signature = `400`, logged, dropped
-- Duplicate webhook deliveries are caught by a `event_id` unique constraint — re-delivered events get a `200` but produce no side effects
+- **Streams** files row-by-row (bounded memory; never buffers the whole file into RAM).
+- **Auto-detects dialects and preambles:** Strips bank summary headers commonly found in SBI, HDFC, and ICICI exports.
+- **Normalizes** amounts to Python `Decimal(18, 2)` and cleans Indian numbering formats (e.g., `1,25,000.50` with commas and `₹` symbols).
+- **Deduplicates** via a SHA-256 hash of `date|amount|utr|raw_row` — uploading the same statement twice is idempotent and safe.
+- **Extracts embedded UTRs:** Scans narration strings for standard 12-to-22 character alphanumeric bank reference codes.
 
-### 2.3 Reconciliation Engine — `app/services/reconciliation.py`
+### 2.2 Razorpay Fetcher — [`backend/app/services/razorpay_client.py`](./backend/app/services/razorpay_client.py)
 
-**Job:** Match bank rows to Razorpay settlements. **No AI here — pure deterministic rules on Decimal values.**
+**Core Responsibility:** Synchronize settlements, payments, and refunds from Razorpay's REST API and webhooks without data loss.
 
-The matching runs in tiers, from strongest to weakest evidence:
+What it does:
+- **Cursor pagination:** Fetches settlements and refunds via `GET /v1/settlements` in batches of 100 until exhausted.
+- **Exponential backoff:** Uses `tenacity` retry with jitter. Ceilings at **5 attempts** before raising `RazorpayFetchExhausted` to avoid endless retry loops on bad credentials.
+- **Paise to Rupee conversion:** Converts Razorpay integer paise amounts to `Decimal` rupees (`amount / Decimal(100)`).
+- **HMAC Webhook verification:** Validates `X-Razorpay-Signature` against the raw request body using constant-time `hmac.compare_digest` before parsing any JSON payload. Invalid signatures receive immediate HTTP 400 rejection.
+- **Event idempotency:** Enforces unique constraint on `event_id` to guarantee duplicate webhook deliveries have no side effects.
 
-| Tier | What It Checks | Result If It Matches |
-|---|---|---|
-| **Tier 1** (Exact) | `utr == utr` AND `amount == amount` | `MATCHED` ✅ (100% confidence) |
-| **Tier 1.5** (Normalized UTR) | Normalized UTR prefix/suffix match (≥6 chars entropy floor) | `SUGGESTED` 🔍 (98% confidence) — CA approves |
-| **Tier 2** (Fuzzy) | Levenshtein/Jaro-Winkler similarity ≥ 90% on descriptor text | `SUGGESTED` 🔍 — needs human review |
-| **Tier 0** (Fallback) | Date window ±3 days + exact amount (used when UTR is missing) | `SUGGESTED` 🔍 — needs human approval |
-| **Tier 3** (Diagnostics & Subset Sum) | Delta explained by fees + 18% GST, Section 194-O TDS, refunds, or batched subset sum | Explained → `MATCHED` / diagnostic logged • Unexplained → `EXCEPTION` ❌ |
+### 2.3 Multi-Tier Reconciliation Engine — [`backend/app/services/reconciliation.py`](./backend/app/services/reconciliation.py)
 
-**Conflict rule:** If one settlement matches multiple bank rows → both are locked as `CONFLICT` (confidence score 0.50) until a human reviews and resolves them. Resolving a conflict on Bank Row A automatically unlocks and transitions competing Bank Rows B...N to `EXCEPTION` (`human_action = "AUTO_DISPLACED"`), preventing double-credit and maintaining a clean audit trail.
+**Core Responsibility:** Match bank records to gateway settlements with mathematical precision. **Zero AI is used in this decision path.**
 
-All money uses `Decimal`. All comparisons at `Decimal` precision. No floats anywhere.
+The matching runs sequentially from strongest to weakest evidence:
 
-### 2.4 Settlement Q&A Agent — `app/services/settlement_qa.py`
+| Tier | Matching Criteria | Result Status | Confidence | Human Action Needed? |
+|---|---|---|---|---|
+| **Tier 1** (Exact) | Exact UTR match AND exact net amount match | `MATCHED` | 100% | No — auto-verified |
+| **Tier 1.5** (Normalized UTR) | UTR match after stripping bank prefix/suffix tokens (entropy ≥ 6 chars) | `SUGGESTED` | 98% | Yes — CA one-click review |
+| **Tier 2** (Fuzzy Narration) | Levenshtein/token similarity $\ge 90\%$ on description text | `SUGGESTED` | 90% | Yes — CA review |
+| **Tier 0** (Date Fallback) | Exact amount match within $\pm 3$ day settlement window (for rows without UTR) | `SUGGESTED` | 75% | Yes — CA approval |
+| **Tier 3** (Delta Diagnostics) | Explains difference using exact formulas: 2% MDR + 18% GST, 1% Section 194-O TDS, or refunds | `MATCHED` with diagnostic | 95% | Flagged in audit ledger |
+| **Tier 3b** (Subset-Sum) | Bounded combination scan for batched payouts | `MATCHED` | 92% | Grouped in audit ledger |
+| **Unresolved** | Any difference that does not match known formulas or tolerance | `EXCEPTION` | 0% | Yes — flagged for forensic review |
 
-**Job:** Answer plain-language questions about reconciliation results. This is a **narration layer**, not a decision layer.
+#### Conflict Resolution & Automated Competitor Displacement:
+When multiple bank transactions match the same Razorpay settlement, all candidates are locked as `CONFLICT`. When a human reviewer confirms the correct match on Bank Row A:
+1. Bank Row A transitions to `MATCHED` (`human_action = "APPROVED"`).
+2. Competing candidate Bank Rows B...N are automatically unlocked and transitioned to `EXCEPTION` with `human_action = "AUTO_DISPLACED"`.
+3. This eliminates double-counting while preserving an immutable record of why the competitor was displaced.
 
-How it works:
-1. User asks something like *"Why didn't order #4521 settle correctly?"*
-2. **Retrieval (deterministic):** Look up the matching `ReconciliationLog` row by order ID / UTR / settlement ID — no LLM involved
-3. **Narration (LLM):** Pass the row's data (diagnostic type, delta, notes) to an LLM with a strict prompt: *"Explain this in plain language for a non-technical CA — do NOT recalculate or invent numbers"*
-4. **Guardrail:** Extract every number from the LLM's response and check against the source row. Any invented number → reject the response, show a template fallback instead
-5. If no record found → deterministic *"No record found for this reference"* — never a fabricated answer
+### 2.4 Settlement Q&A Agent — [`backend/app/services/settlement_qa.py`](./backend/app/services/settlement_qa.py)
+*Protected by [`backend/app/services/guardrail.py`](./backend/app/services/guardrail.py)*
 
-### 2.5 Audit Log — `app/models/reconciliation_log.py`
+**Core Responsibility:** Allow finance teams to ask questions about reconciliation facts in natural language without risk of financial hallucination.
 
-**Job:** Make every decision permanently traceable.
+1. **Deterministic Retrieval:** When the user asks *"Why did order #4521 settle with a ₹336 delta?"*, the engine performs an exact database query for order `#4521`.
+2. **Constrained Prompting:** The pre-computed audit facts (fees, GST, TDS, delta amounts) are passed to the LLM (NVIDIA NIM / LLaMA 3.3 70B) with strict instructions to explain the numbers without inventing or recalculating them.
+3. **Anti-Hallucination Regex Guardrail:** Every numeric token in the generated response is extracted and verified against the source record. If a single unverified number is found, the generated text is immediately dropped and replaced with a structured database fact template.
+4. **Permanent Audit Logging:** Every Q&A question, the raw LLM output, and the guardrail verification status are written to `QaInteractionLogs`.
 
-Each row stores: input record IDs, which tier matched, confidence score, computed delta, diagnostic type, and timestamp.
+### 2.5 Audit Log Model — [`backend/app/models/reconciliation_log.py`](./backend/app/models/reconciliation_log.py)
 
-**Critical rule:** Rows are **append-only** — records are marked `superseded=True`, never physically deleted. A re-reconciliation or human adjustment creates an updated row while preserving the complete audit history.
+**Core Invariant:** All reconciliation logs are **append-only**. Records are marked `superseded=True` if updated by human action, never deleted. The database maintains full row conservation:
 
-Q&A interactions are also logged in `QaInteractionLog` — query text, source record, LLM output, whether the guardrail rejected it. The Q&A layer is auditable too.
+$$\sum (\text{MATCHED} + \text{SUGGESTED} + \text{CONFLICT} + \text{EXCEPTION} + \text{PENDING}) = \text{Total Ingested Rows}$$
 
-### 2.6 Frontend — Next.js Dashboard
+### 2.6 Frontend Dashboard — [`frontend/src/app/page.tsx`](./frontend/src/app/page.tsx)
 
-The user-facing layer:
-- Side-by-side reconciliation ledger with color-coded status badges
-- One-click approve/deny on `SUGGESTED` matches
-- Real-time match-rate and exception metrics
-- Export to CSV/JSON
-- Settlement Q&A chat panel ([detailed wireframes →](./UX-CONTEXT.md))
+Built with Next.js 14 and Tailwind CSS:
+- Real-time KPI summary cards (match rate %, total ₹ reconciled, total unresolved deltas).
+- Tabular reconciliation ledger with color-coded status badges.
+- One-click approval drawer for `SUGGESTED` matches.
+- Interactive multi-row conflict resolution drawer.
+- Forensic audit drawer showing raw bank CSV row side-by-side with Razorpay JSON payload.
+- Slide-out Settlement Q&A panel.
 
 ---
 
@@ -198,7 +214,7 @@ erDiagram
 
 ## 6. API Endpoints
 
-All routes under `/api/v1` — see the [full API reference in the README](./README.md#-api-reference).
+All routes are under `/api/v1` — see the [complete API Reference in the README](./README.md#api-endpoints).
 
 ---
 
