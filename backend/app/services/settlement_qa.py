@@ -379,12 +379,12 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
 
 _UTR_RE = re.compile(r"\b[A-Za-z]{3,5}\d{5,}[A-Za-z0-9]*\b")
 _SETTLEMENT_RE = re.compile(r"\bsetl_[A-Za-z0-9]+\b", re.IGNORECASE)
-_TDS_RATE = Decimal("0.01")
+_TDS_RATE = settings.TDS_194O_RATE
 
 _DIAGNOSTIC_EXPLANATIONS: dict[str, str] = {
     "FEE_DEDUCTION": (
         "The settlement was credited short because Razorpay deducted its gateway fee and 18% GST on that fee "
-        "before paying out. The engine recomputes both from the gross amount and confirms the delta is zero."
+        "before paying out. The delta amount on the record is exactly those deducted gateway charges (fee plus GST), which the engine recomputes from the gross amount."
     ),
     "REFUND_ADJUSTED": (
         "Customer refunds issued in the settlement window were netted off the payout. The engine adds the "
@@ -399,7 +399,15 @@ _DIAGNOSTIC_EXPLANATIONS: dict[str, str] = {
         "statement shows an outflow tied to an earlier settlement."
     ),
     "TDS_194O_DEDUCTION": (
-        "Section 194-O TDS of 1% on gross e-commerce sales was withheld in addition to the gateway fee and GST."
+        "Section 194-O TDS on gross e-commerce sales was withheld in addition to the gateway fee and GST."
+    ),
+    "FX_ADJUSTED": (
+        "The payout differs from the invoice amount because of a foreign exchange conversion fee or rate "
+        "difference. The engine attributes the delta to that FX component."
+    ),
+    "PENDING_SETTLEMENT": (
+        "The bank credit has no matching gateway settlement yet. It is treated as in transit until the "
+        "settlement data arrives."
     ),
 }
 
@@ -410,6 +418,8 @@ _DIAGNOSTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "BATCHED_SETTLEMENT": ("batched_settlement", "batched settlement", "batched", "combined settlement", "clubbed"),
     "REVERSAL": ("reversal", "reversed", "clawback", "charged back"),
     "TDS_194O_DEDUCTION": ("tds_194o", "194-o", "194o"),
+    "FX_ADJUSTED": ("fx_adjusted", "fx adjusted", "fx adjustment", "foreign exchange", "currency conversion"),
+    "PENDING_SETTLEMENT": ("pending_settlement", "pending settlement", "in transit", "in-transit"),
 }
 
 _INSPECT_WORDS = ("fee", "fees", "gst", "tax", "tds", "breakdown", "break down", "deduction", "deductions",
@@ -478,6 +488,7 @@ def get_batch_summary_tool(summary: dict | None) -> ToolResult | None:
         ("Auto-reconciled", summary.get("matched_count", 0)),
         ("Suggested (CA review)", summary.get("suggested_count", 0)),
         ("Conflicts", summary.get("conflict_count", 0)),
+        ("In-transit (pending)", summary.get("pending_count", summary.get("total_pending_count", 0))),
         ("Exceptions", summary.get("exception_count", 0)),
     ]
     reconciled = format_inr(to_decimal(summary.get("total_reconciled_amount", 0)))
@@ -498,27 +509,49 @@ def get_batch_summary_tool(summary: dict | None) -> ToolResult | None:
 def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
     """Full forensic fee, GST and TDS breakdown for one reconciliation record."""
     setl = log.rzp_settlement
-    setl_id = setl.settlement_id if setl else "Unlinked"
     utr = log.bank_transaction.utr if log.bank_transaction else (setl.utr if setl else "N/A")
-    gross = to_decimal(setl.gross_amount) if setl else Decimal("0.00")
-    fee = to_decimal(setl.fees) if setl else Decimal("0.00")
-    gst = to_decimal(setl.tax) if setl else Decimal("0.00")
-    tds = (gross * _TDS_RATE).quantize(Decimal("0.01")) if log.diagnostic_type == "TDS_194O_DEDUCTION" else Decimal("0.00")
-    net = gross - fee - gst - tds
     delta = to_decimal(log.delta_amount)
+    if setl is None:
+        answer = (
+            f"💰 **Fee, GST & TDS Breakdown** (UTR `{utr}`)\n\n"
+            "This bank record is not linked to a gateway settlement, so gross, fee, GST and TDS figures are "
+            "unavailable. They are not zero, the settlement data has not been matched yet.\n\n"
+            f"• **Variance (delta)**: {format_inr(delta)}\n"
+            f"• **Classification**: `{log.diagnostic_type}`"
+        )
+        data = {
+            "type": "tool",
+            "tool": "inspect_record_tool",
+            "settlement_id": None,
+            "utr": utr,
+            "linked": False,
+            "delta_amount": str(delta),
+            "diagnostic_type": log.diagnostic_type,
+        }
+        return ToolResult("inspect_record_tool", answer, data)
+
+    setl_id = setl.settlement_id
+    gross = to_decimal(setl.gross_amount)
+    fee = to_decimal(setl.fees)
+    gst = to_decimal(setl.tax)
+    refund = to_decimal((setl.raw_payload or {}).get("refund_total", 0))
+    has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or "TDS" in (log.diagnostic_note or "").upper()
+    tds = (gross * _TDS_RATE).quantize(Decimal("0.01")) if has_tds else Decimal("0.00")
+    net = gross - fee - gst - tds - refund
 
     answer = (
         f"💰 **Fee, GST & TDS Breakdown for {setl_id}** (UTR `{utr}`)\n\n"
         f"• **Gross amount**: {format_inr(gross)}\n"
         f"• **Gateway fee**: {format_inr(fee)}\n"
         f"• **GST on fee**: {format_inr(gst)}\n"
-        f"• **Section 194-O TDS (1%)**: {format_inr(tds)}\n"
+        f"• **Section 194-O TDS ({_TDS_RATE * 100:g}%)**: {format_inr(tds)}\n"
+        f"• **Customer refunds netted off**: {format_inr(refund)}\n"
         f"• **Expected net payout**: {format_inr(net)}\n"
         f"• **Variance (delta)**: {format_inr(delta)}\n"
         f"• **Classification**: `{log.diagnostic_type}`\n\n"
-        "$$\\text{Net} = \\text{Gross} - \\text{Fee} - \\text{GST} - \\text{TDS}"
+        "**Net = Gross - Fee - GST - TDS - Refunds**"
         f" = {format_inr(gross)} - {format_inr(fee)} - {format_inr(gst)} - {format_inr(tds)}"
-        f" = {format_inr(net)}$$"
+        f" - {format_inr(refund)} = {format_inr(net)}"
     )
     data = {
         "type": "tool",
@@ -529,6 +562,7 @@ def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
         "fee": str(fee),
         "gst": str(gst),
         "tds": str(tds),
+        "refund": str(refund),
         "net": str(net),
         "delta_amount": str(delta),
         "diagnostic_type": log.diagnostic_type,
@@ -556,7 +590,7 @@ def audit_trial_balance_tool(summary: dict | None) -> ToolResult | None:
         f"🚨 **Trial Balance Audit**\n\n{status}\n\n"
         f"• **Total ingested**: {format_inr(ingested)}\n{lines}\n"
         f"• **Sum of buckets**: {format_inr(accounted)}\n\n"
-        "$$\\sum \\text{Bank} \\equiv \\sum \\text{Ledger}$$"
+        "**Check: sum of Bank = sum of Ledger**"
     )
     data = {
         "type": "tool",
@@ -624,7 +658,7 @@ class SettlementQaAgent:
         parsed = parse_query(clean_query)
         if source_log and parsed.intent == "inspect_record":
             tool_result = inspect_record_tool(source_log)
-        elif not source_log:
+        elif not source_log and not (parsed.intent == "get_batch_summary" and "formula" in clean_query.lower()):
             tool_result = route_query(parsed, summary_metrics)
         else:
             tool_result = None

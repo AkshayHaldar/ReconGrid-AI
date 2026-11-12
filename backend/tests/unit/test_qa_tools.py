@@ -90,7 +90,7 @@ def test_inspect_record_tool_returns_exact_values():
     assert result.data["gst"] == "137.29"
     assert result.data["tds"] == "0.00"
     assert result.data["net"] == "49100.00"
-    assert "$$" in result.answer
+    assert "Net = Gross - Fee - GST - TDS - Refunds" in result.answer
 
 
 def test_inspect_record_tool_includes_tds_when_diagnosed():
@@ -144,3 +144,38 @@ async def test_agent_runs_explain_tool_without_record():
     response = await SettlementQaAgent(repo).answer_query("what does REVERSAL mean")
     assert response.retrieved_data["tool"] == "explain_diagnostic_tool"
     assert response.source_record_id is None
+
+
+def test_inspect_record_subtracts_refunds_from_net():
+    log = make_log("REFUND_ADJUSTED")
+    log.rzp_settlement.raw_payload = {"refund_total": "5000.00"}
+    result = inspect_record_tool(log)
+    assert result.data["refund"] == "5000.00"
+    assert result.data["net"] == "44100.00"
+
+
+def test_inspect_record_counts_tds_on_compound_matches():
+    log = make_log("REFUND_ADJUSTED")
+    log.diagnostic_note = "refund clawback + 1% TDS (₹ 500.00) + gateway fee"
+    result = inspect_record_tool(log)
+    assert result.data["tds"] == "500.00"
+
+
+def test_inspect_record_unlinked_does_not_invent_zero_fees():
+    log = make_log("UNRESOLVED")
+    log.rzp_settlement = None
+    result = inspect_record_tool(log)
+    assert "unavailable" in result.answer
+    assert "fee" not in result.data
+
+
+@pytest.mark.parametrize("diagnostic", ["FX_ADJUSTED", "PENDING_SETTLEMENT"])
+def test_emitted_diagnostics_have_explanations(diagnostic):
+    parsed = parse_query(f"what does {diagnostic} mean")
+    assert parsed.diagnostic_type == diagnostic
+    assert explain_diagnostic_tool(diagnostic) is not None
+
+
+def test_batch_summary_lists_pending_bucket():
+    result = get_batch_summary_tool({"total_records": 5, "pending_count": 2})
+    assert "In-transit" in result.answer and ": 2" in result.answer
