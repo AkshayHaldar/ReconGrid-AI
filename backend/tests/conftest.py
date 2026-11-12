@@ -17,7 +17,7 @@ if not settings.RAZORPAY_WEBHOOK_SECRET:
     settings.RAZORPAY_WEBHOOK_SECRET = "test_webhook_secret_key"
 
 DEFAULT_SQLITE_URL = "sqlite+aiosqlite:///./test_recongrid.db"
-DEFAULT_POSTGRES_URL = "postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid"
+DEFAULT_POSTGRES_URL = "postgresql+asyncpg://recongrid:recongrid@127.0.0.1:5432/recongrid"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

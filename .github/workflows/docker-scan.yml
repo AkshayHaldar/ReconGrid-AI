@@ -27,7 +27,7 @@ jobs:
         run: docker build -t recongrid-backend:ci ./backend
 
       - name: Run Trivy vulnerability scan on backend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,7 +50,7 @@ jobs:
         run: docker build -t recongrid-frontend:ci ./frontend
 
       - name: Run Trivy vulnerability scan on frontend image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.28.0
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

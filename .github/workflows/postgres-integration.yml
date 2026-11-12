@@ -38,8 +38,9 @@ jobs:
           --health-retries 5
 
     env:
-      TEST_DATABASE_URL: postgresql+asyncpg://recongrid:recongrid@localhost:5433/recongrid
-      POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://recongrid:recongrid@localhost:5433/recongrid
+      DATABASE_URL: postgresql+asyncpg://recongrid:recongrid@127.0.0.1:5433/recongrid
+      TEST_DATABASE_URL: postgresql+asyncpg://recongrid:recongrid@127.0.0.1:5433/recongrid
+      POSTGRES_TEST_DATABASE_URL: postgresql+asyncpg://recongrid:recongrid@127.0.0.1:5433/recongrid
       ENV: development
       ENABLE_DEMO: "true"
       RAZORPAY_WEBHOOK_SECRET: ci-test-webhook-secret #Test-only value
@@ -63,6 +64,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
+
+      - name: Wait for PostgreSQL socket
+        run: |
+          python -c "
+          import socket, time
+          for i in range(20):
+              try:
+                  s = socket.create_connection(('127.0.0.1', 5433), timeout=2)
+                  s.close()
+                  print('PostgreSQL port 5433 is open and ready!')
+                  break
+              except Exception as e:
+                  print(f'Waiting for Postgres (attempt {i+1}/20)... {e}')
+                  time.sleep(1)
+          else:
+              raise SystemExit('Timed out waiting for PostgreSQL on 127.0.0.1:5433')
+          "
 
       - name: Run PostgreSQL integration tests
         run: |
