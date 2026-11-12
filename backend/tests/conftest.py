@@ -4,6 +4,7 @@ import os
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -55,8 +56,18 @@ async def setup_test_database(pytestconfig: pytest.Config):
     curr_engine_args = get_engine_args_for_url(test_db_url)
     engine = create_async_engine(test_db_url, **curr_engine_args)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-        await conn.run_sync(Base.metadata.create_all)
+        if test_db_url.startswith("sqlite"):
+            await conn.run_sync(Base.metadata.drop_all)
+            await conn.run_sync(Base.metadata.create_all)
+        else:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "TRUNCATE TABLE bank_transactions, razorpay_settlements, "
+                    "razorpay_refunds, reconciliation_logs, qa_interaction_logs, "
+                    "processed_webhook_events CASCADE;"
+                )
+            )
 
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -74,8 +85,9 @@ async def setup_test_database(pytestconfig: pytest.Config):
     app.dependency_overrides[get_db] = override_get_db
     yield
     app.dependency_overrides.clear()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    if test_db_url.startswith("sqlite"):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
