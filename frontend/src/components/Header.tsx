@@ -20,6 +20,7 @@ interface HeaderProps {
   onOpenSync: () => void;
   onToggleQa: () => void;
   isQaOpen: boolean;
+  onExportTally?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,6 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSync,
   onToggleQa,
   isQaOpen,
+  onExportTally,
 }) => {
   const [showShortcuts, setShowShortcuts] = useState(false);
 
@@ -124,6 +126,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Keyboard className="w-3.5 h-3.5" />
               </button>
+
+              {/* Tally Prime XML export */}
+              {onExportTally && (
+                <button
+                  onClick={onExportTally}
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 text-neutral-300 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
+                  title="Download matched settlements as Tally Prime journal vouchers (XML)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>Export to Tally (XML)</span>
+                </button>
+              )}
 
               {/* Upload Bank Statement */}
               <button

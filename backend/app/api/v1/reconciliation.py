@@ -19,6 +19,7 @@ from app.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ScorecardResponse,
 )
+from app.services.tally_export import build_tally_xml
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -295,6 +296,25 @@ async def export_reconciliation_csv(
         content=csv_data,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=recongrid_audit_{batch_id}.csv"},
+    )
+
+
+@router.get("/{batch_id}/export-tally-xml")
+async def export_tally_xml(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloads matched settlements as balanced Tally Prime Journal vouchers."""
+    repo = ReconciliationRepository(db)
+    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
+    export = build_tally_xml(logs)
+    return Response(
+        content=export.xml,
+        media_type="application/xml",
+        headers={
+            "Content-Disposition": "attachment; filename=reconciliation_tally_vouchers.xml",
+            "X-Skipped-Vouchers": str(len(export.skipped)),
+        },
     )
 
 
