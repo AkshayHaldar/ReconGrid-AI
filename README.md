@@ -81,7 +81,7 @@ ReconGrid AI was built specifically to address the mandate of Track 04:
 
 ### Throughput Benchmarks
 
-Measured on standard hardware with full DB writes and audit logging:
+Measured on standard hardware with full DB writes and audit logging using synthetic batches (`backend/scripts/benchmark_throughput.py`). Note that real-world throughput will depend on remote database latency and payment gateway network round-trips:
 
 | Batch Size | Time | Throughput | Peak RAM | Match Rate | Unresolved Anomalies | Conservation |
 |:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -376,10 +376,20 @@ All routes are under `/api/v1`:
 | `POST` | `/reconciliation/records/{id}/deny` | Move suggested match to unresolved exception |
 | `POST` | `/reconciliation/records/{id}/resolve-conflict` | Assign settlement and displace competing rows |
 | `GET` | `/reconciliation/{batch_id}/export` | Export audit ledger as CSV |
+| `GET` | `/reconciliation/{batch_id}/tally-export` | Export balanced Tally Prime XML journal vouchers with Section 194-O TDS |
 | `POST` | `/qa/ask` | Ask question to the Settlement Q&A Agent |
 | `GET` | `/qa/history` | View Q&A query history |
 | `POST` | `/demo/seed` | Seed test batch |
 | `POST` | `/demo/reset` | Clear test records |
+
+---
+
+## Known Limitations
+
+1. **Local SQLite Concurrency:** The zero-config developer mode defaults to SQLite (`aiosqlite`). SQLite serializes database writes with a single-writer lock. For concurrent multi-user environments or production loads, set `DATABASE_URL` to PostgreSQL with `asyncpg`.
+2. **Synchronous In-Process Matching:** Multi-tier matching currently executes in-process within the FastAPI request cycle. For batches exceeding 5,000 records, background worker execution via Celery/RQ (leveraging the provisioned Redis 7 service) is recommended.
+3. **In-Memory File Ingestion:** Uploaded statements are validated and parsed in memory up to 50 MB (`MAX_UPLOAD_SIZE_BYTES`). Multi-hundred megabyte statement files will require chunked disk spooling.
+4. **LLM Provider Availability:** The Settlement Q&A agent requires an active NVIDIA NIM API key (`NVIDIA_API_KEY`). If unconfigured or timed out, the system fails safely to raw database facts without disrupting reconciliation math.
 
 ---
 
@@ -393,8 +403,9 @@ If you want to contribute, please check [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 - **Bank Statement Parsers:** Add parser dialects for more Indian and international banks (Kotak, Punjab National Bank, Bank of Baroda, Federal Bank, Canara Bank).
 - **Payment Gateway Adapters:** Add modular connectors for Stripe, Cashfree, PayU, and Pine Labs following the `RazorpayClient` pattern.
-- **Accounting ERP Exports:** Direct export to Tally Prime XML, Zoho Books, or QuickBooks.
+- **Accounting ERP Exports:** Direct export to Zoho Books, QuickBooks, or SAP (Tally Prime XML is already supported via `/api/v1/reconciliation/{batch_id}/tally-export`).
 - **Local LLM Support:** Add Ollama or vLLM backends for running the Q&A Agent entirely offline.
+- **Distributed Background Workers:** Celery / RQ worker implementation using the provisioned Redis container for massive async reconciliation jobs.
 - **Frontend Enhancements:** Add keyboard shortcuts (`A` to approve, `D` to deny), custom date filters, and dark mode toggles.
 
 ### Core Development Rules

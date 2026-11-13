@@ -184,10 +184,12 @@ def compute_row_hash(
     direction: str,
     utr: str | None,
     description: str,
+    row_index: int | None = None,
 ) -> str:
     """Generates a deterministic SHA-256 hash for row idempotency."""
     formatted_date = date_val.strftime("%Y-%m-%d")
-    raw_key = f"{formatted_date}|{amount:.2f}|{direction}|{utr or ''}|{description.strip().upper()}"
+    idx_str = f"|{row_index}" if row_index is not None else ""
+    raw_key = f"{formatted_date}|{amount:.2f}|{direction}|{utr or ''}|{description.strip().upper()}{idx_str}"
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 
@@ -362,7 +364,7 @@ class BankCsvParser:
                     # Skip rows with zero or missing amount
                     continue
 
-                row_hash = compute_row_hash(parsed_date, amount, direction, utr, description)
+                row_hash = compute_row_hash(parsed_date, amount, direction, utr, description, row_index=row_idx)
 
                 yield {
                     "row_index": row_idx,

@@ -72,6 +72,12 @@ def extract_record_numbers(log: ReconciliationLog) -> set[str]:
             add_num(getattr(date_obj, "day", None))
             add_num(getattr(date_obj, "month", None))
             add_num(getattr(date_obj, "year", None))
+            if hasattr(date_obj, "hour"):
+                add_num(date_obj.hour)
+                add_num(f"{date_obj.hour:02d}")
+            if hasattr(date_obj, "minute"):
+                add_num(date_obj.minute)
+                add_num(f"{date_obj.minute:02d}")
 
     # Razorpay settlement fields
     rzp_setl = getattr(log, "rzp_settlement", None)
@@ -82,6 +88,17 @@ def extract_record_numbers(log: ReconciliationLog) -> set[str]:
         add_num(getattr(rzp_setl, "tax", None))
         add_num(getattr(rzp_setl, "utr", None))
         add_num(getattr(rzp_setl, "settlement_id", None))
+        setl_date = getattr(rzp_setl, "settlement_created_at", None)
+        if setl_date:
+            add_num(getattr(setl_date, "day", None))
+            add_num(getattr(setl_date, "month", None))
+            add_num(getattr(setl_date, "year", None))
+            if hasattr(setl_date, "hour"):
+                add_num(setl_date.hour)
+                add_num(f"{setl_date.hour:02d}")
+            if hasattr(setl_date, "minute"):
+                add_num(setl_date.minute)
+                add_num(f"{setl_date.minute:02d}")
         raw_payload = getattr(rzp_setl, "raw_payload", None)
         if raw_payload and isinstance(raw_payload, dict):
             for k, v in raw_payload.items():
@@ -92,11 +109,15 @@ def extract_record_numbers(log: ReconciliationLog) -> set[str]:
     if diag_note:
         allowed.update(extract_numeric_tokens(diag_note))
 
-    # Explicit GST rate addition ONLY for relevant diagnostic types
+    # Explicit statutory rate and fee percentage whitelist
     diag_type = getattr(log, "diagnostic_type", None)
-    if diag_type in ("FEE_DEDUCTION", "TDS_194O_DEDUCTION"):
+    if diag_type in ("FEE_DEDUCTION", "TDS_194O_DEDUCTION", "BATCHED_SETTLEMENT", "EXACT_MATCH"):
         gst_pct = settings.GST_RATE * Decimal(100) if isinstance(settings.GST_RATE, Decimal) else Decimal(str(settings.GST_RATE)) * Decimal(100)
+        mdr_pct = settings.DEFAULT_MDR_RATE * Decimal(100) if isinstance(settings.DEFAULT_MDR_RATE, Decimal) else Decimal(str(settings.DEFAULT_MDR_RATE)) * Decimal(100)
+        tds_pct = settings.TDS_194O_RATE * Decimal(100) if isinstance(settings.TDS_194O_RATE, Decimal) else Decimal(str(settings.TDS_194O_RATE)) * Decimal(100)
         add_num(gst_pct)
+        add_num(mdr_pct)
+        add_num(tds_pct)
 
     return allowed
 

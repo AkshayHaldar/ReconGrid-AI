@@ -61,10 +61,10 @@ sequenceDiagram
 **Core Responsibility:** Transform raw, messy bank files into clean, deduplicated database records.
 
 What it does:
-- **Streams** files row-by-row (bounded memory; never buffers the whole file into RAM).
+- **Streaming Parser:** In-memory buffered stream processing (`io.StringIO` / `io.BytesIO`) with strict 50 MB file size limits and row-by-row parsing.
 - **Auto-detects dialects and preambles:** Strips bank summary headers commonly found in SBI, HDFC, and ICICI exports.
 - **Normalizes** amounts to Python `Decimal(18, 2)` and cleans Indian numbering formats (e.g., `1,25,000.50` with commas and `₹` symbols).
-- **Deduplicates** via a SHA-256 hash of `date|amount|utr|raw_row` — uploading the same statement twice is idempotent and safe.
+- **Deduplicates** via a SHA-256 hash of `date|amount|direction|utr|description|row_index` — uploading the same statement twice is idempotent and safe, while multiple identical same-day transactions are preserved via row indexing.
 - **Extracts embedded UTRs:** Scans narration strings for standard 12-to-22 character alphanumeric bank reference codes.
 
 ### 2.2 Razorpay Fetcher — [`backend/app/services/razorpay_client.py`](./backend/app/services/razorpay_client.py)
@@ -203,12 +203,23 @@ erDiagram
 
 ---
 
+### 2.7 Tally Prime XML Export — [`backend/app/services/tally_export.py`](./backend/app/services/tally_export.py)
+
+**Core Responsibility:** Generate valid Tally Prime XML vouchers for matched settlements ensuring strict double-entry balancing ($\sum \text{Dr} = \sum \text{Cr}$).
+
+What it does:
+- Emits balanced Tally Journal Vouchers (`TALLYREQUEST: Import Data`, `REPORTNAME: Vouchers`).
+- Maps financial legs: Debits Bank Account (net received), Payment Gateway Charges (MDR fee), Input GST (18%), and Section 194-O TDS Receivable, while crediting Razorpay Clearing Account (gross).
+- Discards and reports any unbalanced voucher before emitting XML, ensuring zero corrupted journal entries reach accounting ledgers.
+
+---
+
 ## 5. Rate Limiting, Pagination & Failure Recovery
 
-- **Pagination:** Cursor/offset loop (`count=100, skip=N`) until no more results
-- **Backoff:** `tenacity` exponential backoff + jitter on `429`/`5xx`, max 5 attempts, then hard-stop with `RazorpayFetchExhausted`
-- **Concurrency throttle:** `asyncio.Semaphore` limits parallel Razorpay calls to avoid quota exhaustion
-- **Circuit breaker:** After N consecutive failures, jobs pause for a cooldown before retrying
+- **Pagination:** Cursor/offset loop (`count=100, skip=N`) until no more results.
+- **Backoff:** `tenacity` exponential backoff + jitter filtering by `_is_transient_error`. Retries on `429 Too Many Requests`, `5xx Server Errors`, and network transport failures. Fails fast without retrying on non-transient client errors (`401 Unauthorized`, `403 Forbidden`, `404 Not Found`).
+- **Event Idempotency:** Webhook ingestion uses SHA-256 payload fingerprinting fallback when headers omit event IDs, guaranteeing deduplication.
+- **Production Roadmap (Distributed Workers):** Redis 7 container is provisioned in Docker Compose for extracting long-running reconciliation runs and external API syncing into Celery/RQ background workers with distributed rate limiters and circuit breakers.
 
 ---
 

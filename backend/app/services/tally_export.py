@@ -17,6 +17,7 @@ from app.utils.money import to_decimal
 BANK_LEDGER = "Bank Account"
 GATEWAY_CHARGES_LEDGER = "Payment Gateway Charges"
 INPUT_GST_LEDGER = "Input GST (18%)"
+TDS_RECEIVABLE_LEDGER = "TDS u/s 194-O Receivable"
 CLEARING_LEDGER = "Razorpay Clearing Account"
 
 ZERO = Decimal("0.00")
@@ -46,12 +47,42 @@ def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
     bank, rzp = log.bank_transaction, log.rzp_settlement
     if log.match_status != "MATCHED" or bank is None or rzp is None:
         return None
-    gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
+
+    # Check for batched many-to-many settlement matches
+    matches = getattr(log, "settlement_matches", None)
+    if matches and len(matches) > 1:
+        valid_setls = [m.rzp_settlement for m in matches if getattr(m, "rzp_settlement", None)]
+        if valid_setls:
+            gross = sum((to_decimal(s.gross_amount) or to_decimal(s.amount) for s in valid_setls), ZERO)
+            fees_amt = sum((to_decimal(s.fees) for s in valid_setls), ZERO)
+            tax_amt = sum((to_decimal(s.tax) for s in valid_setls), ZERO)
+        else:
+            gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
+            fees_amt = to_decimal(rzp.fees)
+            tax_amt = to_decimal(rzp.tax)
+    else:
+        gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
+        fees_amt = to_decimal(rzp.fees)
+        tax_amt = to_decimal(rzp.tax)
+
+    bank_amt = to_decimal(bank.amount)
+
     debits = [
-        (bank_ledger, to_decimal(bank.amount)),
-        (GATEWAY_CHARGES_LEDGER, to_decimal(rzp.fees)),
-        (INPUT_GST_LEDGER, to_decimal(rzp.tax)),
+        (bank_ledger, bank_amt),
+        (GATEWAY_CHARGES_LEDGER, fees_amt),
+        (INPUT_GST_LEDGER, tax_amt),
     ]
+
+    # Handle Section 194-O E-Commerce TDS deduction to preserve double-entry balance
+    if log.diagnostic_type == "TDS_194O_DEDUCTION":
+        tds_amount = gross - (bank_amt + fees_amt + tax_amt)
+        if tds_amount > ZERO:
+            debits.append((TDS_RECEIVABLE_LEDGER, tds_amount))
+    elif gross > (bank_amt + fees_amt + tax_amt):
+        remaining = gross - (bank_amt + fees_amt + tax_amt)
+        if log.delta_amount and abs(to_decimal(log.delta_amount) - remaining) <= Decimal("1.00"):
+            debits.append((TDS_RECEIVABLE_LEDGER, remaining))
+
     return [(name, amt) for name, amt in debits if amt != ZERO], (CLEARING_LEDGER, gross)
 
 

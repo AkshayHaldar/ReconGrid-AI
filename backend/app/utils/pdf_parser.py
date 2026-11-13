@@ -362,10 +362,11 @@ class BankPdfParser:
 
             description = " ".join(narration_tokens).strip()
             utr = extract_utr_from_text(description)
-            row_hash = compute_row_hash(parsed_date, amount_val, direction, utr, description)
+            row_idx = len(results) + 1
+            row_hash = compute_row_hash(parsed_date, amount_val, direction, utr, description, row_index=row_idx)
 
             results.append({
-                "row_index": len(results) + 1,
+                "row_index": row_idx,
                 "row_hash": row_hash,
                 "date": parsed_date,
                 "amount": amount_val,
@@ -440,9 +441,10 @@ class BankPdfParser:
                                     direct = str(row.get("direction", "CREDIT")).upper()
                                     desc = str(row.get("description", ""))
                                     utr = row.get("utr") or extract_utr_from_text(desc)
-                                    h = compute_row_hash(dt, amt, direct, utr, desc)
+                                    row_idx = len(results) + 1
+                                    h = compute_row_hash(dt, amt, direct, utr, desc, row_index=row_idx)
                                     results.append({
-                                        "row_index": len(results) + 1,
+                                        "row_index": row_idx,
                                         "row_hash": h,
                                         "date": dt,
                                         "amount": amt,

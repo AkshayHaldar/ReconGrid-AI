@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -25,6 +25,15 @@ class RazorpayFetchExhausted(Exception):
     """Raised when maximum retries are exceeded."""
 
 
+def _is_transient_error(exc: BaseException) -> bool:
+    """Retries strictly on transient network failures and 429/5xx, exempting permanent 4xx auth errors."""
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in {429, 500, 502, 503, 504}
+    return False
+
+
 class RazorpayClient:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -38,7 +47,7 @@ class RazorpayClient:
         reraise=True,
         stop=stop_after_attempt(5),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
+        retry=retry_if_exception(_is_transient_error),
     )
     async def _fetch_settlements_page(
         self,

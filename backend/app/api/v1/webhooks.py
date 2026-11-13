@@ -1,5 +1,6 @@
 """Razorpay Webhook receiver API Route."""
 
+import hashlib
 import json
 from datetime import UTC, datetime
 
@@ -34,7 +35,7 @@ async def handle_razorpay_webhook(
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed JSON webhook body")
 
-    event_id = payload.get("id") or payload.get("event_id") or f"evt_{hash(raw_body)}"
+    event_id = payload.get("id") or payload.get("event_id") or f"evt_{hashlib.sha256(raw_body).hexdigest()[:24]}"
     event_type = payload.get("event", "unknown")
 
     # 1. Deduplication check on event_id

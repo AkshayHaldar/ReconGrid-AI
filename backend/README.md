@@ -131,7 +131,7 @@ All tests can be executed directly with `pytest`:
 
 ```bash
 # 1. Quick sanity test (matching engine unit test, runs in < 1 second)
-pytest tests/unit/test_matching_engine.py -v
+pytest tests/unit/test_reconciliation_engine_edges.py -v
 
 # 2. Verify schema-level float rejection (Zero-Float Policy)
 pytest tests/unit/test_schema_float_rejection.py -v
@@ -207,6 +207,9 @@ curl -X POST "http://localhost:8000/api/v1/qa/ask" \
 
 # Export the reconciled audit ledger as CSV
 curl -X GET "http://localhost:8000/api/v1/reconciliation/default/export" -o recongrid_audit.csv
+
+# Export balanced Tally Prime XML journal vouchers
+curl -X GET "http://localhost:8000/api/v1/reconciliation/default/tally-export" -o recongrid_tally.xml
 ```
 
 ---

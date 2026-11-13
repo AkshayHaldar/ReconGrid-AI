@@ -69,13 +69,28 @@ class DiagnosticsService:
 
         # Case 1: Settlement Reversal / Chargeback (Debit Row)
         if bank_tx.direction == "DEBIT":
+            if (
+                is_amount_matching(bank_amount, rzp_net, tolerance)
+                or (rzp_gross > Decimal("0.00") and is_amount_matching(bank_amount, rzp_gross, tolerance))
+                or (refund_total > Decimal("0.00") and is_amount_matching(bank_amount, refund_total, tolerance))
+            ):
+                return DiagnosticResult(
+                    diagnostic_type="REVERSAL",
+                    match_status="MATCHED",
+                    delta_amount=bank_amount,
+                    diagnostic_note=(
+                        f"Settlement reversal/chargeback debit of {format_inr(bank_amount)} "
+                        f"matched against negative adjustment on settlement {rzp_setl.settlement_id}."
+                    ),
+                )
+            unexplained_delta = abs(bank_amount - rzp_net)
             return DiagnosticResult(
-                diagnostic_type="REVERSAL",
-                match_status="MATCHED",
-                delta_amount=bank_amount,
+                diagnostic_type="UNRESOLVED",
+                match_status="EXCEPTION",
+                delta_amount=unexplained_delta,
                 diagnostic_note=(
-                    f"Settlement reversal/chargeback debit of {format_inr(bank_amount)} "
-                    f"matched against negative adjustment on settlement {rzp_setl.settlement_id}."
+                    f"Debit amount {format_inr(bank_amount)} does not match settlement {rzp_setl.settlement_id} "
+                    f"payout ({format_inr(rzp_net)}) or refund clawback ({format_inr(refund_total)})."
                 ),
             )
 
