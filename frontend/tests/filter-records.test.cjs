@@ -21,6 +21,8 @@ const {
   isValidIsoDate,
   toDateKey,
   parseAmountInput,
+  sanitizeAmountInput,
+  formatLocalIsoDate,
   getDatePresetRange,
   detectDatePreset,
   filterReconciliationRecords,
@@ -31,25 +33,25 @@ const {
 const sampleRecords = [
   {
     id: "rec-1",
-    date: "2026-08-05T00:00:00Z",
+    date: "2026-08-05T12:00:00Z",
     bank_amount: "4500.00",
     diagnostic_type: "EXACT_MATCH",
   },
   {
     id: "rec-2",
-    date: "2026-08-10T00:00:00+00:00",
+    date: "2026-08-10T12:00:00+00:00",
     bank_amount: "10000.00",
     diagnostic_type: "FEE_DEDUCTION",
   },
   {
     id: "rec-3",
-    date: "2026-08-12T14:30:00Z",
+    date: "2026-08-12T12:30:00Z",
     bank_amount: "25000.00",
     diagnostic_type: "TDS_194O_DEDUCTION",
   },
   {
     id: "rec-4",
-    date: "2026-08-15T23:59:59Z",
+    date: "2026-08-15T12:00:00Z",
     bank_amount: "9850.50",
     diagnostic_type: "EXACT_MATCH",
   },
@@ -138,9 +140,28 @@ test("validates calendar dates and extracts date keys safely", () => {
   assert.equal(isValidIsoDate("2026-08-15"), true);
   assert.equal(isValidIsoDate("2026-02-30"), false);
   assert.equal(isValidIsoDate("not-a-date"), false);
-  assert.equal(toDateKey("2026-08-15T18:30:00Z"), "2026-08-15");
+  assert.equal(toDateKey("2026-08-15"), "2026-08-15");
+
+  // Timestamps with time/timezone resolve to browser-local date key matching formatLocalIsoDate
+  const timestampWithTz = "2026-08-10T22:30:00Z";
+  assert.equal(
+    toDateKey(timestampWithTz),
+    formatLocalIsoDate(new Date(timestampWithTz))
+  );
+
   assert.equal(parseAmountInput("₹ 25,000.50"), 25000.5);
   assert.equal(parseAmountInput(""), null);
+});
+
+test("enforces at most one decimal point in sanitizeAmountInput and parses amounts safely", () => {
+  assert.equal(sanitizeAmountInput("10.5.0"), "10.50");
+  assert.equal(sanitizeAmountInput("1,234.56.78"), "1,234.5678");
+  assert.equal(sanitizeAmountInput("..50"), ".50");
+  assert.equal(sanitizeAmountInput("100"), "100");
+  assert.equal(sanitizeAmountInput("abc"), "");
+  assert.equal(parseAmountInput(sanitizeAmountInput("10.5.0")), 10.5);
+  assert.equal(parseAmountInput("10.5.0"), null);
+  assert.equal(parseAmountInput("."), null);
 });
 
 const toPlain = (val) => JSON.parse(JSON.stringify(val));

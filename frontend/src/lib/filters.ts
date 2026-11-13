@@ -61,19 +61,50 @@ export function isValidIsoDate(val: string | null | undefined): boolean {
 }
 
 /**
- * Normalizes a record timestamp / ISO string into a comparable YYYY-MM-DD date key.
+ * Formats a Date in local calendar YYYY-MM-DD for HTML date inputs and date keys.
  */
-export function toDateKey(val: string | null | undefined): string | null {
+export function formatLocalIsoDate(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Normalizes a record timestamp / ISO string into a comparable YYYY-MM-DD date key.
+ * Calendar-only YYYY-MM-DD dates are preserved as-is.
+ * Strings with time/timezone (e.g. 2026-08-10T22:30:00Z) are resolved using
+ * formatLocalIsoDate(new Date(trimmed)) so the filter key matches the browser-local
+ * date displayed to the user in formatDate().
+ */
+export function toDateKey(val: string | Date | null | undefined): string | null {
   if (!val) return null;
-  const trimmed = val.trim();
-  const isoPrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (isoPrefix && isValidIsoDate(isoPrefix[1])) {
-    return isoPrefix[1];
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? null : formatLocalIsoDate(val);
+  }
+  const trimmed = typeof val === "string" ? val.trim() : "";
+  if (!trimmed) return null;
+  if (isValidIsoDate(trimmed)) {
+    return trimmed;
   }
 
   const parsed = new Date(trimmed);
   if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().slice(0, 10);
+  return formatLocalIsoDate(parsed);
+}
+
+/**
+ * Sanitizes numeric amount inputs, allowing only digits, commas, and at most
+ * a single decimal point so invalid patterns like "10.5.0" strip extra dots.
+ */
+export function sanitizeAmountInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d.,]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return (
+    cleaned.slice(0, dotIndex + 1) +
+    cleaned.slice(dotIndex + 1).replace(/\./g, "")
+  );
 }
 
 /**
@@ -90,16 +121,6 @@ export function parseAmountInput(
   if (!cleaned) return null;
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
-}
-
-/**
- * Formats a Date in local calendar YYYY-MM-DD for HTML date inputs.
- */
-export function formatLocalIsoDate(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 /**
