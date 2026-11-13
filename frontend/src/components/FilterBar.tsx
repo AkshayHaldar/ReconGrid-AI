@@ -40,8 +40,11 @@ interface FilterBarProps {
   batchApproveLoading?: boolean;
 }
 
-const sanitizeAmountInput = (raw: string): string => {
-  return raw.replace(/[^\d.,]/g, "");
+export const sanitizeAmountInput = (raw: string): string => {
+  const cleaned = raw.replace(/[^\d.,]/g, "");
+  const dotIndex = cleaned.indexOf(".");
+  if (dotIndex === -1) return cleaned;
+  return cleaned.slice(0, dotIndex + 1) + cleaned.slice(dotIndex + 1).replace(/\./g, "");
 };
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -126,7 +129,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
     parsedMin !== null && parsedMax !== null && parsedMin > parsedMax;
 
   const hasDateFilter = Boolean(startDate || endDate);
-  const hasAmountFilter = Boolean(minAmount.trim() || maxAmount.trim());
+  const hasAmountFilter = parsedMin !== null || parsedMax !== null;
   const hasDiagnosticFilter = selectedDiagnostic !== "ALL";
   const hasSearchFilter = Boolean(searchQuery.trim());
 
