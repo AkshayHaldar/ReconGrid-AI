@@ -289,12 +289,16 @@ export default function DashboardPage() {
       <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
         <SummaryCards
           status={status}
+          records={records}
+          activeDiagnostic={selectedDiagnostic}
+          activeTab={activeTab}
           onOpenUpload={() => setIsUploadOpen(true)}
           onOpenSync={() => setIsSyncOpen(true)}
           onFilterTab={(tab) => {
             setActiveTab(tab);
             setSelectedDiagnostic("ALL");
           }}
+          onSelectDiagnostic={(diag) => setSelectedDiagnostic(diag)}
         />
 
         {!isEmpty && (

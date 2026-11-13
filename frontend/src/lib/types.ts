@@ -94,3 +94,51 @@ export interface ApiResponse<T> {
     details?: any;
   } | null;
 }
+
+export type WaterfallSegmentId =
+  | "GROSS"
+  | "MDR_FEE"
+  | "GST_TAX"
+  | "TDS_194O"
+  | "NET_CREDIT";
+
+export interface FeeWaterfallStage {
+  id: WaterfallSegmentId;
+  label: string;
+  shortLabel: string;
+  rateLabel?: string;
+  amount: number;
+  formattedAmount: string;
+  percentageOfGross: number;
+  transactionCount: number;
+  diagnosticFilter: DiagnosticType | "ALL" | null;
+  statusTabFilter: MatchStatus | "ALL" | null;
+  color: {
+    bg: string;
+    border: string;
+    text: string;
+    hoverBg: string;
+    barBg: string;
+    badgeBg: string;
+  };
+  description: string;
+}
+
+export interface FeeWaterfallBreakdown {
+  grossAmount: number;
+  mdrFeeAmount: number;
+  gstTaxAmount: number;
+  tdsAmount: number;
+  netBankAmount: number;
+  totalDeductions: number;
+  varianceAmount: number;
+  isInBalance: boolean;
+
+  totalTransactions: number;
+  mdrFeeCount: number;
+  gstTaxCount: number;
+  tdsCount: number;
+  netBankCount: number;
+
+  stages: FeeWaterfallStage[];
+}
