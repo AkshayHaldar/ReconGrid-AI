@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Controls & Action Center */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full xl:w-auto min-w-0">
+          <div className="flex flex-wrap xl:flex-nowrap items-center gap-2 w-full xl:w-auto min-w-0">
             {/* Live Gateway Status Badge (wide desktop) */}
             <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] rounded-md text-[10px] font-mono text-emerald-400 shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
@@ -85,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Bank Account Selector */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 w-full sm:w-[190px] 2xl:w-[260px] min-w-0 flex-1 sm:flex-initial transition">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 w-full sm:w-[190px] 2xl:w-[260px] min-w-0 flex-1 sm:flex-initial sm:shrink-0 transition">
               <Building2 className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
               <select
                 value={selectedBank}
