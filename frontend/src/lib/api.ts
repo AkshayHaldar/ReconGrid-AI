@@ -48,6 +48,29 @@ export async function fetchRecords(
   return json.data;
 }
 
+// The API caps page_size at 200. Walk every page so the (virtualized) ledger
+// can show the full batch instead of only the first page.
+const RECORDS_PAGE_SIZE = 200;
+
+export async function fetchAllRecords(
+  batchId: string = "default",
+  status: string = "ALL",
+  search: string = ""
+): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
+  const first = await fetchRecords(batchId, status, search, 1, RECORDS_PAGE_SIZE);
+  const pages = Math.ceil(first.total_count / RECORDS_PAGE_SIZE);
+  if (pages <= 1) return first;
+  const rest = await Promise.all(
+    Array.from({ length: pages - 1 }, (_, i) =>
+      fetchRecords(batchId, status, search, i + 2, RECORDS_PAGE_SIZE)
+    )
+  );
+  return {
+    records: first.records.concat(...rest.map((r) => r.records)),
+    total_count: first.total_count,
+  };
+}
+
 export async function approveRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
   const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/approve`, {
     method: "POST",
