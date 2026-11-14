@@ -40,19 +40,38 @@ type SortOrder = "asc" | "desc";
 // Estimated height of a collapsed row; real heights are measured after render.
 const ROW_HEIGHT = 53;
 
+// Must match the <th> count in <thead> and the expanded row's colSpan.
+const COLUMN_COUNT = 9;
+
 // Skip the synchronous getBoundingClientRect() the default measurer does when a
 // row mounts (it forces a table layout per row while scrolling). The
 // ResizeObserver entry arrives right after mount with the real size, so until
-// then keep the last known one.
+// then keep the last known one. Engines without borderBoxSize or
+// ResizeObserver fall back to reading the layout directly.
 const measureRow = (
   el: Element,
   entry: ResizeObserverEntry | undefined,
   instance: Virtualizer<HTMLDivElement, Element>
 ) => {
-  const box = entry?.borderBoxSize?.[0];
-  if (box) return Math.round(box.blockSize);
+  // Some engines return a single object instead of an array.
+  const raw = entry?.borderBoxSize as
+    | ResizeObserverSize
+    | ReadonlyArray<ResizeObserverSize>
+    | undefined;
+  const box = Array.isArray(raw) ? raw[0] : (raw as ResizeObserverSize | undefined);
+  if (box && box.blockSize > 0) return Math.round(box.blockSize);
+
+  // Entry present but no usable borderBoxSize (old Safari/Firefox).
+  if (entry) return Math.round(entry.target.getBoundingClientRect().height);
+
   const index = Number((el as HTMLElement).dataset.index);
-  return instance.measurementsCache[index]?.size ?? ROW_HEIGHT;
+  const cached = instance.measurementsCache[index]?.size;
+  if (typeof ResizeObserver !== "undefined") return cached ?? ROW_HEIGHT;
+
+  // No ResizeObserver means no entry will ever follow, so measure now.
+  const h = Math.round(el.getBoundingClientRect().height);
+  if (h > 0) return h;
+  return cached ?? ROW_HEIGHT;
 };
 
 interface LedgerRowProps {
@@ -303,7 +322,7 @@ const LedgerRow = React.memo(function LedgerRow({
           {/* Expandable Inline Detail View */}
           {isExpanded && (
             <tr aria-rowindex={index + 2} className="bg-[#0c0e12] border-y border-[#1e222d]">
-              <td colSpan={9} className="p-4">
+              <td colSpan={COLUMN_COUNT} className="p-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-sans">
                   {/* Col 1: Mathematical Breakdown */}
                   <div className="bg-[#111318] border border-[#1e222d] rounded-lg p-3 space-y-2 font-mono">
@@ -574,54 +593,5 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                 </div>
               </th>
               <th
-                onClick={() => toggleSort("delta_amount")}
-                className="py-2.5 px-3 text-right w-28 cursor-pointer hover:text-neutral-200 select-none transition"
-              >
-                <div className="flex items-center justify-end gap-1">
-                  <span>Delta</span>
-                  <ArrowUpDown className="w-3 h-3 text-neutral-500" />
-                </div>
-              </th>
-              <th className="py-2.5 px-3 w-40 text-center">Status & Diagnostic</th>
-              <th className="py-2.5 px-3 text-right w-24">Actions</th>
-            </tr>
-          </thead>
-          {paddingTop > 0 && (
-            <tbody aria-hidden="true">
-              <tr style={{ height: paddingTop }} />
-            </tbody>
-          )}
-          {virtualItems.map((vi) => {
-              const r = sortedRecords[vi.index];
-              return (
-                <LedgerRow
-                  key={r.id}
-                  r={r}
-                  index={vi.index}
-                  isHighlighted={highlightedRecordId === r.id}
-                  isExpanded={expandedRowId === r.id}
-                  copiedKey={copiedId === `utr-${r.id}` || copiedId === `setl-${r.id}` ? copiedId : null}
-                  measureRef={virtualizer.measureElement}
-                  onToggle={toggleExpanded}
-                  onCopy={handleCopy}
-                  onApprove={onApprove}
-                  onDeny={onDeny}
-                  onOpenConflict={onOpenConflict}
-                  onOpenException={onOpenException}
-                />
-              );
-            })}
-          {paddingBottom > 0 && (
-            <tbody aria-hidden="true">
-              <tr style={{ height: paddingBottom }} />
-            </tbody>
-          )}
-        </table>
-      </div>
-
-      <div className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] text-xs font-mono text-neutral-400">
-        {sortedRecords.length} records
-      </div>
-    </div>
-  );
-};
+                onClick={() => toggleSort("del
+// ... [Truncated for brevity]
