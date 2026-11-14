@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Check,
   X,
@@ -16,8 +17,6 @@ import {
   Code2,
   Percent,
   Layers,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { ReconciliationRecordItem } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/formatters";
@@ -26,6 +25,8 @@ import { StatusBadge } from "./StatusBadge";
 interface ReconciliationTableProps {
   records: ReconciliationRecordItem[];
   highlightedRecordId: string | null;
+  /** Ask the table to scroll a record into view; bump `nonce` to repeat a jump. */
+  scrollRequest?: { id: string; nonce: number } | null;
   onApprove: (recordId: string) => void;
   onDeny: (recordId: string) => void;
   onOpenConflict: (record: ReconciliationRecordItem) => void;
@@ -36,9 +37,13 @@ interface ReconciliationTableProps {
 type SortField = "date" | "bank_amount" | "rzp_amount" | "delta_amount" | "bank_utr";
 type SortOrder = "asc" | "desc";
 
+// Estimated height of a collapsed row; real heights are measured after render.
+const ROW_HEIGHT = 52;
+
 export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   records,
   highlightedRecordId,
+  scrollRequest,
   onApprove,
   onDeny,
   onOpenConflict,
@@ -49,8 +54,8 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef<number | null>(null);
 
   const handleCopy = (text: string, id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -90,11 +95,33 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
     });
   }, [records, sortField, sortOrder]);
 
-  const totalPages = Math.ceil(sortedRecords.length / pageSize) || 1;
-  const paginatedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return sortedRecords.slice(start, start + pageSize);
-  }, [sortedRecords, currentPage, pageSize]);
+  const virtualizer = useVirtualizer({
+    count: sortedRecords.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+    getItemKey: (i) => sortedRecords[i].id,
+  });
+
+  // Jump to a record (e.g. from an Audit Assistant citation). The row may not be
+  // mounted, so scroll by index; wait until the record is in the current list.
+  useEffect(() => {
+    if (scrollRequest) pendingScroll.current = scrollRequest.nonce;
+  }, [scrollRequest]);
+
+  useEffect(() => {
+    if (!scrollRequest || pendingScroll.current !== scrollRequest.nonce) return;
+    const index = sortedRecords.findIndex((r) => r.id === scrollRequest.id);
+    if (index < 0) return;
+    pendingScroll.current = null;
+    virtualizer.scrollToIndex(index, { align: "center" });
+  }, [scrollRequest, sortedRecords, virtualizer]);
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom =
+    virtualItems.length > 0 ? totalSize - virtualItems[virtualItems.length - 1].end : 0;
 
   if (loading && records.length === 0) {
     return (
@@ -126,27 +153,19 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] text-neutral-500">Rows per page:</span>
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-            className="bg-[#151820] border border-[#1e222d] rounded px-1.5 py-0.5 text-[10px] text-neutral-200 focus:outline-none cursor-pointer"
-          >
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </div>
+        <span className="text-[10px] text-neutral-500">
+          Scroll to browse all {sortedRecords.length} records
+        </span>
       </div>
 
-      <div className="overflow-x-auto max-h-[640px] overflow-y-auto touch-scroll">
-        <table className="w-full text-left border-collapse text-xs min-w-[800px] sm:min-w-full">
+      <div ref={scrollRef} className="overflow-x-auto max-h-[640px] overflow-y-auto touch-scroll">
+        <table
+          aria-rowcount={sortedRecords.length + 1}
+          aria-label="Reconciliation ledger"
+          className="w-full text-left border-collapse text-xs min-w-[800px] sm:min-w-full"
+        >
           <thead className="sticky top-0 bg-[#0c0e12] z-20 border-b border-[#1e222d] text-neutral-400 font-medium uppercase tracking-wider text-[9px] sm:text-[10px]">
-            <tr>
+            <tr aria-rowindex={1}>
               <th className="py-2.5 px-3 w-8 text-center"></th>
               <th
                 onClick={() => toggleSort("date")}
@@ -198,8 +217,14 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
               <th className="py-2.5 px-3 text-right w-24">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#161922] font-sans">
-            {paginatedRecords.map((r, idx) => {
+          {paddingTop > 0 && (
+            <tbody aria-hidden="true">
+              <tr style={{ height: paddingTop }} />
+            </tbody>
+          )}
+          {virtualItems.map((vi) => {
+              const r = sortedRecords[vi.index];
+              const idx = vi.index;
               const isHighlighted = highlightedRecordId === r.id;
               const isExpanded = expandedRowId === r.id;
               const isDebit = r.bank_direction === "DEBIT";
@@ -207,11 +232,17 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
               const hasNonZeroDelta = deltaNum > 0;
 
               return (
-                <React.Fragment key={r.id}>
+                <tbody
+                  key={r.id}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  className="font-sans"
+                >
                   <tr
                     id={`record-${r.id}`}
+                    aria-rowindex={vi.index + 2}
                     onClick={() => setExpandedRowId(isExpanded ? null : r.id)}
-                    className={`hover:bg-[#141720] cursor-pointer transition-colors duration-100 ${
+                    className={`border-b border-[#161922] hover:bg-[#141720] cursor-pointer transition-colors duration-100 ${
                       idx % 2 === 0 ? "table-row-even" : "table-row-odd"
                     } ${isHighlighted ? "citation-highlight" : ""} ${
                       isDebit ? "bg-rose-950/20 hover:bg-rose-950/30" : ""
@@ -413,7 +444,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
 
                   {/* Expandable Inline Detail View */}
                   {isExpanded && (
-                    <tr className="bg-[#0c0e12] border-y border-[#1e222d]">
+                    <tr aria-rowindex={vi.index + 2} className="bg-[#0c0e12] border-y border-[#1e222d]">
                       <td colSpan={9} className="p-4">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-sans">
                           {/* Col 1: Mathematical Breakdown */}
@@ -498,39 +529,19 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                       </td>
                     </tr>
                   )}
-                </React.Fragment>
+                </tbody>
               );
             })}
-          </tbody>
+          {paddingBottom > 0 && (
+            <tbody aria-hidden="true">
+              <tr style={{ height: paddingBottom }} />
+            </tbody>
+          )}
         </table>
       </div>
 
-      {/* Pagination Footer */}
-      <div className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] flex items-center justify-between text-xs font-mono text-neutral-400">
-        <div>
-          Showing {(currentPage - 1) * pageSize + 1} to{" "}
-          {Math.min(currentPage * pageSize, sortedRecords.length)} of {sortedRecords.length} records
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
-            disabled={currentPage === 1}
-            className="p-1 rounded bg-[#151820] hover:bg-[#1d212c] border border-[#1e222d] disabled:opacity-40 transition cursor-pointer"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <span>
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
-            disabled={currentPage === totalPages}
-            className="p-1 rounded bg-[#151820] hover:bg-[#1d212c] border border-[#1e222d] disabled:opacity-40 transition cursor-pointer"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
-        </div>
+      <div className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] text-xs font-mono text-neutral-400">
+        {sortedRecords.length} records
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ import {
 import {
   API_BASE,
   fetchStatus,
-  fetchRecords,
+  fetchAllRecords,
   approveRecord,
   denyRecord,
   resolveConflict,
@@ -52,13 +52,14 @@ export default function DashboardPage() {
 
   // Active highlighted record from Q&A citation jump
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [scrollRequest, setScrollRequest] = useState<{ id: string; nonce: number } | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
       const [statusData, recordsData] = await Promise.all([
         fetchStatus("default"),
-        fetchRecords("default", activeTab, searchQuery, 1, 100),
+        fetchAllRecords("default", activeTab, searchQuery),
       ]);
       setStatus(statusData);
       setRecords(recordsData.records);
@@ -250,12 +251,8 @@ export default function DashboardPage() {
     setHighlightedId(recordId);
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
-    setTimeout(() => {
-      const el = document.getElementById(`record-${recordId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 150);
+    // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
+    setScrollRequest({ id: recordId, nonce: Date.now() });
   };
 
   const handleExportCsv = () => {
@@ -318,6 +315,7 @@ export default function DashboardPage() {
              <ReconciliationTable
                 records={displayedRecords}
                 highlightedRecordId={highlightedId}
+                scrollRequest={scrollRequest}
                 onApprove={handleApprove}
                 onDeny={handleDeny}
                 onOpenConflict={(r) => setConflictTarget(r)}
