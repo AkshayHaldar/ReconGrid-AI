@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { formatFiscalPeriod } from "@/lib/formatters";
 import {
   UploadCloud,
   Building2,
@@ -6,7 +7,6 @@ import {
   Zap,
   HelpCircle,
   FileText,
-  ShieldCheck,
   Activity,
   CheckCircle2,
   X,
@@ -21,6 +21,8 @@ interface HeaderProps {
   onToggleQa: () => void;
   isQaOpen: boolean;
   onExportTally?: () => void;
+  /** The active batch's date. The fiscal period follows it, or today when it is missing. */
+  periodDate?: string | Date | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,30 +33,31 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleQa,
   isQaOpen,
   onExportTally,
+  periodDate,
 }) => {
   const [showShortcuts, setShowShortcuts] = useState(false);
 
   return (
     <>
-      <header className="border-b border-[#1e222d] bg-[#090a0f]/95 backdrop-blur-md sticky top-0 z-30 px-3 sm:px-6 lg:px-8 py-2.5 transition-all">
-        <div className="w-full max-w-[1920px] mx-auto flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+      <header className="border-b border-[#1e222d] bg-[#090a0f]/95 backdrop-blur-md sticky top-0 z-30 px-3 sm:px-6 lg:px-8 py-2 transition-all">
+        <div className="w-full max-w-[1920px] mx-auto flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-3 gap-y-2">
           {/* Brand & Workspace Identity */}
-          <div className="flex items-center justify-between lg:justify-start gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 sm:w-8.5 sm:h-8.5 rounded-md bg-[#161922] border border-[#282e3d] flex items-center justify-center text-neutral-100 font-semibold text-xs sm:text-sm font-mono tracking-tight shadow-xs">
+          <div className="flex items-center justify-between xl:justify-start gap-3 w-full xl:w-auto min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 shrink-0 rounded-md bg-[#161922] border border-[#282e3d] flex items-center justify-center text-neutral-100 font-semibold text-xs sm:text-sm font-mono tracking-tight shadow-xs">
                 RG
               </div>
 
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-sm sm:text-base font-semibold text-neutral-100 tracking-tight font-sans">
+                  <h1 className="text-sm sm:text-base leading-tight font-semibold text-neutral-100 tracking-tight font-sans">
                     ReconGrid
                   </h1>
                   <span className="px-1.5 py-0.5 rounded bg-neutral-900 text-neutral-400 border border-neutral-800 text-[9px] sm:text-[10px] font-mono tracking-tight font-medium">
                     SETTLEMENT CONSOLE
                   </span>
                 </div>
-                <p className="text-[10px] sm:text-[11px] text-neutral-400 font-sans truncate max-w-[240px] sm:max-w-sm">
+                <p className="hidden sm:block text-[11px] leading-tight text-neutral-400 font-sans truncate max-w-[240px] sm:max-w-sm">
                   Automated Settlement Reconciliation & Variance Audit
                 </p>
               </div>
@@ -68,28 +71,21 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Controls & Action Center */}
-          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-            {/* Live Gateway & Engine Status Badge (Desktop) */}
-            <div className="hidden xl:flex items-center gap-2 px-2.5 py-1 bg-[#111318] border border-[#1e222d] rounded-md text-xs font-mono text-neutral-300">
-              <div className="flex items-center gap-1.5 text-emerald-400 text-[10px]">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                <span>Gateway Connected</span>
-              </div>
-              <span className="text-neutral-700">|</span>
-              <div className="flex items-center gap-1 text-[10px] text-neutral-400">
-                <ShieldCheck className="w-3 h-3 text-neutral-400" />
-                <span>Deterministic Engine v2.1</span>
-              </div>
+          <div className="flex flex-wrap xl:flex-nowrap items-center gap-2 w-full xl:w-auto min-w-0">
+            {/* Live Gateway Status Badge (wide desktop) */}
+            <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] rounded-md text-[10px] font-mono text-emerald-400 shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span>Gateway Connected</span>
             </div>
 
-            {/* Fiscal Accounting Period */}
+            {/* Fiscal Accounting Period (follows the active batch date) */}
             <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] rounded-md text-xs text-neutral-300 font-mono shrink-0">
               <Calendar className="w-3.5 h-3.5 text-neutral-400" />
-              <span>Aug 2026 Close (FY 26-27)</span>
+              <span suppressHydrationWarning>{formatFiscalPeriod(periodDate)}</span>
             </div>
 
             {/* Bank Account Selector */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 w-full sm:w-auto min-w-0 flex-1 sm:flex-initial transition">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 w-full sm:w-[190px] 2xl:w-[260px] min-w-0 flex-1 sm:flex-initial sm:shrink-0 transition">
               <Building2 className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
               <select
                 value={selectedBank}
@@ -115,63 +111,67 @@ export const Header: React.FC<HeaderProps> = ({
               </select>
             </div>
 
-            {/* Action Buttons */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0">
+            {/* Action Buttons: quiet helpers first, the main action (Upload) last */}
+            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0 sm:ml-auto xl:ml-0">
               {/* Keyboard Shortcuts Trigger */}
               <button
                 onClick={() => setShowShortcuts(true)}
-                className="p-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 rounded-md transition"
+                className="p-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 rounded-md transition cursor-pointer"
                 title="Keyboard Shortcuts Cheat Sheet"
                 aria-label="Keyboard Shortcuts"
               >
                 <Keyboard className="w-3.5 h-3.5" />
               </button>
 
-              {/* Tally Prime XML export */}
+              {/* Settlement Q&A Copilot Toggle */}
+              <button
+                onClick={onToggleQa}
+                className={`flex items-center justify-center gap-1.5 px-2.5 2xl:px-3 py-1.5 rounded-md text-xs font-medium transition border whitespace-nowrap cursor-pointer ${
+                  isQaOpen
+                    ? "bg-neutral-800 text-white border-neutral-600 shadow-xs"
+                    : "bg-[#111318] hover:bg-[#161922] text-neutral-300 border-[#1e222d] hover:border-neutral-700"
+                }`}
+                title="Audit Assistant (press ?)"
+                aria-label="Audit Assistant"
+                aria-pressed={isQaOpen}
+              >
+                <HelpCircle className="w-3.5 h-3.5 text-neutral-400" />
+                <span className="hidden 2xl:inline">Audit Assistant</span>
+                <span className="hidden 2xl:inline text-[9px] font-mono text-neutral-400 bg-neutral-900 px-1 py-0.2 rounded border border-neutral-800">
+                  ?
+                </span>
+              </button>
+
+              {/* Gateway Sync & Synthetic Seeder (ghost, icon only) */}
+              <button
+                onClick={onOpenSync}
+                className="p-1.5 bg-transparent hover:bg-[#161922] border border-transparent hover:border-[#1e222d] text-amber-400 rounded-md transition cursor-pointer"
+                title="Razorpay Gateway API Sync & 60-Transaction Test Seeder"
+                aria-label="Sync / Seed"
+              >
+                <Zap className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Tally Prime XML export (outline) */}
               {onExportTally && (
                 <button
                   onClick={onExportTally}
-                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 text-neutral-300 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-transparent hover:bg-[#161922] border border-neutral-700 hover:border-neutral-500 text-neutral-200 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
                   title="Download matched settlements as Tally Prime journal vouchers (XML)"
+                  aria-label="Export to Tally (XML)"
                 >
                   <FileText className="w-3.5 h-3.5 text-neutral-400" />
-                  <span>Export to Tally (XML)</span>
+                  <span className="hidden sm:inline">Export to Tally (XML)</span>
                 </button>
               )}
 
-              {/* Upload Bank Statement */}
+              {/* Upload Bank Statement (primary) */}
               <button
                 onClick={onOpenUpload}
                 className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-white text-neutral-900 rounded-md text-xs font-semibold shadow-xs transition transform active:scale-98 whitespace-nowrap cursor-pointer"
               >
                 <UploadCloud className="w-3.5 h-3.5" />
                 <span>Upload Statement</span>
-              </button>
-
-              {/* Gateway Sync & Synthetic Seeder */}
-              <button
-                onClick={onOpenSync}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 text-neutral-300 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
-                title="Razorpay Gateway API Sync & 60-Transaction Test Seeder"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>Sync / Seed</span>
-              </button>
-
-              {/* Settlement Q&A Copilot Toggle */}
-              <button
-                onClick={onToggleQa}
-                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition border whitespace-nowrap cursor-pointer ${
-                  isQaOpen
-                    ? "bg-neutral-800 text-white border-neutral-600 shadow-xs"
-                    : "bg-[#111318] hover:bg-[#161922] text-neutral-300 border-[#1e222d] hover:border-neutral-700"
-                }`}
-              >
-                <FileText className="w-3.5 h-3.5 text-neutral-400" />
-                <span>Audit Assistant</span>
-                <span className="hidden md:inline text-[9px] font-mono text-neutral-400 bg-neutral-900 px-1 py-0.2 rounded border border-neutral-800">
-                  ?
-                </span>
               </button>
             </div>
           </div>
