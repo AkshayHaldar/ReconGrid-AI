@@ -280,6 +280,7 @@ export default function DashboardPage() {
         onToggleQa={() => setIsQaOpen(!isQaOpen)}
         isQaOpen={isQaOpen}
         onExportTally={handleExportTally}
+        periodDate={status?.last_reconciled_at}
       />
 
       {/* Main Financial Workspace */}

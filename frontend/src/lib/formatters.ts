@@ -103,3 +103,21 @@ export function formatFeeEquation(
 ): string {
   return `Gross ${formatINR(gross)} - Fee ${formatINR(fee)} - GST (18%) ${formatINR(tax)} = Net ${formatINR(net)}`;
 }
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * The accounting period shown in the header, in the Indian fiscal year (April to March):
+ * 'Aug 2026 Close (FY 26-27)'. Uses the given date, or today when it is missing or unreadable.
+ */
+export function formatFiscalPeriod(date?: string | Date | null): string {
+  let d = date ? new Date(date) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+
+  const year = d.getFullYear();
+  const month = d.getMonth();
+  const startYear = month >= 3 ? year : year - 1;
+  const twoDigits = (n: number) => String(n % 100).padStart(2, "0");
+
+  return `${MONTH_NAMES[month]} ${year} Close (FY ${twoDigits(startYear)}-${twoDigits(startYear + 1)})`;
+}
