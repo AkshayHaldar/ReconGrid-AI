@@ -26,6 +26,14 @@ from app.utils.money import to_decimal
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
 
 
+def _csv_text(value: str | None) -> str:
+    """Keep exported text literal when spreadsheet apps interpret CSV cells."""
+    text = value or ""
+    if text and (text[0] in "=+-@\t\r\n" or text.lstrip(" \t\r\n\v\f\ufeff").startswith(("=", "+", "-", "@"))):
+        return "'" + text
+    return text
+
+
 def _map_log_to_item(log: ReconciliationLog) -> ReconciliationRecordItem:
     """Helper to map a DB ReconciliationLog to API response schema."""
     bank = log.bank_transaction
@@ -301,25 +309,25 @@ async def export_reconciliation_csv(
         writer.writerow(
             [
                 bank.date.strftime("%Y-%m-%d") if bank else "",
-                bank.direction if bank else "CREDIT",
-                bank.description if bank else "",
-                bank.utr if bank else "",
+                _csv_text(bank.direction) if bank else "CREDIT",
+                _csv_text(bank.description) if bank else "",
+                _csv_text(bank.utr) if bank else "",
                 f"{to_decimal(bank.amount):.2f}" if bank else "0.00",
-                rzp.settlement_id if rzp else "",
+                _csv_text(rzp.settlement_id) if rzp else "",
                 f"{to_decimal(rzp.amount):.2f}" if rzp else "",
                 f"{to_decimal(rzp.gross_amount):.2f}" if rzp else "",
                 f"{to_decimal(rzp.fees):.2f}" if rzp else "",
                 f"{to_decimal(rzp.tax):.2f}" if rzp else "",
-                log.match_status,
-                log.match_tier,
+                _csv_text(log.match_status),
+                _csv_text(log.match_tier),
                 (
                     f"{log.confidence_score * 100:.1f}%"
                     if log.confidence_score is not None
                     else ("100.0%" if log.match_status == "MATCHED" else "N/A")
                 ),
-                log.diagnostic_type,
-                log.diagnostic_note,
-                log.human_action or "AUTO",
+                _csv_text(log.diagnostic_type),
+                _csv_text(log.diagnostic_note),
+                _csv_text(log.human_action) or "AUTO",
             ]
         )
 

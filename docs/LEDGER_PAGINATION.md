@@ -49,6 +49,11 @@ whole batch or fan out page requests. Existing amount/approval/export logic is
 preserved. Two pre-existing export type errors are repaired by accepting Sequence
 and explicitly retaining the existing skip for records without settlements.
 
+The CSV review follow-up prefixes an apostrophe to text cells beginning with
+spreadsheet formula/control prefixes (including formulas after leading whitespace
+or a BOM). It does not alter stored records, dates, or formatted numeric amounts;
+negative monetary values remain numeric CSV cells.
+
 This is a live ledger, not an MVCC snapshot spanning HTTP requests. Insertions
 before a cursor do not shift existing rows between windows. Updates/deletions can
 change membership or counts; refresh starts a fresh traversal. Mutations refresh
