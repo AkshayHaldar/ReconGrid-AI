@@ -550,7 +550,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
         </div>
 
         <span className="text-[10px] text-neutral-500">
-          {hasMore ? "Scroll to load more records" : "All matching records loaded"}
+          {hasMore ? "Scroll to load more records" : "End of current view"}
         </span>
       </div>
 

@@ -96,8 +96,15 @@ export default function DashboardPage() {
         settlementId: record.rzp_settlement_db_id,
       }) : [];
       if (request !== conflictRequest.current) return;
+      const current = candidates.find(candidate => candidate.id === record.id);
+      if (!current) {
+        setConflictTarget(null);
+        await loadData();
+        setActionError("This conflict changed while loading. Refresh and choose an active conflict.");
+        return;
+      }
       setConflictRecords(candidates);
-      setConflictTarget(record);
+      setConflictTarget(current);
     } catch {
       if (request === conflictRequest.current) setActionError("Unable to load all conflict candidates. Please retry.");
     } finally {
@@ -244,18 +251,23 @@ export default function DashboardPage() {
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
     if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
+    let failed = false;
+    setActionError(null);
+    setBatchApproveLoading(true);
     try {
-      setBatchApproveLoading(true);
       // This explicit whole-selection action must include unloaded matching rows.
       const candidates = (await collectRecordWindows({ ...query, status: "SUGGESTED" }))
         .filter(r => (r.confidence_score || 0) >= 0.9);
       for (const rec of candidates) {
         await approveRecord(rec.id);
       }
-      await loadData();
     } catch (err) {
+      failed = true;
       console.error("Batch approve failed:", err);
     } finally {
+      // Earlier approvals may have committed before a later request failed.
+      await loadData();
+      if (failed) setActionError("Batch approval stopped. Some records may already be approved. Refresh before retrying.");
       setBatchApproveLoading(false);
     }
   };

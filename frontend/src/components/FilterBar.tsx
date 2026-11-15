@@ -194,7 +194,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           {onBatchApprove && (activeTab === "SUGGESTED" || highConfidenceCandidates > 0) && (
             <button
               onClick={onBatchApprove}
-              disabled={batchApproveLoading || highConfidenceCandidates === 0}
+              disabled={batchApproveLoading || highConfidenceCandidates === 0 || (activeTab !== "ALL" && activeTab !== "SUGGESTED")}
               className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/80 text-emerald-300 hover:text-emerald-100 rounded-md text-xs font-semibold transition disabled:opacity-50 whitespace-nowrap shadow-xs shrink-0 cursor-pointer"
               title="Batch approve all suggestions with confidence ≥ 90%"
             >
