@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Header } from "@/components/Header";
 import { SummaryCards } from "@/components/SummaryCards";
 import { FilterBar } from "@/components/FilterBar";
@@ -18,11 +18,15 @@ import {
 import {
   API_BASE,
   fetchStatus,
-  fetchAllRecords,
+  collectRecordWindows,
+  LedgerSort,
+  RecordQuery,
   approveRecord,
   denyRecord,
   resolveConflict,
 } from "@/lib/api";
+
+import { useLedgerRecords } from "@/lib/useLedgerRecords";
 
 interface ToastAction {
   id: string;
@@ -34,11 +38,9 @@ interface ToastAction {
 
 export default function DashboardPage() {
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
-  const [records, setRecords] = useState<ReconciliationRecordItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("ALL");
-  const [selectedDiagnostic, setSelectedDiagnostic] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTabState] = useState("ALL");
+  const [selectedDiagnostic, setSelectedDiagnosticState] = useState("ALL");
+  const [searchQuery, setSearchQueryState] = useState("");
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
@@ -54,25 +56,54 @@ export default function DashboardPage() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ id: string; nonce: number } | null>(null);
 
+  const [sort, setSort] = useState<LedgerSort>("date");
+  const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [anchorId, setAnchorId] = useState<string>();
+  const setActiveTab = (value: string) => { setAnchorId(undefined); setActiveTabState(value); };
+  const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
+  const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
+  const [conflictLoading, setConflictLoading] = useState(false);
+  const conflictRequest = useRef(0);
+  const query = useMemo<RecordQuery>(() => ({
+    batchId: "default", status: activeTab, search: searchQuery,
+    diagnostic: selectedDiagnostic, sort, direction,
+  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction]);
+  const ledger = useLedgerRecords(query, anchorId);
+  const { records, loading, pager } = ledger;
+  const setRecords = pager.setRecords;
+  const loadStatus = useCallback(async () => {
+    setStatus(await fetchStatus("default"));
+  }, []);
   const loadData = useCallback(async () => {
+    setActionError(null);
     try {
-      setLoading(true);
-      const [statusData, recordsData] = await Promise.all([
-        fetchStatus("default"),
-        fetchAllRecords("default", activeTab, searchQuery),
-      ]);
-      setStatus(statusData);
-      setRecords(recordsData.records);
-    } catch (err) {
-      console.error("Error fetching dashboard data:", err);
-    } finally {
-      setLoading(false);
+      await Promise.all([loadStatus(), pager.reload()]);
+    } catch {
+      setActionError("Unable to refresh dashboard status. Please retry.");
     }
-  }, [activeTab, searchQuery]);
+  }, [pager, loadStatus]);
+  useEffect(() => { void loadStatus().catch(() => setActionError("Unable to load dashboard status.")); }, [loadStatus]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const openConflict = async (record: ReconciliationRecordItem) => {
+    const request = ++conflictRequest.current;
+    setConflictLoading(true);
+    setActionError(null);
+    try {
+      const candidates = record.rzp_settlement_db_id ? await collectRecordWindows({
+        ...query, status: "CONFLICT", search: "", diagnostic: "ALL",
+        settlementId: record.rzp_settlement_db_id,
+      }) : [];
+      if (request !== conflictRequest.current) return;
+      setConflictRecords(candidates);
+      setConflictTarget(record);
+    } catch {
+      if (request === conflictRequest.current) setActionError("Unable to load all conflict candidates. Please retry.");
+    } finally {
+      if (request === conflictRequest.current) setConflictLoading(false);
+    }
+  };
 
   // Toast Auto-Dismiss
   useEffect(() => {
@@ -149,8 +180,7 @@ export default function DashboardPage() {
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      const newStatus = await fetchStatus("default");
-      setStatus(newStatus);
+      await loadData();
     } catch (err) {
       console.error("Approve failed:", err);
       // Revert on error
@@ -195,8 +225,7 @@ export default function DashboardPage() {
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      const newStatus = await fetchStatus("default");
-      setStatus(newStatus);
+      await loadData();
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
@@ -214,13 +243,12 @@ export default function DashboardPage() {
 
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
-    const candidates = records.filter(
-      (r) => r.match_status === "SUGGESTED" && (r.confidence_score || 0) >= 0.9
-    );
-    if (candidates.length === 0) return;
-
+    if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
     try {
       setBatchApproveLoading(true);
+      // This explicit whole-selection action must include unloaded matching rows.
+      const candidates = (await collectRecordWindows({ ...query, status: "SUGGESTED" }))
+        .filter(r => (r.confidence_score || 0) >= 0.9);
       for (const rec of candidates) {
         await approveRecord(rec.id);
       }
@@ -251,6 +279,10 @@ export default function DashboardPage() {
     setHighlightedId(recordId);
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
+    setSearchQuery("");
+    setSort("date");
+    setDirection("desc");
+    setAnchorId(recordId);
     // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
     setScrollRequest({ id: recordId, nonce: Date.now() });
   };
@@ -263,11 +295,6 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
   };
 
-  // Filter records by diagnostic sub-type if selected
-  const displayedRecords = records.filter((r) => {
-    if (selectedDiagnostic === "ALL") return true;
-    return r.diagnostic_type === selectedDiagnostic;
-  });
   const isEmpty = Boolean(status && status.total_records === 0);
   return (
     <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex flex-col font-sans selection:bg-neutral-800 selection:text-white">
@@ -284,6 +311,13 @@ export default function DashboardPage() {
 
       {/* Main Financial Workspace */}
       <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
+        {(actionError || conflictLoading) && <div role={actionError ? "alert" : "status"} className="text-sm text-amber-300">
+          {actionError || "Loading all conflict candidates..."}
+          {actionError && <button onClick={loadData} className="ml-3 underline">Retry refresh</button>}
+        </div>}
+        {anchorId && <div className="text-xs text-neutral-300">Showing from cited record.
+          <button onClick={() => setAnchorId(undefined)} className="ml-3 underline">Return to first records</button>
+        </div>}
         <SummaryCards
           status={status}
           onOpenUpload={() => setIsUploadOpen(true)}
@@ -313,12 +347,21 @@ export default function DashboardPage() {
             />
 
              <ReconciliationTable
-                records={displayedRecords}
+                key={ledger.revision}
+                records={records}
+                totalCount={ledger.totalCount}
+                hasMore={ledger.hasMore}
+                loadingMore={loading && records.length > 0}
+                error={ledger.error}
+                onLoadMore={pager.loadMore}
+                onRetry={pager.retry}
+                serverSort={{ field: sort, order: direction }}
+                onSortChange={(field, order) => { setSort(field); setDirection(order); setAnchorId(undefined); }}
                 highlightedRecordId={highlightedId}
                 scrollRequest={scrollRequest}
                 onApprove={handleApprove}
                 onDeny={handleDeny}
-                onOpenConflict={(r) => setConflictTarget(r)}
+                onOpenConflict={openConflict}
                 onOpenException={(r) => setExceptionTarget(r)}
                 loading={loading}
               />
@@ -349,7 +392,7 @@ export default function DashboardPage() {
       {/* Conflict Resolution Drawer */}
       <ConflictDrawer
         record={conflictTarget}
-        allRecords={records}
+        allRecords={conflictRecords}
         onClose={() => setConflictTarget(null)}
         onResolve={handleResolveConflict}
       />

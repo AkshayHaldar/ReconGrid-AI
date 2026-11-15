@@ -4,13 +4,14 @@ from collections.abc import Sequence
 from datetime import UTC
 from decimal import Decimal
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
+from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
 
 
@@ -76,12 +77,9 @@ class ReconciliationRepository:
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""
-        stmt = (
-            select(ReconciliationLog.bank_tx_id, ReconciliationLog.match_status)
-            .where(
-                ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.superseded == False,
-            )
+        stmt = select(ReconciliationLog.bank_tx_id, ReconciliationLog.match_status).where(
+            ReconciliationLog.batch_id == batch_id,
+            ReconciliationLog.superseded == False,
         )
         result = await self.session.execute(stmt)
         return {row[0]: row[1] for row in result.all()}
@@ -120,6 +118,22 @@ class ReconciliationRepository:
         page_size: int = 100,
     ) -> tuple[Sequence[ReconciliationLog], int]:
         """Queries active (non-superseded) logs with filters, search, and pagination."""
+        base_query = self._filtered_logs(batch_id, status_filter, search)
+
+        # Count query
+        count_stmt = select(func.count()).select_from(base_query.subquery())
+        total_count = (await self.session.execute(count_stmt)).scalar_one() or 0
+
+        # Ordered pagination
+        query = (
+            base_query.order_by(BankTransaction.date.desc(), ReconciliationLog.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.session.execute(query)
+        return result.scalars().all(), total_count
+
+    def _filtered_logs(self, batch_id, status_filter, search, diagnostic="ALL", settlement_id=""):
         base_query = (
             select(ReconciliationLog)
             .join(ReconciliationLog.bank_transaction)
@@ -147,18 +161,83 @@ class ReconciliationRepository:
                 | (ReconciliationLog.diagnostic_note.ilike(s))
             )
 
-        # Count query
-        count_stmt = select(func.count()).select_from(base_query.subquery())
-        total_count = (await self.session.execute(count_stmt)).scalar_one() or 0
+        if diagnostic and diagnostic != "ALL":
+            base_query = base_query.where(ReconciliationLog.diagnostic_type == diagnostic)
+        if settlement_id:
+            base_query = base_query.where(ReconciliationLog.rzp_settlement_id == settlement_id)
+        return base_query
 
-        # Ordered pagination
-        query = (
-            base_query.order_by(BankTransaction.date.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+    async def get_log_window(
+        self,
+        batch_id,
+        status_filter="ALL",
+        search="",
+        diagnostic="ALL",
+        sort="date",
+        direction="desc",
+        limit=100,
+        cursor=None,
+        anchor_id=None,
+        settlement_id="",
+    ):
+        columns = {
+            "date": BankTransaction.date,
+            "bank_amount": BankTransaction.amount,
+            "rzp_amount": RazorpaySettlement.amount,
+            "delta_amount": ReconciliationLog.delta_amount,
+            "bank_utr": func.lower(BankTransaction.utr),
+        }
+        if sort not in columns or direction not in ("asc", "desc") or not 1 <= limit <= 200:
+            raise ValueError("Invalid pagination sort, direction or limit")
+        if cursor and anchor_id:
+            raise ValueError("Use either cursor or anchor_id, not both")
+        base = self._filtered_logs(batch_id, status_filter, search, diagnostic, settlement_id)
+        scope = query_scope(batch_id, status_filter.upper(), search.strip(), diagnostic, sort, direction, settlement_id)
+        column = columns[sort]
+        position = decode_cursor(cursor, scope, sort) if cursor else None
+        if anchor_id:
+            anchor = (await self.session.execute(base.where(ReconciliationLog.id == anchor_id))).scalar_one_or_none()
+            if anchor is None:
+                raise LookupError("Record is not present in this batch/filter")
+            position = (self._sort_value(anchor, sort), anchor.id)
+        # Count only at the start, never on continuation requests.
+        total = (
+            None
+            if cursor
+            else (await self.session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
         )
-        result = await self.session.execute(query)
-        return result.scalars().all(), total_count
+        query = base
+        if position:
+            value, record_id = position
+            id_after = ReconciliationLog.id > record_id if direction == "asc" else ReconciliationLog.id < record_id
+            if anchor_id:
+                id_after = or_(id_after, ReconciliationLog.id == record_id)
+            if value is None:
+                seek = and_(column.is_(None), id_after)
+            else:
+                after = column > value if direction == "asc" else column < value
+                seek = or_(after, and_(column == value, id_after), column.is_(None))
+            query = query.where(seek)
+        ordered = column.asc() if direction == "asc" else column.desc()
+        tie = ReconciliationLog.id.asc() if direction == "asc" else ReconciliationLog.id.desc()
+        result = await self.session.execute(query.order_by(ordered.nulls_last(), tie).limit(limit + 1))
+        rows = list(result.scalars().all())
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        next_cursor = encode_cursor(scope, self._sort_value(rows[-1], sort), rows[-1].id) if has_more else None
+        return rows, total, next_cursor, has_more
+
+    @staticmethod
+    def _sort_value(log, sort):
+        if sort == "date":
+            return log.bank_transaction.date
+        if sort == "bank_amount":
+            return log.bank_transaction.amount
+        if sort == "bank_utr":
+            return log.bank_transaction.utr.lower() if log.bank_transaction.utr is not None else None
+        if sort == "rzp_amount":
+            return log.rzp_settlement.amount if log.rzp_settlement else None
+        return log.delta_amount
 
     async def get_summary_metrics(self, batch_id: str = "default") -> dict:
         """Computes live aggregated reconciliation metrics for Ramesh's dashboard cards."""
@@ -207,6 +286,7 @@ class ReconciliationRepository:
             if last_reconciled_at is None:
                 last_reconciled_at = log.matched_at
             else:
+
                 def _to_utc_naive(dt):
                     if dt.tzinfo is not None:
                         return dt.astimezone(UTC).replace(tzinfo=None)
@@ -239,16 +319,11 @@ class ReconciliationRepository:
                 pending_count += 1
                 total_pending_amount += bank_amt
 
-        match_rate = (
-            round((matched_count / total_records) * 100.0, 2) if total_records > 0 else 0.0
-        )
+        match_rate = round((matched_count / total_records) * 100.0, 2) if total_records > 0 else 0.0
 
         net_ingested_amount = total_credit_amount - total_debit_amount
         total_unresolved_variance = (
-            total_exception_amount
-            + total_suggested_amount
-            + total_conflict_amount
-            + total_pending_amount
+            total_exception_amount + total_suggested_amount + total_conflict_amount + total_pending_amount
         )
         is_in_balance = (
             total_records > 0
@@ -361,15 +436,17 @@ class ReconciliationRepository:
             elif log.match_status == "EXCEPTION":
                 total_exception_count += 1
                 total_exception_amount += bank_amt
-                exceptions_list.append({
-                    "bank_transaction_id": log.bank_tx_id,
-                    "date": bank.date if bank else log.matched_at,
-                    "amount": bank_amt,
-                    "reason_code": log.diagnostic_type,
-                    "diagnostic_note": log.diagnostic_note,
-                    "utr": bank.utr if bank else None,
-                    "description": bank.description if bank else "",
-                })
+                exceptions_list.append(
+                    {
+                        "bank_transaction_id": log.bank_tx_id,
+                        "date": bank.date if bank else log.matched_at,
+                        "amount": bank_amt,
+                        "reason_code": log.diagnostic_type,
+                        "diagnostic_note": log.diagnostic_note,
+                        "utr": bank.utr if bank else None,
+                        "description": bank.description if bank else "",
+                    }
+                )
             elif log.match_status == "PENDING_SETTLEMENT_DATA":
                 total_pending_count += 1
                 total_pending_amount += bank_amt
@@ -414,10 +491,7 @@ class ReconciliationRepository:
 
         net_ingested_amount = total_credit_amount - total_debit_amount
         total_unresolved_variance = (
-            total_exception_amount
-            + total_suggested_amount
-            + total_conflict_amount
-            + total_pending_amount
+            total_exception_amount + total_suggested_amount + total_conflict_amount + total_pending_amount
         )
         is_in_balance = (
             unaccounted == 0

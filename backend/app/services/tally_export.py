@@ -8,6 +8,7 @@ written out unbalanced.
 
 import io
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -59,7 +60,7 @@ def is_balanced(debits, credit) -> bool:
     return sum((amt for _, amt in debits), ZERO) - credit[1] == ZERO
 
 
-def build_tally_xml(logs: list[ReconciliationLog], bank_ledger: str = BANK_LEDGER) -> TallyExport:
+def build_tally_xml(logs: Sequence[ReconciliationLog], bank_ledger: str = BANK_LEDGER) -> TallyExport:
     envelope = ET.Element("ENVELOPE")
     header = ET.SubElement(envelope, "HEADER")
     ET.SubElement(header, "TALLYREQUEST").text = "Import Data"
@@ -72,11 +73,14 @@ def build_tally_xml(logs: list[ReconciliationLog], bank_ledger: str = BANK_LEDGE
     count = 0
     skipped: list[str] = []
     for log in logs:
+        settlement = log.rzp_settlement
+        if settlement is None:
+            continue
         lines = build_voucher_lines(log, bank_ledger)
         if lines is None:
             continue
         debits, credit = lines
-        setl_id = log.rzp_settlement.settlement_id
+        setl_id = settlement.settlement_id
         if not is_balanced(debits, credit):
             skipped.append(setl_id)
             continue

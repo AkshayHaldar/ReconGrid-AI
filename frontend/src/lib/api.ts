@@ -19,6 +19,56 @@ export function getApiBase(): string {
 
 export const API_BASE = getApiBase();
 
+export type LedgerSort = "date" | "bank_amount" | "rzp_amount" | "delta_amount" | "bank_utr";
+export interface RecordQuery {
+  batchId: string;
+  status: string;
+  search: string;
+  diagnostic: string;
+  sort: LedgerSort;
+  direction: "asc" | "desc";
+  settlementId?: string;
+}
+export interface RecordWindow {
+  records: ReconciliationRecordItem[];
+  total_count: number | null;
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export async function fetchRecordWindow(
+  query: RecordQuery, cursor: string | null = null,
+  signal?: AbortSignal, anchorId?: string,
+): Promise<RecordWindow> {
+  const params = new URLSearchParams({
+    limit: "200", status: query.status, q: query.search,
+    diagnostic: query.diagnostic, sort: query.sort, direction: query.direction,
+  });
+  if (cursor) params.set("cursor", cursor);
+  if (anchorId) params.set("anchor_id", anchorId);
+  if (query.settlementId) params.set("settlement_id", query.settlementId);
+  const response = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(query.batchId)}/records?${params}`, {
+    cache: "no-store", signal,
+  });
+  if (!response.ok) throw new Error("Unable to load ledger records. Please retry.");
+  return (await response.json()).data;
+}
+
+// Only used for explicit whole-selection actions, never the initial ledger load.
+export async function collectRecordWindows(query: RecordQuery): Promise<ReconciliationRecordItem[]> {
+  const records: ReconciliationRecordItem[] = [];
+  const visited = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await fetchRecordWindow(query, cursor);
+    records.push(...page.records);
+    if (!page.has_more) return records;
+    if (!page.next_cursor || visited.has(page.next_cursor)) throw new Error("Ledger cursor did not advance");
+    cursor = page.next_cursor;
+    visited.add(cursor);
+  } while (true);
+}
+
 export async function fetchStatus(batchId: string = "default"): Promise<ReconciliationStatus> {
   const base = getApiBase();
   const res = await fetch(`${base}/reconciliation/${batchId}/status`, { cache: "no-store" });

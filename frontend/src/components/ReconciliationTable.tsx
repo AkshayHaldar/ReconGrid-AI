@@ -21,6 +21,7 @@ import {
 import { ReconciliationRecordItem } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/formatters";
 import { StatusBadge } from "./StatusBadge";
+import { LedgerSort } from "@/lib/api";
 
 interface ReconciliationTableProps {
   records: ReconciliationRecordItem[];
@@ -32,6 +33,14 @@ interface ReconciliationTableProps {
   onOpenConflict: (record: ReconciliationRecordItem) => void;
   onOpenException: (record: ReconciliationRecordItem) => void;
   loading: boolean;
+  totalCount?: number | null;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  error?: string | null;
+  onLoadMore?: () => void;
+  onRetry?: () => void;
+  serverSort?: { field: LedgerSort; order: "asc" | "desc" };
+  onSortChange?: (field: LedgerSort, order: "asc" | "desc") => void;
 }
 
 type SortField = "date" | "bank_amount" | "rzp_amount" | "delta_amount" | "bank_utr";
@@ -400,6 +409,8 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   onOpenConflict,
   onOpenException,
   loading,
+  totalCount, hasMore = false, loadingMore = false, error,
+  onLoadMore, onRetry, serverSort, onSortChange,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
@@ -420,6 +431,10 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   }, []);
 
   const toggleSort = (field: SortField) => {
+    if (onSortChange && serverSort) {
+      onSortChange(field, serverSort.field === field && serverSort.order === "desc" ? "asc" : "desc");
+      return;
+    }
     if (sortField === field) {
       setSortOrder(sortOrder === "asc" ? "desc" : "asc");
     } else {
@@ -429,6 +444,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   };
 
   const sortedRecords = useMemo(() => {
+    if (serverSort) return records;
     return [...records].sort((a, b) => {
       let aVal: any = a[sortField];
       let bVal: any = b[sortField];
@@ -448,7 +464,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
       if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
-  }, [records, sortField, sortOrder]);
+  }, [records, sortField, sortOrder, serverSort]);
 
   // Stable references: a new getItemKey/estimateSize each render makes the
   // virtualizer rebuild all row measurements on every scroll tick.
@@ -487,6 +503,12 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   }, [scrollRequest, sortedRecords, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
+  const lastVisibleIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
+  useEffect(() => {
+    if (hasMore && !loading && !loadingMore && !error && lastVisibleIndex >= records.length - 10) {
+      onLoadMore?.();
+    }
+  }, [hasMore, loading, loadingMore, error, lastVisibleIndex, records.length, onLoadMore]);
   const totalSize = virtualizer.getTotalSize();
   const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
   const paddingBottom =
@@ -502,6 +524,11 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
     );
   }
 
+  if (records.length === 0 && error) {
+    return <div role="alert" className="fin-card rounded-lg p-8 text-amber-300">
+      {error} <button onClick={onRetry} className="ml-3 underline">Retry loading records</button>
+    </div>;
+  }
   if (records.length === 0) {
     return (
       <div className="fin-card rounded-lg p-12 text-center text-neutral-400 border border-[#1e222d]">
@@ -518,18 +545,18 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
         <div className="flex items-center gap-2">
           <span className="font-semibold text-neutral-200">Reconciliation Ledger</span>
           <span className="text-[10px] text-neutral-300 bg-neutral-900 px-2 py-0.5 rounded border border-neutral-800">
-            {records.length} Records
+            {records.length} loaded{totalCount != null ? ` of ${totalCount}` : ""}
           </span>
         </div>
 
         <span className="text-[10px] text-neutral-500">
-          Scroll to browse all {sortedRecords.length} records
+          {hasMore ? "Scroll to load more records" : "All matching records loaded"}
         </span>
       </div>
 
-      <div ref={scrollRef} className="overflow-x-auto max-h-[640px] overflow-y-auto touch-scroll">
+      <div ref={scrollRef} role="region" aria-label="Scrollable reconciliation records" tabIndex={0} className="overflow-x-auto max-h-[640px] overflow-y-auto touch-scroll">
         <table
-          aria-rowcount={sortedRecords.length + 1}
+          aria-rowcount={hasMore ? -1 : sortedRecords.length + 1}
           aria-label="Reconciliation ledger"
           className="w-full text-left border-collapse text-xs min-w-[800px] sm:min-w-full"
         >
@@ -619,8 +646,13 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
         </table>
       </div>
 
-      <div className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] text-xs font-mono text-neutral-400">
-        {sortedRecords.length} records
+      <div aria-live="polite" className="px-4 py-2.5 bg-[#0c0e12] border-t border-[#1e222d] text-xs font-mono text-neutral-400">
+        {sortedRecords.length} loaded{totalCount != null ? ` of ${totalCount}` : ""}
+        {error ? <span role="alert" className="ml-3 text-amber-300">{error}
+          <button onClick={onRetry} className="ml-2 underline">Retry next page</button>
+        </span> : hasMore && <button disabled={loadingMore} onClick={onLoadMore} className="ml-3 underline disabled:opacity-50">
+          {loadingMore ? "Loading more records..." : "Load more records"}
+        </button>}
       </div>
     </div>
   );

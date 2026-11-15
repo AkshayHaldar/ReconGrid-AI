@@ -2,6 +2,7 @@
 
 import csv
 import io
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,21 +88,37 @@ async def get_batch_scorecard(
 @router.get("/{batch_id}/records", response_model=ApiResponse[ReconciliationRecordListResponse])
 async def get_reconciliation_records(
     batch_id: str = "default",
-    status: str = Query(default="ALL", description="Filter by MATCHED, SUGGESTED, CONFLICT, EXCEPTION, PENDING_SETTLEMENT_DATA, or ALL"),
+    status: str = Query(
+        default="ALL", description="Filter by MATCHED, SUGGESTED, CONFLICT, EXCEPTION, PENDING_SETTLEMENT_DATA, or ALL"
+    ),
     q: str = Query(default="", description="Search query across UTR, descriptor, or settlement ID"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=2048),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    diagnostic: str = Query(default="ALL", max_length=64),
+    sort: Literal["date", "bank_amount", "rzp_amount", "delta_amount", "bank_utr"] = "date",
+    direction: Literal["asc", "desc"] = "desc",
+    anchor_id: str | None = Query(default=None, max_length=36),
+    settlement_id: str = Query(default="", max_length=36),
     db: AsyncSession = Depends(get_db),
 ):
     """Returns filtered, paginated reconciliation records for the ledger table."""
     repo = ReconciliationRepository(db)
-    logs, total_count = await repo.get_active_logs(
-        batch_id=batch_id,
-        status_filter=status,
-        search=q,
-        page=page,
-        page_size=page_size,
-    )
+    next_cursor, has_more = None, False
+    if limit is not None or cursor is not None or anchor_id is not None:
+        try:
+            logs, total_count, next_cursor, has_more = await repo.get_log_window(
+                batch_id, status, q, diagnostic, sort, direction, limit or page_size, cursor, anchor_id, settlement_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    else:
+        logs, total_count = await repo.get_active_logs(
+            batch_id=batch_id, status_filter=status, search=q, page=page, page_size=page_size
+        )
     records = [_map_log_to_item(l) for l in logs]
 
     return ApiResponse.ok(
@@ -110,7 +127,9 @@ async def get_reconciliation_records(
             records=records,
             total_count=total_count,
             page=page,
-            page_size=page_size,
+            page_size=limit or page_size,
+            next_cursor=next_cursor,
+            has_more=has_more,
         )
     )
 
@@ -181,7 +200,9 @@ async def resolve_conflict(
         log.confidence_score = None
         bank_amt = to_decimal(log.bank_transaction.amount) if log.bank_transaction else to_decimal(0)
         log.delta_amount = bank_amt
-        log.diagnostic_note = f"Conflict dismissed by CA: unlinked from settlement.{': ' + resolve_req.note if resolve_req.note else ''}"
+        log.diagnostic_note = (
+            f"Conflict dismissed by CA: unlinked from settlement.{': ' + resolve_req.note if resolve_req.note else ''}"
+        )
         await db.flush()
         return ApiResponse.ok(_map_log_to_item(log))
 
@@ -198,7 +219,9 @@ async def resolve_conflict(
         # Fallback if synthetic identifier passed directly
         log.match_status = "MATCHED"
         log.human_action = "RESOLVED"
-        log.diagnostic_note = f"Conflict manually resolved to {chosen_setl_id}.{': ' + resolve_req.note if resolve_req.note else ''}"
+        log.diagnostic_note = (
+            f"Conflict manually resolved to {chosen_setl_id}.{': ' + resolve_req.note if resolve_req.note else ''}"
+        )
         await db.flush()
         return ApiResponse.ok(_map_log_to_item(log))
 
@@ -226,9 +249,10 @@ async def resolve_conflict(
         comp_amt = to_decimal(comp.bank_transaction.amount) if comp.bank_transaction else to_decimal(0)
         comp.delta_amount = comp_amt
         bank_ref = (
-            log.bank_transaction.utr
-            or (f"ID:{log.bank_tx_id[:8]}" if log.bank_tx_id else "another row")
-        ) if log.bank_transaction else log.id
+            (log.bank_transaction.utr or (f"ID:{log.bank_tx_id[:8]}" if log.bank_tx_id else "another row"))
+            if log.bank_transaction
+            else log.id
+        )
         comp.diagnostic_note = (
             f"Settlement {target_setl.settlement_id} was manually allocated to bank row ({bank_ref}). "
             f"Transferred to EXCEPTION for separate audit."
@@ -250,46 +274,54 @@ async def export_reconciliation_csv(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        "Date",
-        "Direction",
-        "Bank Description",
-        "Bank UTR",
-        "Bank Amount (INR)",
-        "Razorpay Settlement ID",
-        "Razorpay Net (INR)",
-        "Razorpay Gross (INR)",
-        "Fees (INR)",
-        "GST (INR)",
-        "Match Status",
-        "Match Tier",
-        "Confidence %",
-        "Diagnostic Type",
-        "Diagnostic Note",
-        "Human Action",
-    ])
+    writer.writerow(
+        [
+            "Date",
+            "Direction",
+            "Bank Description",
+            "Bank UTR",
+            "Bank Amount (INR)",
+            "Razorpay Settlement ID",
+            "Razorpay Net (INR)",
+            "Razorpay Gross (INR)",
+            "Fees (INR)",
+            "GST (INR)",
+            "Match Status",
+            "Match Tier",
+            "Confidence %",
+            "Diagnostic Type",
+            "Diagnostic Note",
+            "Human Action",
+        ]
+    )
 
     for log in logs:
         bank = log.bank_transaction
         rzp = log.rzp_settlement
-        writer.writerow([
-            bank.date.strftime("%Y-%m-%d") if bank else "",
-            bank.direction if bank else "CREDIT",
-            bank.description if bank else "",
-            bank.utr if bank else "",
-            f"{to_decimal(bank.amount):.2f}" if bank else "0.00",
-            rzp.settlement_id if rzp else "",
-            f"{to_decimal(rzp.amount):.2f}" if rzp else "",
-            f"{to_decimal(rzp.gross_amount):.2f}" if rzp else "",
-            f"{to_decimal(rzp.fees):.2f}" if rzp else "",
-            f"{to_decimal(rzp.tax):.2f}" if rzp else "",
-            log.match_status,
-            log.match_tier,
-            f"{log.confidence_score * 100:.1f}%" if log.confidence_score is not None else ("100.0%" if log.match_status == "MATCHED" else "N/A"),
-            log.diagnostic_type,
-            log.diagnostic_note,
-            log.human_action or "AUTO",
-        ])
+        writer.writerow(
+            [
+                bank.date.strftime("%Y-%m-%d") if bank else "",
+                bank.direction if bank else "CREDIT",
+                bank.description if bank else "",
+                bank.utr if bank else "",
+                f"{to_decimal(bank.amount):.2f}" if bank else "0.00",
+                rzp.settlement_id if rzp else "",
+                f"{to_decimal(rzp.amount):.2f}" if rzp else "",
+                f"{to_decimal(rzp.gross_amount):.2f}" if rzp else "",
+                f"{to_decimal(rzp.fees):.2f}" if rzp else "",
+                f"{to_decimal(rzp.tax):.2f}" if rzp else "",
+                log.match_status,
+                log.match_tier,
+                (
+                    f"{log.confidence_score * 100:.1f}%"
+                    if log.confidence_score is not None
+                    else ("100.0%" if log.match_status == "MATCHED" else "N/A")
+                ),
+                log.diagnostic_type,
+                log.diagnostic_note,
+                log.human_action or "AUTO",
+            ]
+        )
 
     csv_data = output.getvalue()
     return Response(
@@ -361,11 +393,13 @@ async def export_scorecard_report(
             f"INR {exc['amount']:>10,.2f} | {exc['reason_code']:<22} | {exc['diagnostic_note']}"
         )
 
-    lines.extend([
-        "=" * 90,
-        "END OF AUDIT SCORECARD REPORT - RECONGRID AI ENGINE",
-        "=" * 90,
-    ])
+    lines.extend(
+        [
+            "=" * 90,
+            "END OF AUDIT SCORECARD REPORT - RECONGRID AI ENGINE",
+            "=" * 90,
+        ]
+    )
 
     report_text = "\n".join(lines)
     return Response(
@@ -373,4 +407,3 @@ async def export_scorecard_report(
         media_type="text/plain",
         headers={"Content-Disposition": f"attachment; filename=recongrid_scorecard_{batch_id}.txt"},
     )
-
