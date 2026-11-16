@@ -19,9 +19,12 @@ export function getApiBase(): string {
 
 export const API_BASE = getApiBase();
 
-export async function fetchStatus(batchId: string = "default"): Promise<ReconciliationStatus> {
+export async function fetchStatus(
+  batchId: string = "default",
+  signal?: AbortSignal
+): Promise<ReconciliationStatus> {
   const base = getApiBase();
-  const res = await fetch(`${base}/reconciliation/${batchId}/status`, { cache: "no-store" });
+  const res = await fetch(`${base}/reconciliation/${batchId}/status`, { cache: "no-store", signal });
   if (!res.ok) throw new Error("Failed to fetch reconciliation status");
   const json: ApiResponse<ReconciliationStatus> = await res.json();
   return json.data;
@@ -32,7 +35,8 @@ export async function fetchRecords(
   status: string = "ALL",
   search: string = "",
   page: number = 1,
-  pageSize: number = 100
+  pageSize: number = 100,
+  signal?: AbortSignal
 ): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
   const params = new URLSearchParams({
     status,
@@ -42,6 +46,7 @@ export async function fetchRecords(
   });
   const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/records?${params}`, {
     cache: "no-store",
+    signal,
   });
   if (!res.ok) throw new Error("Failed to fetch reconciliation records");
   const json = await res.json();
@@ -55,16 +60,19 @@ const RECORDS_PAGE_SIZE = 200;
 export async function fetchAllRecords(
   batchId: string = "default",
   status: string = "ALL",
-  search: string = ""
+  search: string = "",
+  signal?: AbortSignal
 ): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
-  const first = await fetchRecords(batchId, status, search, 1, RECORDS_PAGE_SIZE);
+  const first = await fetchRecords(batchId, status, search, 1, RECORDS_PAGE_SIZE, signal);
+  signal?.throwIfAborted();
   const pages = Math.ceil(first.total_count / RECORDS_PAGE_SIZE);
   if (pages <= 1) return first;
   const rest = await Promise.all(
     Array.from({ length: pages - 1 }, (_, i) =>
-      fetchRecords(batchId, status, search, i + 2, RECORDS_PAGE_SIZE)
+      fetchRecords(batchId, status, search, i + 2, RECORDS_PAGE_SIZE, signal)
     )
   );
+  signal?.throwIfAborted();
   return {
     records: first.records.concat(...rest.map((r) => r.records)),
     total_count: first.total_count,

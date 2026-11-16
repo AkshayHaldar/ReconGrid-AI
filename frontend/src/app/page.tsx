@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Header } from "@/components/Header";
 import { SummaryCards } from "@/components/SummaryCards";
 import { FilterBar } from "@/components/FilterBar";
@@ -39,6 +39,8 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState("ALL");
   const [selectedDiagnostic, setSelectedDiagnostic] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const loadControllerRef = useRef<AbortController | null>(null);
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
@@ -54,24 +56,42 @@ export default function DashboardPage() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ id: string; nonce: number } | null>(null);
 
+  useEffect(() => {
+    // Stop the old search immediately; start the replacement after typing settles.
+    loadControllerRef.current?.abort();
+    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
   const loadData = useCallback(async () => {
+    loadControllerRef.current?.abort();
+    const controller = new AbortController();
+    loadControllerRef.current = controller;
+
     try {
       setLoading(true);
       const [statusData, recordsData] = await Promise.all([
-        fetchStatus("default"),
-        fetchAllRecords("default", activeTab, searchQuery),
+        fetchStatus("default", controller.signal),
+        fetchAllRecords("default", activeTab, debouncedSearchQuery, controller.signal),
       ]);
+      if (controller.signal.aborted) return;
       setStatus(statusData);
       setRecords(recordsData.records);
     } catch (err) {
-      console.error("Error fetching dashboard data:", err);
+      if (!controller.signal.aborted && !(err instanceof Error && err.name === "AbortError")) {
+        console.error("Error fetching dashboard data:", err);
+      }
     } finally {
-      setLoading(false);
+      if (loadControllerRef.current === controller) {
+        loadControllerRef.current = null;
+        setLoading(false);
+      }
     }
-  }, [activeTab, searchQuery]);
+  }, [activeTab, debouncedSearchQuery]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
+    return () => loadControllerRef.current?.abort();
   }, [loadData]);
 
   // Toast Auto-Dismiss
