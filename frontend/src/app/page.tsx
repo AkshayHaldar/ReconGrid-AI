@@ -22,6 +22,7 @@ import {
   LedgerSort,
   RecordQuery,
   approveRecord,
+  batchApprove,
   denyRecord,
   resolveConflict,
 } from "@/lib/api";
@@ -251,23 +252,22 @@ export default function DashboardPage() {
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
     if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
-    let failed = false;
     setActionError(null);
     setBatchApproveLoading(true);
     try {
-      // This explicit whole-selection action must include unloaded matching rows.
-      const candidates = (await collectRecordWindows({ ...query, status: "SUGGESTED" }))
-        .filter(r => (r.confidence_score || 0) >= 0.9);
-      for (const rec of candidates) {
-        await approveRecord(rec.id);
-      }
-    } catch (err) {
-      failed = true;
-      console.error("Batch approve failed:", err);
-    } finally {
-      // Earlier approvals may have committed before a later request failed.
+      const result = await batchApprove("default", 0.9);
       await loadData();
-      if (failed) setActionError("Batch approval stopped. Some records may already be approved. Refresh before retrying.");
+      setToast({
+        id: `toast-batch-${Date.now()}`,
+        message: `Approved ${result.approved_count} high-confidence suggestion${result.approved_count === 1 ? "" : "s"}`,
+        type: "info",
+        recordId: "batch",
+      });
+    } catch (err) {
+      console.error("Batch approve failed:", err);
+      await loadData();
+      setActionError("Approval result could not be confirmed. Review the refreshed ledger before retrying.");
+    } finally {
       setBatchApproveLoading(false);
     }
   };

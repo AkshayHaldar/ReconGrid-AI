@@ -132,6 +132,20 @@ export async function approveRecord(recordId: string, note?: string): Promise<Re
   return json.data;
 }
 
+export async function batchApprove(
+  batchId: string,
+  minConfidence: number = 0.90
+): Promise<{ approved_count: number; batch_id: string }> {
+  const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/batch-approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ min_confidence: minConfidence }),
+  });
+  if (!res.ok) throw new Error("Failed to batch approve suggestions");
+  const json: ApiResponse<{ approved_count: number; batch_id: string }> = await res.json();
+  return json.data;
+}
+
 export async function denyRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
   const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/deny`, {
     method: "POST",

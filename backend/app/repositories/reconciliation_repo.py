@@ -75,6 +75,27 @@ class ReconciliationRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def batch_approve_suggestions(self, batch_id: str, min_confidence: float) -> int:
+        """Approve eligible active suggestions with one atomic conditional UPDATE."""
+        suffix = f" [Batch Approved >= {min_confidence * 100:g}% by CA]"
+        stmt = (
+            update(ReconciliationLog)
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.match_status == "SUGGESTED",
+                ReconciliationLog.confidence_score >= min_confidence,
+                ReconciliationLog.superseded == False,
+            )
+            .values(
+                match_status="MATCHED",
+                human_action="APPROVED",
+                diagnostic_note=func.coalesce(ReconciliationLog.diagnostic_note, "") + suffix,
+            )
+            .returning(ReconciliationLog.id)
+        )
+        result = await self.session.execute(stmt)
+        return len(result.scalars().all())
+
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""
         stmt = select(ReconciliationLog.bank_tx_id, ReconciliationLog.match_status).where(
