@@ -333,12 +333,16 @@ export default function DashboardPage() {
         </div>}
         <SummaryCards
           status={status}
+          records={records}
+          activeDiagnostic={selectedDiagnostic}
+          activeTab={activeTab}
           onOpenUpload={() => setIsUploadOpen(true)}
           onOpenSync={() => setIsSyncOpen(true)}
           onFilterTab={(tab) => {
             setActiveTab(tab);
             setSelectedDiagnostic("ALL");
           }}
+          onSelectDiagnostic={(diag) => setSelectedDiagnostic(diag)}
         />
 
         {!isEmpty && (

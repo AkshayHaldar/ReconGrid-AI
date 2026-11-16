@@ -16,21 +16,30 @@ import {
   Info,
   Zap,
 } from "lucide-react";
-import { ReconciliationStatus } from "@/lib/types";
+import { DiagnosticType, ReconciliationRecordItem, ReconciliationStatus } from "@/lib/types";
 import { formatINR } from "@/lib/formatters";
+import { FeeWaterfallBar } from "./FeeWaterfallBar";
 
 interface SummaryCardsProps {
   status: ReconciliationStatus | null;
+  records?: ReconciliationRecordItem[];
+  activeDiagnostic?: DiagnosticType | "ALL" | string;
+  activeTab?: string;
   onOpenUpload: () => void;
   onOpenSync?: () => void;
   onFilterTab: (tab: string) => void;
+  onSelectDiagnostic?: (diagnostic: DiagnosticType | "ALL") => void;
 }
 
 export const SummaryCards: React.FC<SummaryCardsProps> = ({
   status,
+  records = [],
+  activeDiagnostic = "ALL",
+  activeTab = "ALL",
   onOpenUpload,
   onOpenSync,
   onFilterTab,
+  onSelectDiagnostic,
 }) => {
   const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
 
@@ -276,6 +285,16 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Visual Fee & Tax Waterfall Breakdown Bar for Settlement Deductions */}
+      <FeeWaterfallBar
+        records={records}
+        status={status}
+        activeDiagnostic={activeDiagnostic}
+        activeTab={activeTab}
+        onSelectDiagnostic={onSelectDiagnostic}
+        onFilterTab={onFilterTab}
+      />
 
       {/* Visual Ledger Distribution Bar */}
       <div className="fin-card rounded-lg p-3 shadow-xs space-y-2">
