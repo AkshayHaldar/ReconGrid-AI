@@ -37,8 +37,7 @@ def _tally_amount(value: Decimal) -> str:
 def _validate_ledger_name(name: str) -> None:
     """Reject characters forbidden by XML 1.0 before serializing Tally vouchers."""
     if not name.strip() or any(
-        not (code in (9, 10, 13) or 0x20 <= code <= 0xD7FF
-             or 0xE000 <= code <= 0xFFFD or 0x10000 <= code <= 0x10FFFF)
+        not (code in (9, 10, 13) or 0x20 <= code <= 0xD7FF or 0xE000 <= code <= 0xFFFD or 0x10000 <= code <= 0x10FFFF)
         for code in map(ord, name)
     ):
         raise ValueError("Ledger names must be non-blank and contain only XML 1.0 characters")

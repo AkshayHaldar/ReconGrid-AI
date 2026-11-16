@@ -348,10 +348,10 @@ async def export_reconciliation_csv(
 @router.get("/{batch_id}/export-tally-xml")
 async def export_tally_xml(
     batch_id: str = "default",
-    bank_ledger: str = Query(default=BANK_LEDGER, min_length=1),
-    charges_ledger: str = Query(default=GATEWAY_CHARGES_LEDGER, min_length=1),
-    gst_ledger: str = Query(default=INPUT_GST_LEDGER, min_length=1),
-    clearing_ledger: str = Query(default=CLEARING_LEDGER, min_length=1),
+    bank_ledger: str = Query(default=BANK_LEDGER, min_length=1, max_length=255),
+    charges_ledger: str = Query(default=GATEWAY_CHARGES_LEDGER, min_length=1, max_length=255),
+    gst_ledger: str = Query(default=INPUT_GST_LEDGER, min_length=1, max_length=255),
+    clearing_ledger: str = Query(default=CLEARING_LEDGER, min_length=1, max_length=255),
     db: AsyncSession = Depends(get_db),
 ):
     """Downloads matched settlements as balanced Tally Prime Journal vouchers."""

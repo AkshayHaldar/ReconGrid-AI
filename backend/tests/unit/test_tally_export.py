@@ -20,24 +20,56 @@ from app.services.tally_export import (
 )
 
 
-def make_log(*, bank=Decimal("49100.00"), gross=Decimal("50000.00"), fee=Decimal("762.71"),
-             tax=Decimal("137.29"), status="MATCHED", setl="setl_abc123", with_rzp=True):
+def make_log(
+    *,
+    bank=Decimal("49100.00"),
+    gross=Decimal("50000.00"),
+    fee=Decimal("762.71"),
+    tax=Decimal("137.29"),
+    status="MATCHED",
+    setl="setl_abc123",
+    with_rzp=True,
+):
     now = datetime(2026, 8, 14, tzinfo=UTC)
-    bank_tx = BankTransaction(id="b-" + setl, amount=bank, date=now, direction="CREDIT",
-                              utr="ICIC009283", description="CMS", row_hash="h" + setl)
-    rzp = RazorpaySettlement(id="r-" + setl, settlement_id=setl, amount=bank, gross_amount=gross,
-                             fees=fee, tax=tax, utr="ICIC009283", settlement_created_at=now)
+    bank_tx = BankTransaction(
+        id="b-" + setl,
+        amount=bank,
+        date=now,
+        direction="CREDIT",
+        utr="ICIC009283",
+        description="CMS",
+        row_hash="h" + setl,
+    )
+    rzp = RazorpaySettlement(
+        id="r-" + setl,
+        settlement_id=setl,
+        amount=bank,
+        gross_amount=gross,
+        fees=fee,
+        tax=tax,
+        utr="ICIC009283",
+        settlement_created_at=now,
+    )
     return ReconciliationLog(
-        id="l-" + setl, bank_tx_id=bank_tx.id, rzp_settlement_id=rzp.id, match_status=status,
-        match_tier="TIER_3", delta_amount=Decimal("0.00"), diagnostic_type="FEE_DEDUCTION",
-        diagnostic_note="n", bank_transaction=bank_tx, rzp_settlement=rzp if with_rzp else None,
+        id="l-" + setl,
+        bank_tx_id=bank_tx.id,
+        rzp_settlement_id=rzp.id,
+        match_status=status,
+        match_tier="TIER_3",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="FEE_DEDUCTION",
+        diagnostic_note="n",
+        bank_transaction=bank_tx,
+        rzp_settlement=rzp if with_rzp else None,
         matched_at=now,
     )
 
 
 def amounts(voucher):
-    return [(e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
-            for e in voucher.findall("ALLLEDGERENTRIES.LIST")]
+    return [
+        (e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
+        for e in voucher.findall("ALLLEDGERENTRIES.LIST")
+    ]
 
 
 def test_matched_settlement_becomes_balanced_journal_voucher():
@@ -63,9 +95,16 @@ def test_envelope_structure_and_udf_namespace():
 
 
 def test_every_voucher_balances_across_a_batch():
-    logs = [make_log(setl=f"setl_{i}", gross=Decimal(g), bank=Decimal(g) - Decimal("118.00"),
-                     fee=Decimal("100.00"), tax=Decimal("18.00"))
-            for i, g in enumerate(["1000.00", "2500.50", "99999.99"])]
+    logs = [
+        make_log(
+            setl=f"setl_{i}",
+            gross=Decimal(g),
+            bank=Decimal(g) - Decimal("118.00"),
+            fee=Decimal("100.00"),
+            tax=Decimal("18.00"),
+        )
+        for i, g in enumerate(["1000.00", "2500.50", "99999.99"])
+    ]
     root = ET.fromstring(build_tally_xml(logs).xml)
     vouchers = root.findall(".//VOUCHER")
     assert len(vouchers) == 3
@@ -140,6 +179,22 @@ def test_export_endpoint_rejects_xml_forbidden_ledger_name(monkeypatch):
         )
     assert response.status_code == 422
     assert "XML 1.0" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("ledger_key", ["bank_ledger", "charges_ledger", "gst_ledger", "clearing_ledger"])
+def test_export_endpoint_rejects_overlong_ledger_name(ledger_key):
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/default/export-tally-xml",
+            params={ledger_key: "A" * 256},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == ledger_key
 
 
 def test_export_endpoint_accepts_custom_ledger_query_parameters(monkeypatch):
