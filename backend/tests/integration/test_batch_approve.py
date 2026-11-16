@@ -25,14 +25,23 @@ async def test_batch_approve_only_updates_eligible_active_suggestions(db_session
     logs = []
     for index, (batch_id, match_status, confidence, superseded) in enumerate(candidates):
         bank = BankTransaction(
-            id=f"bank-{index}", batch_id=batch_id, row_hash=f"hash-{index}",
-            date=datetime(2026, 11, 16, tzinfo=UTC), amount=Decimal("100.00"),
-            direction="CREDIT", description="Batch approval test",
+            id=f"bank-{index}",
+            batch_id=batch_id,
+            row_hash=f"hash-{index}",
+            date=datetime(2026, 11, 16, tzinfo=UTC),
+            amount=Decimal("100.00"),
+            direction="CREDIT",
+            description="Batch approval test",
         )
         log = ReconciliationLog(
-            id=f"log-{index}", bank_tx_id=bank.id, batch_id=batch_id,
-            match_status=match_status, match_tier="TIER_2", confidence_score=confidence,
-            diagnostic_type="FUZZY_MATCH", diagnostic_note="Candidate",
+            id=f"log-{index}",
+            bank_tx_id=bank.id,
+            batch_id=batch_id,
+            match_status=match_status,
+            match_tier="TIER_2",
+            confidence_score=confidence,
+            diagnostic_type="FUZZY_MATCH",
+            diagnostic_note="Candidate",
             superseded=superseded,
         )
         db_session.add_all((bank, log))
@@ -45,7 +54,9 @@ async def test_batch_approve_only_updates_eligible_active_suggestions(db_session
         assert response.json()["data"] == {"approved_count": 2, "batch_id": "target"}
         repeat = await client.post("/api/v1/reconciliation/target/batch-approve", json={"min_confidence": 0.90})
         assert repeat.json()["data"]["approved_count"] == 0
-        assert (await client.post("/api/v1/reconciliation/target/batch-approve", json={"min_confidence": 1.1})).status_code == 422
+        assert (
+            await client.post("/api/v1/reconciliation/target/batch-approve", json={"min_confidence": 1.1})
+        ).status_code == 422
 
     for log in logs:
         await db_session.refresh(log)
