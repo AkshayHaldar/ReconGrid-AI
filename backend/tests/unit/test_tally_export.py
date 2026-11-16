@@ -17,24 +17,56 @@ from app.services.tally_export import (
 )
 
 
-def make_log(*, bank=Decimal("49100.00"), gross=Decimal("50000.00"), fee=Decimal("762.71"),
-             tax=Decimal("137.29"), status="MATCHED", setl="setl_abc123", with_rzp=True):
+def make_log(
+    *,
+    bank=Decimal("49100.00"),
+    gross=Decimal("50000.00"),
+    fee=Decimal("762.71"),
+    tax=Decimal("137.29"),
+    status="MATCHED",
+    setl="setl_abc123",
+    with_rzp=True,
+):
     now = datetime(2026, 8, 14, tzinfo=UTC)
-    bank_tx = BankTransaction(id="b-" + setl, amount=bank, date=now, direction="CREDIT",
-                              utr="ICIC009283", description="CMS", row_hash="h" + setl)
-    rzp = RazorpaySettlement(id="r-" + setl, settlement_id=setl, amount=bank, gross_amount=gross,
-                             fees=fee, tax=tax, utr="ICIC009283", settlement_created_at=now)
+    bank_tx = BankTransaction(
+        id="b-" + setl,
+        amount=bank,
+        date=now,
+        direction="CREDIT",
+        utr="ICIC009283",
+        description="CMS",
+        row_hash="h" + setl,
+    )
+    rzp = RazorpaySettlement(
+        id="r-" + setl,
+        settlement_id=setl,
+        amount=bank,
+        gross_amount=gross,
+        fees=fee,
+        tax=tax,
+        utr="ICIC009283",
+        settlement_created_at=now,
+    )
     return ReconciliationLog(
-        id="l-" + setl, bank_tx_id=bank_tx.id, rzp_settlement_id=rzp.id, match_status=status,
-        match_tier="TIER_3", delta_amount=Decimal("0.00"), diagnostic_type="FEE_DEDUCTION",
-        diagnostic_note="n", bank_transaction=bank_tx, rzp_settlement=rzp if with_rzp else None,
+        id="l-" + setl,
+        bank_tx_id=bank_tx.id,
+        rzp_settlement_id=rzp.id,
+        match_status=status,
+        match_tier="TIER_3",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="FEE_DEDUCTION",
+        diagnostic_note="n",
+        bank_transaction=bank_tx,
+        rzp_settlement=rzp if with_rzp else None,
         matched_at=now,
     )
 
 
 def amounts(voucher):
-    return [(e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
-            for e in voucher.findall("ALLLEDGERENTRIES.LIST")]
+    return [
+        (e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
+        for e in voucher.findall("ALLLEDGERENTRIES.LIST")
+    ]
 
 
 def test_matched_settlement_becomes_balanced_journal_voucher():
@@ -60,9 +92,16 @@ def test_envelope_structure_and_udf_namespace():
 
 
 def test_every_voucher_balances_across_a_batch():
-    logs = [make_log(setl=f"setl_{i}", gross=Decimal(g), bank=Decimal(g) - Decimal("118.00"),
-                     fee=Decimal("100.00"), tax=Decimal("18.00"))
-            for i, g in enumerate(["1000.00", "2500.50", "99999.99"])]
+    logs = [
+        make_log(
+            setl=f"setl_{i}",
+            gross=Decimal(g),
+            bank=Decimal(g) - Decimal("118.00"),
+            fee=Decimal("100.00"),
+            tax=Decimal("18.00"),
+        )
+        for i, g in enumerate(["1000.00", "2500.50", "99999.99"])
+    ]
     root = ET.fromstring(build_tally_xml(logs).xml)
     vouchers = root.findall(".//VOUCHER")
     assert len(vouchers) == 3
@@ -122,8 +161,12 @@ def test_compound_tds_and_refund_settlement_balances():
     export = build_tally_xml([log])
     entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
     assert [name for name, _, _ in entries] == [
-        "Bank Account", GATEWAY_CHARGES_LEDGER, INPUT_GST_LEDGER,
-        TDS_RECEIVABLE_LEDGER, CUSTOMER_REFUNDS_LEDGER, CLEARING_LEDGER,
+        "Bank Account",
+        GATEWAY_CHARGES_LEDGER,
+        INPUT_GST_LEDGER,
+        TDS_RECEIVABLE_LEDGER,
+        CUSTOMER_REFUNDS_LEDGER,
+        CLEARING_LEDGER,
     ]
     assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
     assert export.voucher_count == 1 and export.skipped == []
@@ -131,8 +174,10 @@ def test_compound_tds_and_refund_settlement_balances():
 
 def test_tds_with_estimated_gateway_fees_is_posted_only_when_exactly_balanced():
     log = make_log(
-        gross=Decimal("100000.00"), bank=Decimal("96640.00"),
-        fee=Decimal("0.00"), tax=Decimal("0.00"),
+        gross=Decimal("100000.00"),
+        bank=Decimal("96640.00"),
+        fee=Decimal("0.00"),
+        tax=Decimal("0.00"),
     )
     log.diagnostic_type = "TDS_194O_DEDUCTION"
     export = build_tally_xml([log])

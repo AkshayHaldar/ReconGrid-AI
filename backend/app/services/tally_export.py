@@ -56,8 +56,7 @@ def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
     has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or "TDS" in (log.diagnostic_note or "").upper()
     tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if has_tds else ZERO
     refund = (
-        to_decimal((rzp.raw_payload or {}).get("refund_total"))
-        if log.diagnostic_type == "REFUND_ADJUSTED" else ZERO
+        to_decimal((rzp.raw_payload or {}).get("refund_total")) if log.diagnostic_type == "REFUND_ADJUSTED" else ZERO
     )
 
     # Diagnostics can match a TDS/refund payout using estimated MDR when the gateway sent
