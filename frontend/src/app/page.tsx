@@ -38,9 +38,11 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("ALL");
   const [selectedDiagnostic, setSelectedDiagnostic] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [search, setSearch] = useState({ query: "", revision: 0 });
+  const [debouncedSearch, setDebouncedSearch] = useState({ query: "", revision: 0 });
   const loadControllerRef = useRef<AbortController | null>(null);
+  const searchInputRef = useRef({ query: "", revision: 0 });
+  const activeTabRef = useRef("ALL");
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
@@ -56,12 +58,32 @@ export default function DashboardPage() {
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ id: string; nonce: number } | null>(null);
 
-  useEffect(() => {
-    // Stop the old search immediately; start the replacement after typing settles.
+  const cancelStaleLoad = useCallback(() => {
     loadControllerRef.current?.abort();
-    const timer = window.setTimeout(() => setDebouncedSearchQuery(searchQuery), 300);
+    loadControllerRef.current = null;
+    setRecords([]);
+    setLoading(true);
+  }, []);
+
+  const handleSearchChange = useCallback((query: string) => {
+    if (query === searchInputRef.current.query) return;
+    searchInputRef.current = { query, revision: searchInputRef.current.revision + 1 };
+    cancelStaleLoad();
+    setSearch(searchInputRef.current);
+  }, [cancelStaleLoad]);
+
+  const handleTabChange = useCallback((tab: string) => {
+    if (tab === activeTabRef.current) return;
+    activeTabRef.current = tab;
+    cancelStaleLoad();
+    setActiveTab(tab);
+  }, [cancelStaleLoad]);
+
+  useEffect(() => {
+    if (search.revision === 0) return;
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
     return () => window.clearTimeout(timer);
-  }, [searchQuery]);
+  }, [search]);
 
   const loadData = useCallback(async () => {
     loadControllerRef.current?.abort();
@@ -72,9 +94,9 @@ export default function DashboardPage() {
       setLoading(true);
       const [statusData, recordsData] = await Promise.all([
         fetchStatus("default", controller.signal),
-        fetchAllRecords("default", activeTab, debouncedSearchQuery, controller.signal),
+        fetchAllRecords("default", activeTab, debouncedSearch.query, controller.signal),
       ]);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || searchInputRef.current.revision !== debouncedSearch.revision) return;
       setStatus(statusData);
       setRecords(recordsData.records);
     } catch (err) {
@@ -84,10 +106,10 @@ export default function DashboardPage() {
     } finally {
       if (loadControllerRef.current === controller) {
         loadControllerRef.current = null;
-        setLoading(false);
+        if (searchInputRef.current.revision === debouncedSearch.revision) setLoading(false);
       }
     }
-  }, [activeTab, debouncedSearchQuery]);
+  }, [activeTab, debouncedSearch]);
 
   useEffect(() => {
     void loadData();
@@ -122,23 +144,23 @@ export default function DashboardPage() {
         e.preventDefault();
         setIsQaOpen((prev) => !prev);
       } else if (e.key === "1") {
-        setActiveTab("ALL");
+        handleTabChange("ALL");
       } else if (e.key === "2") {
-        setActiveTab("MATCHED");
+        handleTabChange("MATCHED");
       } else if (e.key === "3") {
-        setActiveTab("SUGGESTED");
+        handleTabChange("SUGGESTED");
       } else if (e.key === "4") {
-        setActiveTab("CONFLICT");
+        handleTabChange("CONFLICT");
       } else if (e.key === "5") {
-        setActiveTab("EXCEPTION");
+        handleTabChange("EXCEPTION");
       } else if (e.key === "6") {
-        setActiveTab("PENDING_SETTLEMENT_DATA");
+        handleTabChange("PENDING_SETTLEMENT_DATA");
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [handleTabChange]);
 
   // Handle single-click Approve with Optimistic UI & Undo Toast
   const handleApprove = async (recordId: string) => {
@@ -269,7 +291,7 @@ export default function DashboardPage() {
   // Handle source record jump from Q&A
   const handleSelectRecordFromQa = (recordId: string) => {
     setHighlightedId(recordId);
-    setActiveTab("ALL"); // Reset filter so record is visible
+    handleTabChange("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
     // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
     setScrollRequest({ id: recordId, nonce: Date.now() });
@@ -309,7 +331,7 @@ export default function DashboardPage() {
           onOpenUpload={() => setIsUploadOpen(true)}
           onOpenSync={() => setIsSyncOpen(true)}
           onFilterTab={(tab) => {
-            setActiveTab(tab);
+            handleTabChange(tab);
             setSelectedDiagnostic("ALL");
           }}
         />
@@ -319,11 +341,11 @@ export default function DashboardPage() {
             <FilterBar
               activeTab={activeTab}
               onTabChange={(tab) => {
-                setActiveTab(tab);
+                handleTabChange(tab);
                 setSelectedDiagnostic("ALL");
              }}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
+              searchQuery={search.query}
+              onSearchChange={handleSearchChange}
               status={status}
               onExportCsv={handleExportCsv}
               selectedDiagnostic={selectedDiagnostic}
