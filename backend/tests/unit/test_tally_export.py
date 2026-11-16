@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -113,6 +114,32 @@ def test_custom_ledger_names_are_used_without_changing_voucher_balance():
     ]
     assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
     assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("invalid_name", ["Bad\x00Name", "Bad\x0bName", "Bad\ud800Name", "Bad\ufffeName", " "])
+@pytest.mark.parametrize("ledger_key", ["bank_ledger", "charges_ledger", "gst_ledger", "clearing_ledger"])
+def test_invalid_xml_ledger_names_are_rejected(ledger_key, invalid_name):
+    with pytest.raises(ValueError, match="XML 1.0"):
+        build_tally_xml([make_log()], **{ledger_key: invalid_name})
+
+
+def test_export_endpoint_rejects_xml_forbidden_ledger_name(monkeypatch):
+    class StubRepo:
+        async def get_active_logs(self, **kwargs):
+            return [make_log()], 1
+
+    monkeypatch.setattr(reconciliation_api, "ReconciliationRepository", lambda db: StubRepo())
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/default/export-tally-xml",
+            params={"bank_ledger": "Bad\x01Name"},
+        )
+    assert response.status_code == 422
+    assert "XML 1.0" in response.json()["detail"]
 
 
 def test_export_endpoint_accepts_custom_ledger_query_parameters(monkeypatch):

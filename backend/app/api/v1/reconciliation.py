@@ -357,13 +357,16 @@ async def export_tally_xml(
     """Downloads matched settlements as balanced Tally Prime Journal vouchers."""
     repo = ReconciliationRepository(db)
     logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
-    export = build_tally_xml(
-        logs,
-        bank_ledger=bank_ledger,
-        charges_ledger=charges_ledger,
-        gst_ledger=gst_ledger,
-        clearing_ledger=clearing_ledger,
-    )
+    try:
+        export = build_tally_xml(
+            logs,
+            bank_ledger=bank_ledger,
+            charges_ledger=charges_ledger,
+            gst_ledger=gst_ledger,
+            clearing_ledger=clearing_ledger,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
     return Response(
         content=export.xml,
         media_type="application/xml",

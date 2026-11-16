@@ -34,6 +34,16 @@ def _tally_amount(value: Decimal) -> str:
     return f"{value:.2f}"
 
 
+def _validate_ledger_name(name: str) -> None:
+    """Reject characters forbidden by XML 1.0 before serializing Tally vouchers."""
+    if not name.strip() or any(
+        not (code in (9, 10, 13) or 0x20 <= code <= 0xD7FF
+             or 0xE000 <= code <= 0xFFFD or 0x10000 <= code <= 0x10FFFF)
+        for code in map(ord, name)
+    ):
+        raise ValueError("Ledger names must be non-blank and contain only XML 1.0 characters")
+
+
 def _ledger_entry(parent: ET.Element, ledger: str, amount: Decimal, *, debit: bool) -> None:
     """Tally writes debit amounts as negative with ISDEEMEDPOSITIVE=Yes, credits as positive."""
     entry = ET.SubElement(parent, "ALLLEDGERENTRIES.LIST")
@@ -75,6 +85,9 @@ def build_tally_xml(
     gst_ledger: str = INPUT_GST_LEDGER,
     clearing_ledger: str = CLEARING_LEDGER,
 ) -> TallyExport:
+    for ledger_name in (bank_ledger, charges_ledger, gst_ledger, clearing_ledger):
+        _validate_ledger_name(ledger_name)
+
     envelope = ET.Element("ENVELOPE")
     header = ET.SubElement(envelope, "HEADER")
     ET.SubElement(header, "TALLYREQUEST").text = "Import Data"
