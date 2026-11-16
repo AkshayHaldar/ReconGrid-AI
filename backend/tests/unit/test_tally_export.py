@@ -127,3 +127,21 @@ def test_compound_tds_and_refund_settlement_balances():
     ]
     assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
     assert export.voucher_count == 1 and export.skipped == []
+
+
+def test_tds_with_estimated_gateway_fees_is_posted_only_when_exactly_balanced():
+    log = make_log(
+        gross=Decimal("100000.00"), bank=Decimal("96640.00"),
+        fee=Decimal("0.00"), tax=Decimal("0.00"),
+    )
+    log.diagnostic_type = "TDS_194O_DEDUCTION"
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert (GATEWAY_CHARGES_LEDGER, Decimal("-2000.00"), "Yes") in entries
+    assert (INPUT_GST_LEDGER, Decimal("-360.00"), "Yes") in entries
+    assert (TDS_RECEIVABLE_LEDGER, Decimal("-1000.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1
+
+    log.bank_transaction.amount = Decimal("96639.99")
+    assert build_tally_xml([log]).skipped == [log.rzp_settlement.settlement_id]

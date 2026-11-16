@@ -14,7 +14,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app.core.config import settings
 from app.models.reconciliation_log import ReconciliationLog
-from app.utils.money import to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 BANK_LEDGER = "Bank Account"
 GATEWAY_CHARGES_LEDGER = "Payment Gateway Charges"
@@ -51,21 +51,31 @@ def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
     if log.match_status != "MATCHED" or bank is None or rzp is None:
         return None
     gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
-    debits = [
-        (bank_ledger, to_decimal(bank.amount)),
-        (GATEWAY_CHARGES_LEDGER, to_decimal(rzp.fees)),
-        (INPUT_GST_LEDGER, to_decimal(rzp.tax)),
-    ]
+    bank_amount = to_decimal(bank.amount)
+    fee, tax = to_decimal(rzp.fees), to_decimal(rzp.tax)
     has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or "TDS" in (log.diagnostic_note or "").upper()
-    if has_tds:
-        tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        if tds > ZERO:
-            debits.append((TDS_RECEIVABLE_LEDGER, tds))
+    tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if has_tds else ZERO
+    refund = (
+        to_decimal((rzp.raw_payload or {}).get("refund_total"))
+        if log.diagnostic_type == "REFUND_ADJUSTED" else ZERO
+    )
 
-    if log.diagnostic_type == "REFUND_ADJUSTED":
-        refund = to_decimal((rzp.raw_payload or {}).get("refund_total"))
-        if refund > ZERO:
-            debits.append((CUSTOMER_REFUNDS_LEDGER, refund))
+    # Diagnostics can match a TDS/refund payout using estimated MDR when the gateway sent
+    # no fee fields. Only book that estimate if it restores the exact voucher balance.
+    if fee + tax == ZERO and (tds > ZERO or refund > ZERO):
+        estimated_fee, estimated_tax, _ = calculate_standard_fees(
+            gross, mdr_rate=settings.DEFAULT_MDR_RATE, gst_rate=settings.GST_RATE
+        )
+        if bank_amount + tds + refund + estimated_fee + estimated_tax == gross:
+            fee, tax = estimated_fee, estimated_tax
+
+    debits = [
+        (bank_ledger, bank_amount),
+        (GATEWAY_CHARGES_LEDGER, fee),
+        (INPUT_GST_LEDGER, tax),
+        (TDS_RECEIVABLE_LEDGER, tds),
+        (CUSTOMER_REFUNDS_LEDGER, refund),
+    ]
 
     return [(name, amt) for name, amt in debits if amt != ZERO], (CLEARING_LEDGER, gross)
 
