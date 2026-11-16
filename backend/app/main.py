@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -11,12 +11,15 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import init_db
 from app.core.logging import logger, setup_logging
+from app.core.security import metrics_access_guard
+from app.core.telemetry import CONTENT_TYPE_LATEST, get_latest_metrics, setup_telemetry
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: configure logging and database schemas
     setup_logging()
+    setup_telemetry()
     logger.info("recondgrid_api_starting", env=settings.ENV, test_mode=settings.IS_TEST_MODE)
     await init_db()
     logger.info("database_schema_initialized")
@@ -42,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Global Exception Handlers for Standardized Envelopes (CODE-STANDARDS.md §7)
 @app.exception_handler(HTTPException)
@@ -109,3 +113,18 @@ app.include_router(api_router)
 @app.get("/health", tags=["Health"])
 async def health_check():
     return {"status": "ok", "service": "recongrid-ai-backend", "version": "0.1.0"}
+
+
+@app.get(
+    "/metrics",
+    tags=["Observability"],
+    dependencies=[Depends(metrics_access_guard)],
+    summary="Prometheus reconciliation metrics",
+    response_class=Response,
+)
+async def prometheus_metrics() -> Response:
+    """Returns real-time Prometheus-compatible gauges, counters, and histograms."""
+    return Response(
+        content=get_latest_metrics(),
+        media_type=CONTENT_TYPE_LATEST,
+    )
