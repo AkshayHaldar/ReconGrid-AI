@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlite3 import Connection as SQLite3Connection
 
 from sqlalchemy import Engine, event
+from sqlalchemy.dialects.sqlite.aiosqlite import AsyncAdapt_aiosqlite_connection
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -25,17 +26,12 @@ class Base(DeclarativeBase):
 @event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     """Ensure SQLite connections (both sync sqlite3 and async aiosqlite) enforce foreign keys."""
-    if isinstance(dbapi_connection, SQLite3Connection):
+    if isinstance(dbapi_connection, (SQLite3Connection, AsyncAdapt_aiosqlite_connection)):
         cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-    elif hasattr(dbapi_connection, "cursor"):
         try:
-            cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
             cursor.close()
-        except Exception:
-            pass
 
 
 def _custom_json_serializer(obj):

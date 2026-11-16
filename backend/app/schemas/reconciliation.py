@@ -111,9 +111,11 @@ class ReconciliationRecordItem(BaseModel):
 class ReconciliationRecordListResponse(BaseModel):
     batch_id: str
     records: list[ReconciliationRecordItem]
-    total_count: int
+    total_count: int | None
     page: int
     page_size: int
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class ActionRequest(BaseModel):
