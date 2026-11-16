@@ -9,8 +9,10 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.services.tally_export import (
     CLEARING_LEDGER,
+    CUSTOMER_REFUNDS_LEDGER,
     GATEWAY_CHARGES_LEDGER,
     INPUT_GST_LEDGER,
+    TDS_RECEIVABLE_LEDGER,
     build_tally_xml,
 )
 
@@ -90,3 +92,38 @@ def test_only_matched_records_with_both_sides_are_exported():
 def test_special_characters_are_escaped():
     log = make_log(setl="setl_a&b<c>")
     assert ET.fromstring(build_tally_xml([log]).xml).findtext(".//VOUCHERNUMBER") == "setl_a&b<c>"
+
+
+def test_tds_deduction_adds_receivable_debit():
+    log = make_log(bank=Decimal("48600.00"))
+    log.diagnostic_type = "TDS_194O_DEDUCTION"
+    entries = amounts(ET.fromstring(build_tally_xml([log]).xml).find(".//VOUCHER"))
+    assert (TDS_RECEIVABLE_LEDGER, Decimal("-500.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+
+
+def test_refund_adjustment_adds_suspense_debit_only_when_netted():
+    log = make_log(bank=Decimal("47100.00"))
+    log.rzp_settlement.raw_payload = {"refund_total": "2000.00"}
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    entries = amounts(ET.fromstring(build_tally_xml([log]).xml).find(".//VOUCHER"))
+    assert (CUSTOMER_REFUNDS_LEDGER, Decimal("-2000.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+
+    log.diagnostic_type = "FEE_DEDUCTION"
+    assert build_tally_xml([log]).skipped == [log.rzp_settlement.settlement_id]
+
+
+def test_compound_tds_and_refund_settlement_balances():
+    log = make_log(bank=Decimal("46600.00"))
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    log.diagnostic_note = "Refund clawback + 1% TDS + gateway fee"
+    log.rzp_settlement.raw_payload = {"refund_total": "2000.00"}
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "Bank Account", GATEWAY_CHARGES_LEDGER, INPUT_GST_LEDGER,
+        TDS_RECEIVABLE_LEDGER, CUSTOMER_REFUNDS_LEDGER, CLEARING_LEDGER,
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1 and export.skipped == []

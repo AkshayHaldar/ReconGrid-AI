@@ -10,8 +10,9 @@ import io
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
+from app.core.config import settings
 from app.models.reconciliation_log import ReconciliationLog
 from app.utils.money import to_decimal
 
@@ -19,6 +20,8 @@ BANK_LEDGER = "Bank Account"
 GATEWAY_CHARGES_LEDGER = "Payment Gateway Charges"
 INPUT_GST_LEDGER = "Input GST (18%)"
 CLEARING_LEDGER = "Razorpay Clearing Account"
+TDS_RECEIVABLE_LEDGER = "TDS Receivable (Sec 194-O)"
+CUSTOMER_REFUNDS_LEDGER = "Customer Refunds Suspense"
 
 ZERO = Decimal("0.00")
 
@@ -53,6 +56,17 @@ def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
         (GATEWAY_CHARGES_LEDGER, to_decimal(rzp.fees)),
         (INPUT_GST_LEDGER, to_decimal(rzp.tax)),
     ]
+    has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or "TDS" in (log.diagnostic_note or "").upper()
+    if has_tds:
+        tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if tds > ZERO:
+            debits.append((TDS_RECEIVABLE_LEDGER, tds))
+
+    if log.diagnostic_type == "REFUND_ADJUSTED":
+        refund = to_decimal((rzp.raw_payload or {}).get("refund_total"))
+        if refund > ZERO:
+            debits.append((CUSTOMER_REFUNDS_LEDGER, refund))
+
     return [(name, amt) for name, amt in debits if amt != ZERO], (CLEARING_LEDGER, gross)
 
 
