@@ -4,6 +4,10 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.v1 import reconciliation as reconciliation_api
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
@@ -90,3 +94,55 @@ def test_only_matched_records_with_both_sides_are_exported():
 def test_special_characters_are_escaped():
     log = make_log(setl="setl_a&b<c>")
     assert ET.fromstring(build_tally_xml([log]).xml).findtext(".//VOUCHERNUMBER") == "setl_a&b<c>"
+
+
+def test_custom_ledger_names_are_used_without_changing_voucher_balance():
+    export = build_tally_xml(
+        [make_log()],
+        bank_ledger="HDFC Bank Current A/c",
+        charges_ledger="Razorpay Processing Fees",
+        gst_ledger="Input GST & Credits",
+        clearing_ledger="Razorpay Clearing <2026>",
+    )
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "HDFC Bank Current A/c",
+        "Razorpay Processing Fees",
+        "Input GST & Credits",
+        "Razorpay Clearing <2026>",
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+def test_export_endpoint_accepts_custom_ledger_query_parameters(monkeypatch):
+    class StubRepo:
+        async def get_active_logs(self, **kwargs):
+            assert kwargs["batch_id"] == "test-batch"
+            return [make_log()], 1
+
+    monkeypatch.setattr(reconciliation_api, "ReconciliationRepository", lambda db: StubRepo())
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/test-batch/export-tally-xml",
+            params={
+                "bank_ledger": "HDFC Bank Current A/c",
+                "charges_ledger": "Razorpay Processing Fees",
+                "gst_ledger": "Input GST & Credits",
+                "clearing_ledger": "Razorpay Clearing <2026>",
+            },
+        )
+
+    assert response.status_code == 200
+    entries = amounts(ET.fromstring(response.text).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "HDFC Bank Current A/c",
+        "Razorpay Processing Fees",
+        "Input GST & Credits",
+        "Razorpay Clearing <2026>",
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")

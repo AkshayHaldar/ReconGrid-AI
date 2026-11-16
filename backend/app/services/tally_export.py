@@ -42,7 +42,14 @@ def _ledger_entry(parent: ET.Element, ledger: str, amount: Decimal, *, debit: bo
     ET.SubElement(entry, "AMOUNT").text = _tally_amount(-amount if debit else amount)
 
 
-def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
+def build_voucher_lines(
+    log: ReconciliationLog,
+    bank_ledger: str = BANK_LEDGER,
+    *,
+    charges_ledger: str = GATEWAY_CHARGES_LEDGER,
+    gst_ledger: str = INPUT_GST_LEDGER,
+    clearing_ledger: str = CLEARING_LEDGER,
+):
     """Return (debits, credit) as ledger/amount pairs, or None when the record is not postable."""
     bank, rzp = log.bank_transaction, log.rzp_settlement
     if log.match_status != "MATCHED" or bank is None or rzp is None:
@@ -50,17 +57,24 @@ def build_voucher_lines(log: ReconciliationLog, bank_ledger: str = BANK_LEDGER):
     gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
     debits = [
         (bank_ledger, to_decimal(bank.amount)),
-        (GATEWAY_CHARGES_LEDGER, to_decimal(rzp.fees)),
-        (INPUT_GST_LEDGER, to_decimal(rzp.tax)),
+        (charges_ledger, to_decimal(rzp.fees)),
+        (gst_ledger, to_decimal(rzp.tax)),
     ]
-    return [(name, amt) for name, amt in debits if amt != ZERO], (CLEARING_LEDGER, gross)
+    return [(name, amt) for name, amt in debits if amt != ZERO], (clearing_ledger, gross)
 
 
 def is_balanced(debits, credit) -> bool:
     return sum((amt for _, amt in debits), ZERO) - credit[1] == ZERO
 
 
-def build_tally_xml(logs: Sequence[ReconciliationLog], bank_ledger: str = BANK_LEDGER) -> TallyExport:
+def build_tally_xml(
+    logs: Sequence[ReconciliationLog],
+    bank_ledger: str = BANK_LEDGER,
+    *,
+    charges_ledger: str = GATEWAY_CHARGES_LEDGER,
+    gst_ledger: str = INPUT_GST_LEDGER,
+    clearing_ledger: str = CLEARING_LEDGER,
+) -> TallyExport:
     envelope = ET.Element("ENVELOPE")
     header = ET.SubElement(envelope, "HEADER")
     ET.SubElement(header, "TALLYREQUEST").text = "Import Data"
@@ -76,7 +90,13 @@ def build_tally_xml(logs: Sequence[ReconciliationLog], bank_ledger: str = BANK_L
         settlement = log.rzp_settlement
         if settlement is None:
             continue
-        lines = build_voucher_lines(log, bank_ledger)
+        lines = build_voucher_lines(
+            log,
+            bank_ledger,
+            charges_ledger=charges_ledger,
+            gst_ledger=gst_ledger,
+            clearing_ledger=clearing_ledger,
+        )
         if lines is None:
             continue
         debits, credit = lines

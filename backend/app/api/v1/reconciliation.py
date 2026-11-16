@@ -20,7 +20,13 @@ from app.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ScorecardResponse,
 )
-from app.services.tally_export import build_tally_xml
+from app.services.tally_export import (
+    BANK_LEDGER,
+    CLEARING_LEDGER,
+    GATEWAY_CHARGES_LEDGER,
+    INPUT_GST_LEDGER,
+    build_tally_xml,
+)
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -342,12 +348,22 @@ async def export_reconciliation_csv(
 @router.get("/{batch_id}/export-tally-xml")
 async def export_tally_xml(
     batch_id: str = "default",
+    bank_ledger: str = Query(default=BANK_LEDGER, min_length=1),
+    charges_ledger: str = Query(default=GATEWAY_CHARGES_LEDGER, min_length=1),
+    gst_ledger: str = Query(default=INPUT_GST_LEDGER, min_length=1),
+    clearing_ledger: str = Query(default=CLEARING_LEDGER, min_length=1),
     db: AsyncSession = Depends(get_db),
 ):
     """Downloads matched settlements as balanced Tally Prime Journal vouchers."""
     repo = ReconciliationRepository(db)
     logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
-    export = build_tally_xml(logs)
+    export = build_tally_xml(
+        logs,
+        bank_ledger=bank_ledger,
+        charges_ledger=charges_ledger,
+        gst_ledger=gst_ledger,
+        clearing_ledger=clearing_ledger,
+    )
     return Response(
         content=export.xml,
         media_type="application/xml",
