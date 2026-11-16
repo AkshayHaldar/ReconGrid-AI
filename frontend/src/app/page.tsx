@@ -34,7 +34,7 @@ interface ToastAction {
   message: string;
   type: "approve" | "deny" | "info";
   recordId: string;
-  previousRecord: ReconciliationRecordItem;
+  previousRecord?: ReconciliationRecordItem;
 }
 
 export default function DashboardPage() {
@@ -81,8 +81,10 @@ export default function DashboardPage() {
     setActionError(null);
     try {
       await Promise.all([loadStatus(), pager.reload()]);
+      return true;
     } catch {
       setActionError("Unable to refresh dashboard status. Please retry.");
+      return false;
     }
   }, [pager, loadStatus]);
   useEffect(() => { void loadStatus().catch(() => setActionError("Unable to load dashboard status.")); }, [loadStatus]);
@@ -242,7 +244,7 @@ export default function DashboardPage() {
 
   // Handle Undo from Toast
   const handleUndo = async () => {
-    if (!toast) return;
+    if (!toast?.previousRecord) return;
     const { previousRecord } = toast;
     setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
     setToast(null);
@@ -256,17 +258,26 @@ export default function DashboardPage() {
     setBatchApproveLoading(true);
     try {
       const result = await batchApprove("default", 0.9);
-      await loadData();
+      const refreshed = await loadData();
       setToast({
         id: `toast-batch-${Date.now()}`,
-        message: `Approved ${result.approved_count} high-confidence suggestion${result.approved_count === 1 ? "" : "s"}`,
+        message: refreshed
+          ? `Approved ${result.approved_count} high-confidence suggestion${result.approved_count === 1 ? "" : "s"}`
+          : `Approved ${result.approved_count} suggestion${result.approved_count === 1 ? "" : "s"}, but the ledger did not refresh. Reload to see current results.`,
         type: "info",
         recordId: "batch",
       });
     } catch (err) {
       console.error("Batch approve failed:", err);
-      await loadData();
-      setActionError("Approval result could not be confirmed. Review the refreshed ledger before retrying.");
+      const refreshed = await loadData();
+      setToast({
+        id: `toast-batch-error-${Date.now()}`,
+        message: refreshed
+          ? "Approval result could not be confirmed. Ledger refreshed; review current suggestions before retrying."
+          : "Approval result could not be confirmed and the ledger could not refresh. Reload before retrying.",
+        type: "deny",
+        recordId: "batch",
+      });
     } finally {
       setBatchApproveLoading(false);
     }
@@ -424,7 +435,7 @@ export default function DashboardPage() {
       {toast && (
         <div className="fixed bottom-5 left-5 sm:left-6 z-50 flex items-center gap-3.5 bg-[#151820] border border-[#282e3d] shadow-2xl rounded-lg px-4 py-3 text-xs text-neutral-200 animate-in fade-in slide-in-from-bottom-3 duration-200">
           <div className="flex items-center gap-2.5">
-            {toast.type === "approve" ? (
+            {toast.type === "approve" || toast.type === "info" ? (
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             ) : (
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -432,13 +443,15 @@ export default function DashboardPage() {
             <span className="font-medium text-neutral-200">{toast.message}</span>
           </div>
           <div className="flex items-center gap-2 pl-3 border-l border-[#282e3d]">
-            <button
-              onClick={handleUndo}
-              className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-[11px] font-mono flex items-center gap-1.5 transition font-semibold cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Undo</span>
-            </button>
+            {toast.previousRecord && (
+              <button
+                onClick={handleUndo}
+                className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded text-[11px] font-mono flex items-center gap-1.5 transition font-semibold cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Undo</span>
+              </button>
+            )}
             <button
               onClick={() => setToast(null)}
               className="p-1 text-neutral-400 hover:text-neutral-200 rounded transition cursor-pointer"

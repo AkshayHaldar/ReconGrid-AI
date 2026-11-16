@@ -136,7 +136,7 @@ export async function batchApprove(
   batchId: string,
   minConfidence: number = 0.90
 ): Promise<{ approved_count: number; batch_id: string }> {
-  const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/batch-approve`, {
+  const res = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(batchId)}/batch-approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ min_confidence: minConfidence }),

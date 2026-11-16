@@ -56,7 +56,7 @@ test('uncertain batch response refreshes the ledger before a retry', async () =>
   await page.find('FilterBar').onBatchApprove();
   assert.equal(requests, 1);
   assert.equal(page.refreshes(), 1);
-  assert.ok(page.updates.some(value => typeof value === 'string' && value.includes('could not be confirmed')));
+  assert.ok(page.updates.some(value => value?.message?.includes('could not be confirmed')));
   assert.equal(page.updates.at(-1), false);
 });
 
