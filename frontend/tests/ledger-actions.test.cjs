@@ -27,6 +27,29 @@ function dashboard(api) {
     require(name) {
       if (name === 'react') return hooks;
       if (name === 'react/jsx-runtime') return require(name);
+      if (name === 'next/navigation') {
+        return {
+          useRouter: () => ({ replace() {}, push() {} }),
+          usePathname: () => '/',
+          useSearchParams: () => new URLSearchParams(),
+        };
+      }
+      if (name === '@/lib/filters') {
+        return {
+          parseFilterSearchParams: () => ({
+            status: "ALL",
+            q: "",
+            diagnostic: "ALL",
+            startDate: "",
+            endDate: "",
+            minAmount: "",
+            maxAmount: "",
+          }),
+          buildFilterSearchParams: () => new URLSearchParams(),
+          normalizeAmountQueryParam: (val) =>
+            val ? String(val).replace(/[₹,\s]/g, "").trim() : null,
+        };
+      }
       if (name === '@/lib/api') return { fetchStatus: async () => ({}), ...api };
       if (name === '@/lib/useLedgerRecords') return {
         useLedgerRecords: () => ({ records: [], loading: false, pager: {
@@ -36,9 +59,14 @@ function dashboard(api) {
       return new Proxy({}, { get: (_, key) => key });
     },
   });
-  const tree = exports.default();
+  const tree = typeof exports.DashboardContent === 'function' ? exports.DashboardContent() : exports.default();
   function find(node, type) {
     if (!node || typeof node !== 'object') return;
+    if (typeof node.type === 'function') {
+      const rendered = node.type(node.props);
+      const res = find(rendered, type);
+      if (res) return res;
+    }
     if (node.type === type) return node.props;
     for (const child of React.Children.toArray(node.props?.children)) {
       const result = find(child, type);

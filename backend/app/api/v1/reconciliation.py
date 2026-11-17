@@ -2,6 +2,7 @@
 
 import csv
 import io
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -141,19 +142,22 @@ async def get_reconciliation_records(
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     else:
-        logs, total_count = await repo.get_active_logs(
-            batch_id=batch_id,
-            status_filter=status,
-            search=q,
-            page=page,
-            page_size=page_size,
-            diagnostic=diagnostic,
-            settlement_id=settlement_id,
-            start_date=start_date or "",
-            end_date=end_date or "",
-            min_amount=min_amount,
-            max_amount=max_amount,
-        )
+        try:
+            logs, total_count = await repo.get_active_logs(
+                batch_id=batch_id,
+                status_filter=status,
+                search=q,
+                page=page,
+                page_size=page_size,
+                diagnostic=diagnostic,
+                settlement_id=settlement_id,
+                start_date=start_date or "",
+                end_date=end_date or "",
+                min_amount=min_amount,
+                max_amount=max_amount,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     records = [_map_log_to_item(l) for l in logs]
 
     return ApiResponse.ok(

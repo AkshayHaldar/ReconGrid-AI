@@ -1,6 +1,28 @@
 import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus } from "./types";
 
 /**
+ * Normalizes an amount string for API query parameters:
+ * - Strips commas, currency symbols, and whitespace.
+ * - Rejects empty strings, lone decimal points ('.'), negative values, or non-finite inputs.
+ * - Returns a clean numeric string (e.g. "1000", "50.25") or null if unset/invalid.
+ */
+export function normalizeAmountQueryParam(
+  raw: string | number | null | undefined
+): string | null {
+  if (raw === null || raw === undefined) return null;
+  const str = typeof raw === "number" ? String(raw) : String(raw);
+  const cleaned = str.replace(/[₹,\s]/g, "").trim();
+  if (!cleaned || cleaned === "." || cleaned === "-" || cleaned === "+") {
+    return null;
+  }
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num < 0) {
+    return null;
+  }
+  return cleaned;
+}
+
+/**
  * Resolves the API base URL depending on execution environment:
  * - Server functions/SSR: Reads BACKEND_URL injected by Vercel service binding.
  * - Browser / Client: Defaults to relative path "/api/v1" to route through Vercel's rewrites on the same domain without CORS.
@@ -53,8 +75,10 @@ export async function fetchRecordWindow(
   if (query.settlementId) params.set("settlement_id", query.settlementId);
   if (query.startDate) params.set("start_date", query.startDate);
   if (query.endDate) params.set("end_date", query.endDate);
-  if (query.minAmount) params.set("min_amount", query.minAmount);
-  if (query.maxAmount) params.set("max_amount", query.maxAmount);
+  const normalizedMin = normalizeAmountQueryParam(query.minAmount);
+  if (normalizedMin !== null) params.set("min_amount", normalizedMin);
+  const normalizedMax = normalizeAmountQueryParam(query.maxAmount);
+  if (normalizedMax !== null) params.set("max_amount", normalizedMax);
   const response = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(query.batchId)}/records?${params}`, {
     cache: "no-store", signal,
   });
@@ -104,8 +128,10 @@ export async function fetchRecords(
   });
   if (startDate) params.set("start_date", startDate);
   if (endDate) params.set("end_date", endDate);
-  if (minAmount) params.set("min_amount", minAmount);
-  if (maxAmount) params.set("max_amount", maxAmount);
+  const normalizedMin = normalizeAmountQueryParam(minAmount);
+  if (normalizedMin !== null) params.set("min_amount", normalizedMin);
+  const normalizedMax = normalizeAmountQueryParam(maxAmount);
+  if (normalizedMax !== null) params.set("max_amount", normalizedMax);
   const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/records?${params}`, {
     cache: "no-store",
   });

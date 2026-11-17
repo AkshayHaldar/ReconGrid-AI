@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import {
   buildFilterSearchParams,
+  normalizeAmountQueryParam,
   parseFilterSearchParams,
 } from "@/lib/filters";
 
@@ -41,23 +42,12 @@ interface ToastAction {
   previousRecord: ReconciliationRecordItem;
 }
 
-export default function Dashboard() {
-  const router = typeof useRouter === "function" ? useRouter() : null;
-  const pathname = typeof usePathname === "function" ? usePathname() : "/";
-  const searchParams = typeof useSearchParams === "function" ? useSearchParams() : null;
+export function DashboardContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const initialFilters =
-    typeof parseFilterSearchParams === "function"
-      ? parseFilterSearchParams(searchParams)
-      : {
-          status: "ALL",
-          q: "",
-          diagnostic: "ALL",
-          startDate: "",
-          endDate: "",
-          minAmount: "",
-          maxAmount: "",
-        };
+  const initialFilters = parseFilterSearchParams(searchParams);
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
   const [activeTab, setActiveTabState] = useState(initialFilters.status);
   const [selectedDiagnostic, setSelectedDiagnosticState] = useState(initialFilters.diagnostic);
@@ -71,10 +61,9 @@ export default function Dashboard() {
   const [toast, setToast] = useState<ToastAction | null>(null);
 
   // Sync active filters to URL search params for shareable auditor views
-  const lastSyncedQueryRef = useRef<string>(searchParams ? searchParams.toString() : "");
+  const lastSyncedQueryRef = useRef<string>(searchParams.toString());
 
   useEffect(() => {
-    if (typeof buildFilterSearchParams !== "function") return;
     const nextParams = buildFilterSearchParams({
       status: activeTab,
       q: searchQuery,
@@ -90,9 +79,7 @@ export default function Dashboard() {
 
     lastSyncedQueryRef.current = nextQuery;
     const targetUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-    if (router && typeof router.replace === "function") {
-      router.replace(targetUrl, { scroll: false });
-    }
+    router.replace(targetUrl, { scroll: false });
   }, [
     activeTab,
     searchQuery,
@@ -104,6 +91,52 @@ export default function Dashboard() {
     pathname,
     router,
   ]);
+
+  // Toast Auto-Dismiss
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in inputs/textareas
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
+        if (e.key === "Escape") {
+          target.blur();
+        }
+        return;
+      }
+
+      if (e.key === "/") {
+        e.preventDefault();
+        const searchInput = document.getElementById("ledger-search-input");
+        searchInput?.focus();
+      } else if (e.key === "?") {
+        e.preventDefault();
+        setIsQaOpen((prev) => !prev);
+      } else if (e.key === "1") {
+        setActiveTab("ALL");
+      } else if (e.key === "2") {
+        setActiveTab("MATCHED");
+      } else if (e.key === "3") {
+        setActiveTab("SUGGESTED");
+      } else if (e.key === "4") {
+        setActiveTab("CONFLICT");
+      } else if (e.key === "5") {
+        setActiveTab("EXCEPTION");
+      } else if (e.key === "6") {
+        setActiveTab("PENDING_SETTLEMENT_DATA");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -131,18 +164,22 @@ export default function Dashboard() {
   const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
   const conflictRequest = useRef(0);
-  const query = useMemo<RecordQuery>(() => ({
-    batchId: "default",
-    status: activeTab,
-    search: searchQuery,
-    diagnostic: selectedDiagnostic,
-    sort,
-    direction,
-    startDate: (typeof startDate === "string" ? startDate.trim() : "") || undefined,
-    endDate: (typeof endDate === "string" ? endDate.trim() : "") || undefined,
-    minAmount: (typeof minAmount === "string" ? minAmount.trim() : "") || undefined,
-    maxAmount: (typeof maxAmount === "string" ? maxAmount.trim() : "") || undefined,
-  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction, startDate, endDate, minAmount, maxAmount]);
+  const query = useMemo<RecordQuery>(() => {
+    const normMin = normalizeAmountQueryParam(minAmount);
+    const normMax = normalizeAmountQueryParam(maxAmount);
+    return {
+      batchId: "default",
+      status: activeTab,
+      search: searchQuery,
+      diagnostic: selectedDiagnostic,
+      sort,
+      direction,
+      startDate: (typeof startDate === "string" ? startDate.trim() : "") || undefined,
+      endDate: (typeof endDate === "string" ? endDate.trim() : "") || undefined,
+      minAmount: normMin || undefined,
+      maxAmount: normMax || undefined,
+    };
+  }, [activeTab, searchQuery, selectedDiagnostic, sort, direction, startDate, endDate, minAmount, maxAmount]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
@@ -215,7 +252,7 @@ export default function Dashboard() {
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      await loadStatus();
+      await loadData();
     } catch (err) {
       console.error("Approve failed:", err);
       // Revert on error
@@ -260,7 +297,7 @@ export default function Dashboard() {
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      await loadStatus();
+      await loadData();
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
@@ -501,5 +538,21 @@ export default function Dashboard() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex items-center justify-center">
+          <div className="text-xs font-mono text-neutral-400">
+            Loading settlement reconciliation console...
+          </div>
+        </div>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }

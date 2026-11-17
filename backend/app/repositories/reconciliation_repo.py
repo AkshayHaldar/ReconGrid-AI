@@ -200,7 +200,10 @@ class ReconciliationRepository:
                 if s_dt.tzinfo is None:
                     s_dt = s_dt.replace(tzinfo=UTC)
             except ValueError:
-                s_dt = datetime.combine(date.fromisoformat(raw_start), time.min).replace(tzinfo=UTC)
+                try:
+                    s_dt = datetime.combine(date.fromisoformat(raw_start), time.min).replace(tzinfo=UTC)
+                except ValueError as exc:
+                    raise ValueError(f"Invalid start_date format: {raw_start}") from exc
             base_query = base_query.where(BankTransaction.date >= s_dt)
 
         if end_date and str(end_date).strip():
@@ -212,8 +215,14 @@ class ReconciliationRepository:
                 if len(raw_end) == 10:
                     e_dt = datetime.combine(e_dt.date(), time.max).replace(tzinfo=UTC)
             except ValueError:
-                e_dt = datetime.combine(date.fromisoformat(raw_end), time.max).replace(tzinfo=UTC)
+                try:
+                    e_dt = datetime.combine(date.fromisoformat(raw_end), time.max).replace(tzinfo=UTC)
+                except ValueError as exc:
+                    raise ValueError(f"Invalid end_date format: {raw_end}") from exc
             base_query = base_query.where(BankTransaction.date <= e_dt)
+
+        if min_amount is not None and max_amount is not None and min_amount > max_amount:
+            raise ValueError("min_amount cannot exceed max_amount")
 
         if min_amount is not None:
             base_query = base_query.where(BankTransaction.amount >= min_amount)

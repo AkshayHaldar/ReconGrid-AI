@@ -124,6 +124,28 @@ export function parseAmountInput(
 }
 
 /**
+ * Normalizes an amount string for API query parameters:
+ * - Strips commas, currency symbols, and whitespace.
+ * - Rejects empty strings, lone decimal points ('.'), negative values, or non-finite inputs.
+ * - Returns a clean numeric string (e.g. "1000", "50.25") or null if unset/invalid.
+ */
+export function normalizeAmountQueryParam(
+  raw: string | number | null | undefined
+): string | null {
+  if (raw === null || raw === undefined) return null;
+  const str = typeof raw === "number" ? String(raw) : String(raw);
+  const cleaned = str.replace(/[₹,\s]/g, "").trim();
+  if (!cleaned || cleaned === "." || cleaned === "-" || cleaned === "+") {
+    return null;
+  }
+  const num = Number(cleaned);
+  if (!Number.isFinite(num) || num < 0) {
+    return null;
+  }
+  return cleaned;
+}
+
+/**
  * Returns { startDate, endDate } in YYYY-MM-DD for a quick date preset.
  */
 export function getDatePresetRange(
