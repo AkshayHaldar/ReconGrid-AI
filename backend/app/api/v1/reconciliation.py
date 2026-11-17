@@ -2,6 +2,7 @@
 
 import csv
 import io
+from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -30,6 +31,7 @@ from app.services.tally_export import (
     INPUT_GST_LEDGER,
     build_tally_xml,
 )
+from app.services.tax_schedule import build_tax_schedule
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -406,6 +408,19 @@ async def export_tally_xml(
             "X-Skipped-Vouchers": str(len(export.skipped)),
         },
     )
+
+
+@router.get("/{batch_id}/tax-schedule")
+async def get_tax_schedule(
+    batch_id: str = "default",
+    intra_state: bool = Query(True, description="Split GST into CGST+SGST (true) or report it as IGST (false)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Section 194-O TDS and GST input tax credit totals for the batch, with TDS deviations."""
+    repo = ReconciliationRepository(db)
+    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
+    schedule = build_tax_schedule(batch_id, logs, intra_state=intra_state)
+    return ApiResponse.ok(asdict(schedule))
 
 
 @router.get("/{batch_id}/scorecard/export")
