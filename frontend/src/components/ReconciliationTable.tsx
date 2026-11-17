@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { observedBlockSize } from "@/lib/rowMeasure";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 import {
   Check,
@@ -48,6 +49,8 @@ type SortOrder = "asc" | "desc";
 
 // Estimated height of a collapsed row; real heights are measured after render.
 const ROW_HEIGHT = 53;
+// An empty <tr> with only a height collapses to 0 in WebKit; the spacer needs a real cell spanning every column.
+const SPACER_COLSPAN = 10;
 
 // Skip the synchronous getBoundingClientRect() the default measurer does when a
 // row mounts (it forces a table layout per row while scrolling). The
@@ -58,8 +61,8 @@ const measureRow = (
   entry: ResizeObserverEntry | undefined,
   instance: Virtualizer<HTMLDivElement, Element>
 ) => {
-  const box = entry?.borderBoxSize?.[0];
-  if (box) return Math.round(box.blockSize);
+  const measured = observedBlockSize(entry);
+  if (measured !== undefined) return measured;
   const index = Number((el as HTMLElement).dataset.index);
   return instance.measurementsCache[index]?.size ?? ROW_HEIGHT;
 };
@@ -615,7 +618,9 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
           </thead>
           {paddingTop > 0 && (
             <tbody aria-hidden="true">
-              <tr style={{ height: paddingTop }} />
+              <tr>
+                <td colSpan={SPACER_COLSPAN} style={{ height: `${paddingTop}px`, padding: 0, border: 0 }} />
+              </tr>
             </tbody>
           )}
           {virtualItems.map((vi) => {
@@ -640,7 +645,9 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
             })}
           {paddingBottom > 0 && (
             <tbody aria-hidden="true">
-              <tr style={{ height: paddingBottom }} />
+              <tr>
+                <td colSpan={SPACER_COLSPAN} style={{ height: `${paddingBottom}px`, padding: 0, border: 0 }} />
+              </tr>
             </tbody>
           )}
         </table>
