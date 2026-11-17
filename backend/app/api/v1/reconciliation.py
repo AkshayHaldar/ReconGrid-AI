@@ -14,6 +14,8 @@ from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
 from app.schemas.reconciliation import (
     ActionRequest,
+    BatchApproveRequest,
+    BatchApproveResponse,
     ConflictResolveRequest,
     ReconciliationRecordItem,
     ReconciliationRecordListResponse,
@@ -166,6 +168,18 @@ async def approve_suggested_match(
     await db.flush()
 
     return ApiResponse.ok(_map_log_to_item(log))
+
+
+@router.post("/{batch_id}/batch-approve", response_model=ApiResponse[BatchApproveResponse])
+async def batch_approve_suggested_matches(
+    batch_id: str,
+    request: BatchApproveRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Approve high-confidence active suggestions with one database update."""
+    repo = ReconciliationRepository(db)
+    count = await repo.batch_approve_suggestions(batch_id, request.min_confidence)
+    return ApiResponse.ok(BatchApproveResponse(approved_count=count, batch_id=batch_id))
 
 
 @router.post("/records/{record_id}/deny", response_model=ApiResponse[ReconciliationRecordItem])

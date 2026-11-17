@@ -122,6 +122,15 @@ class ActionRequest(BaseModel):
     note: str | None = None
 
 
+class BatchApproveRequest(BaseModel):
+    min_confidence: float = Field(default=0.90, ge=0.0, le=1.0, allow_inf_nan=False)
+
+
+class BatchApproveResponse(BaseModel):
+    approved_count: int
+    batch_id: str
+
+
 class ConflictResolveRequest(BaseModel):
     chosen_settlement_id: str
     note: str | None = None

@@ -48,17 +48,27 @@ function dashboard(api) {
   return { find: type => find(tree, type), updates, refreshes: () => refreshes };
 }
 
-test('partial batch failure refreshes committed rows and reports the failure', async () => {
-  const approved = [];
+test('uncertain batch response refreshes the ledger before a retry', async () => {
+  let requests = 0;
   const page = dashboard({
-    collectRecordWindows: async () => [{ id: 'a', confidence_score: 1 }, { id: 'b', confidence_score: 1 }],
-    approveRecord: async id => { if (id === 'b') throw Error('request failed'); approved.push(id); },
+    batchApprove: async () => { requests++; throw Error('response lost'); },
   });
   await page.find('FilterBar').onBatchApprove();
-  assert.deepEqual(approved, ['a']);
+  assert.equal(requests, 1);
   assert.equal(page.refreshes(), 1);
-  assert.ok(page.updates.some(value => typeof value === 'string' && value.includes('Some records may already be approved')));
+  assert.ok(page.updates.some(value => value?.message?.includes('could not be confirmed')));
   assert.equal(page.updates.at(-1), false);
+});
+
+test('batch approval sends one request and reports the server count', async () => {
+  const requests = [];
+  const page = dashboard({
+    batchApprove: async (...args) => { requests.push(args); return { approved_count: 3 }; },
+  });
+  await page.find('FilterBar').onBatchApprove();
+  assert.deepEqual(requests, [['default', 0.9]]);
+  assert.equal(page.refreshes(), 1);
+  assert.ok(page.updates.some(value => value?.message?.includes('Approved 3 high-confidence suggestions')));
 });
 
 test('a conflict removed during loading never opens with the stale row', async () => {
