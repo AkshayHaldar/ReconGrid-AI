@@ -1,13 +1,69 @@
 """Cryptographic security and webhook signature verification."""
 
+import base64
+import binascii
 import hashlib
 import hmac
 import ipaddress
+import os
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import Header, HTTPException, Request, status
 
 from app.core.config import settings
 from app.core.logging import logger
+
+ENCRYPTED_PREFIX = "enc:"
+_NONCE_BYTES = 12
+
+
+def _master_key() -> bytes:
+    """Returns the 32-byte AES-256 key from ENCRYPTION_MASTER_KEY (urlsafe base64)."""
+    raw = settings.ENCRYPTION_MASTER_KEY
+    if not raw:
+        raise ValueError("ENCRYPTION_MASTER_KEY is not set")
+    try:
+        key = base64.urlsafe_b64decode(raw.encode("ascii"))
+    except (binascii.Error, UnicodeEncodeError) as exc:
+        raise ValueError("ENCRYPTION_MASTER_KEY must be urlsafe base64") from exc
+    if len(key) != 32:
+        raise ValueError("ENCRYPTION_MASTER_KEY must decode to 32 bytes (AES-256)")
+    return key
+
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypts a secret with AES-256-GCM. Output is `enc:` + urlsafe base64(nonce + ciphertext)."""
+    nonce = os.urandom(_NONCE_BYTES)
+    sealed = AESGCM(_master_key()).encrypt(nonce, plaintext.encode("utf-8"), None)
+    return ENCRYPTED_PREFIX + base64.urlsafe_b64encode(nonce + sealed).decode("ascii")
+
+
+def decrypt_secret(ciphertext: str) -> str:
+    """Reverses encrypt_secret. Raises ValueError for malformed input or a wrong key."""
+    token = ciphertext[len(ENCRYPTED_PREFIX) :] if ciphertext.startswith(ENCRYPTED_PREFIX) else ciphertext
+    try:
+        blob = base64.urlsafe_b64decode(token.encode("ascii"))
+        return AESGCM(_master_key()).decrypt(blob[:_NONCE_BYTES], blob[_NONCE_BYTES:], None).decode("utf-8")
+    except (binascii.Error, UnicodeError, InvalidTag) as exc:
+        raise ValueError("Unable to decrypt secret") from exc
+
+
+def resolve_secret(value: str) -> str:
+    """Returns the plaintext for a configured secret, decrypting it only if it is stored as `enc:...`."""
+    if value.startswith(ENCRYPTED_PREFIX):
+        return decrypt_secret(value)
+    return value
+
+
+def mask_secret(value: str, visible_prefix: int = 8, visible_suffix: int = 4) -> str:
+    """Masks a credential for logs and API responses, keeping only a short prefix and suffix."""
+    if not value:
+        return ""
+    if len(value) <= visible_prefix + visible_suffix:
+        return "•" * len(value)
+    hidden = len(value) - visible_prefix - visible_suffix
+    return value[:visible_prefix] + "•" * hidden + value[-visible_suffix:]
 
 
 def is_internal_ip(client_ip: str | None) -> bool:
@@ -42,7 +98,7 @@ async def razorpay_webhook_guard(
     """FastAPI dependency to guard Razorpay webhook endpoints against forged payloads."""
     raw_body = await request.body()
     if not x_razorpay_signature or not verify_razorpay_signature(
-        raw_body, x_razorpay_signature, settings.RAZORPAY_WEBHOOK_SECRET
+        raw_body, x_razorpay_signature, resolve_secret(settings.RAZORPAY_WEBHOOK_SECRET)
     ):
         logger.warning(
             "webhook_signature_verification_failed",
