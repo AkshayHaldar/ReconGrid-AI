@@ -109,6 +109,10 @@ async def get_reconciliation_records(
     direction: Literal["asc", "desc"] = "desc",
     anchor_id: str | None = Query(default=None, max_length=36),
     settlement_id: str = Query(default="", max_length=36),
+    start_date: str | None = Query(default=None, description="Start date (YYYY-MM-DD or ISO)"),
+    end_date: str | None = Query(default=None, description="End date (YYYY-MM-DD or ISO)"),
+    min_amount: Decimal | None = Query(default=None, ge=0, description="Minimum bank transaction amount"),
+    max_amount: Decimal | None = Query(default=None, ge=0, description="Maximum bank transaction amount"),
     db: AsyncSession = Depends(get_db),
 ):
     """Returns filtered, paginated reconciliation records for the ledger table."""
@@ -117,7 +121,20 @@ async def get_reconciliation_records(
     if limit is not None or cursor is not None or anchor_id is not None:
         try:
             logs, total_count, next_cursor, has_more = await repo.get_log_window(
-                batch_id, status, q, diagnostic, sort, direction, limit or page_size, cursor, anchor_id, settlement_id
+                batch_id=batch_id,
+                status_filter=status,
+                search=q,
+                diagnostic=diagnostic,
+                sort=sort,
+                direction=direction,
+                limit=limit or page_size,
+                cursor=cursor,
+                anchor_id=anchor_id,
+                settlement_id=settlement_id,
+                start_date=start_date or "",
+                end_date=end_date or "",
+                min_amount=min_amount,
+                max_amount=max_amount,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -125,7 +142,17 @@ async def get_reconciliation_records(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     else:
         logs, total_count = await repo.get_active_logs(
-            batch_id=batch_id, status_filter=status, search=q, page=page, page_size=page_size
+            batch_id=batch_id,
+            status_filter=status,
+            search=q,
+            page=page,
+            page_size=page_size,
+            diagnostic=diagnostic,
+            settlement_id=settlement_id,
+            start_date=start_date or "",
+            end_date=end_date or "",
+            min_amount=min_amount,
+            max_amount=max_amount,
         )
     records = [_map_log_to_item(l) for l in logs]
 

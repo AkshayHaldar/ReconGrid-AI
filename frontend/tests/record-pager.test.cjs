@@ -166,7 +166,16 @@ test('real API window includes filters, abort signal and cursor, omits offset pa
   });
   const signal = new AbortController().signal;
   await api.fetchRecordWindow(
-    { ...query, batchId: 'batch/a', diagnostic: 'FEE_DEDUCTION', settlementId: 'settle' },
+    {
+      ...query,
+      batchId: 'batch/a',
+      diagnostic: 'FEE_DEDUCTION',
+      settlementId: 'settle',
+      startDate: '2026-08-01',
+      endDate: '2026-08-10',
+      minAmount: '500',
+      maxAmount: '10000',
+    },
     'opaque+/=',
     signal,
   );
@@ -176,6 +185,10 @@ test('real API window includes filters, abort signal and cursor, omits offset pa
   assert.equal(url.searchParams.get('limit'), '200');
   assert.equal(url.searchParams.get('diagnostic'), 'FEE_DEDUCTION');
   assert.equal(url.searchParams.get('settlement_id'), 'settle');
+  assert.equal(url.searchParams.get('start_date'), '2026-08-01');
+  assert.equal(url.searchParams.get('end_date'), '2026-08-10');
+  assert.equal(url.searchParams.get('min_amount'), '500');
+  assert.equal(url.searchParams.get('max_amount'), '10000');
   assert.equal(url.searchParams.has('page'), false);
   assert.equal(requests[0].options.signal, signal);
 });

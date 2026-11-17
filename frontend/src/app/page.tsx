@@ -41,41 +41,40 @@ interface ToastAction {
   previousRecord: ReconciliationRecordItem;
 }
 
-function DashboardContent() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+export default function Dashboard() {
+  const router = typeof useRouter === "function" ? useRouter() : null;
+  const pathname = typeof usePathname === "function" ? usePathname() : "/";
+  const searchParams = typeof useSearchParams === "function" ? useSearchParams() : null;
 
+  const initialFilters =
+    typeof parseFilterSearchParams === "function"
+      ? parseFilterSearchParams(searchParams)
+      : {
+          status: "ALL",
+          q: "",
+          diagnostic: "ALL",
+          startDate: "",
+          endDate: "",
+          minAmount: "",
+          maxAmount: "",
+        };
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
-  const [activeTab, setActiveTabState] = useState(
-    () => parseFilterSearchParams(searchParams).status
-  );
-  const [selectedDiagnostic, setSelectedDiagnosticState] = useState(
-    () => parseFilterSearchParams(searchParams).diagnostic
-  );
-  const [searchQuery, setSearchQueryState] = useState(
-    () => parseFilterSearchParams(searchParams).q
-  );
-  const [startDate, setStartDateState] = useState(
-    () => parseFilterSearchParams(searchParams).startDate
-  );
-  const [endDate, setEndDateState] = useState(
-    () => parseFilterSearchParams(searchParams).endDate
-  );
-  const [minAmount, setMinAmountState] = useState(
-    () => parseFilterSearchParams(searchParams).minAmount
-  );
-  const [maxAmount, setMaxAmountState] = useState(
-    () => parseFilterSearchParams(searchParams).maxAmount
-  );
+  const [activeTab, setActiveTabState] = useState(initialFilters.status);
+  const [selectedDiagnostic, setSelectedDiagnosticState] = useState(initialFilters.diagnostic);
+  const [searchQuery, setSearchQueryState] = useState(initialFilters.q);
+  const [startDate, setStartDateState] = useState(initialFilters.startDate);
+  const [endDate, setEndDateState] = useState(initialFilters.endDate);
+  const [minAmount, setMinAmountState] = useState(initialFilters.minAmount);
+  const [maxAmount, setMaxAmountState] = useState(initialFilters.maxAmount);
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
 
   // Sync active filters to URL search params for shareable auditor views
-  const lastSyncedQueryRef = useRef<string>(searchParams.toString());
+  const lastSyncedQueryRef = useRef<string>(searchParams ? searchParams.toString() : "");
 
   useEffect(() => {
+    if (typeof buildFilterSearchParams !== "function") return;
     const nextParams = buildFilterSearchParams({
       status: activeTab,
       q: searchQuery,
@@ -91,7 +90,9 @@ function DashboardContent() {
 
     lastSyncedQueryRef.current = nextQuery;
     const targetUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
-    router.replace(targetUrl, { scroll: false });
+    if (router && typeof router.replace === "function") {
+      router.replace(targetUrl, { scroll: false });
+    }
   }, [
     activeTab,
     searchQuery,
@@ -137,10 +138,10 @@ function DashboardContent() {
     diagnostic: selectedDiagnostic,
     sort,
     direction,
-    startDate: startDate || undefined,
-    endDate: endDate || undefined,
-    minAmount: minAmount.trim() || undefined,
-    maxAmount: maxAmount.trim() || undefined,
+    startDate: (typeof startDate === "string" ? startDate.trim() : "") || undefined,
+    endDate: (typeof endDate === "string" ? endDate.trim() : "") || undefined,
+    minAmount: (typeof minAmount === "string" ? minAmount.trim() : "") || undefined,
+    maxAmount: (typeof maxAmount === "string" ? maxAmount.trim() : "") || undefined,
   }), [activeTab, searchQuery, selectedDiagnostic, sort, direction, startDate, endDate, minAmount, maxAmount]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
@@ -277,28 +278,24 @@ function DashboardContent() {
 
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
+    if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
+    let failed = false;
     setActionError(null);
     setBatchApproveLoading(true);
-    let succeeded = 0;
     try {
-      const candidates = (await collectRecordWindows({
-        ...query, status: "SUGGESTED", search: "", diagnostic: "ALL",
-      })).filter(r => (r.confidence_score || 0) >= 0.9);
+      // This explicit whole-selection action must include unloaded matching rows.
+      const candidates = (await collectRecordWindows({ ...query, status: "SUGGESTED" }))
+        .filter(r => (r.confidence_score || 0) >= 0.9);
       for (const rec of candidates) {
-        try {
-          await approveRecord(rec.id);
-          succeeded += 1;
-        } catch {
-          // Keep approving remaining candidates; report total outcomes below.
-        }
+        await approveRecord(rec.id);
       }
-      if (succeeded < candidates.length) {
-        setActionError(`Approved ${succeeded} of ${candidates.length} records. Refreshing ledger.`);
-      }
-      await loadData();
-    } catch {
-      setActionError("Unable to load all suggested records for batch approval.");
+    } catch (err) {
+      failed = true;
+      console.error("Batch approve failed:", err);
     } finally {
+      // Earlier approvals may have committed before a later request failed.
+      await loadData();
+      if (failed) setActionError("Batch approval stopped. Some records may already be approved. Refresh before retrying.");
       setBatchApproveLoading(false);
     }
   };
@@ -504,21 +501,5 @@ function DashboardContent() {
         </div>
       )}
     </div>
-  );
-}
-
-export default function DashboardPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex items-center justify-center">
-          <div className="text-xs font-mono text-neutral-400">
-            Loading settlement reconciliation console...
-          </div>
-        </div>
-      }
-    >
-      <DashboardContent />
-    </Suspense>
   );
 }

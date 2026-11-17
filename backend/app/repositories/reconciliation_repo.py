@@ -1,7 +1,7 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
 from collections.abc import Sequence
-from datetime import UTC
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 from sqlalchemy import and_, func, or_, select, update
@@ -116,9 +116,25 @@ class ReconciliationRepository:
         search: str | None = None,
         page: int = 1,
         page_size: int = 100,
+        diagnostic: str = "ALL",
+        settlement_id: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        min_amount: Decimal | None = None,
+        max_amount: Decimal | None = None,
     ) -> tuple[Sequence[ReconciliationLog], int]:
         """Queries active (non-superseded) logs with filters, search, and pagination."""
-        base_query = self._filtered_logs(batch_id, status_filter, search)
+        base_query = self._filtered_logs(
+            batch_id,
+            status_filter,
+            search,
+            diagnostic=diagnostic,
+            settlement_id=settlement_id,
+            start_date=start_date,
+            end_date=end_date,
+            min_amount=min_amount,
+            max_amount=max_amount,
+        )
 
         # Count query
         count_stmt = select(func.count()).select_from(base_query.subquery())
@@ -133,7 +149,18 @@ class ReconciliationRepository:
         result = await self.session.execute(query)
         return result.scalars().all(), total_count
 
-    def _filtered_logs(self, batch_id, status_filter, search, diagnostic="ALL", settlement_id=""):
+    def _filtered_logs(
+        self,
+        batch_id,
+        status_filter,
+        search,
+        diagnostic="ALL",
+        settlement_id="",
+        start_date="",
+        end_date="",
+        min_amount=None,
+        max_amount=None,
+    ):
         base_query = (
             select(ReconciliationLog)
             .join(ReconciliationLog.bank_transaction)
@@ -165,6 +192,35 @@ class ReconciliationRepository:
             base_query = base_query.where(ReconciliationLog.diagnostic_type == diagnostic)
         if settlement_id:
             base_query = base_query.where(ReconciliationLog.rzp_settlement_id == settlement_id)
+
+        if start_date and str(start_date).strip():
+            raw_start = str(start_date).strip()
+            try:
+                s_dt = datetime.fromisoformat(raw_start)
+                if s_dt.tzinfo is None:
+                    s_dt = s_dt.replace(tzinfo=UTC)
+            except ValueError:
+                s_dt = datetime.combine(date.fromisoformat(raw_start), time.min).replace(tzinfo=UTC)
+            base_query = base_query.where(BankTransaction.date >= s_dt)
+
+        if end_date and str(end_date).strip():
+            raw_end = str(end_date).strip()
+            try:
+                e_dt = datetime.fromisoformat(raw_end)
+                if e_dt.tzinfo is None:
+                    e_dt = e_dt.replace(tzinfo=UTC)
+                if len(raw_end) == 10:
+                    e_dt = datetime.combine(e_dt.date(), time.max).replace(tzinfo=UTC)
+            except ValueError:
+                e_dt = datetime.combine(date.fromisoformat(raw_end), time.max).replace(tzinfo=UTC)
+            base_query = base_query.where(BankTransaction.date <= e_dt)
+
+        if min_amount is not None:
+            base_query = base_query.where(BankTransaction.amount >= min_amount)
+
+        if max_amount is not None:
+            base_query = base_query.where(BankTransaction.amount <= max_amount)
+
         return base_query
 
     async def get_log_window(
@@ -179,6 +235,10 @@ class ReconciliationRepository:
         cursor=None,
         anchor_id=None,
         settlement_id="",
+        start_date="",
+        end_date="",
+        min_amount=None,
+        max_amount=None,
     ):
         columns = {
             "date": BankTransaction.date,
@@ -191,8 +251,30 @@ class ReconciliationRepository:
             raise ValueError("Invalid pagination sort, direction or limit")
         if cursor and anchor_id:
             raise ValueError("Use either cursor or anchor_id, not both")
-        base = self._filtered_logs(batch_id, status_filter, search, diagnostic, settlement_id)
-        scope = query_scope(batch_id, status_filter.upper(), search.strip(), diagnostic, sort, direction, settlement_id)
+        base = self._filtered_logs(
+            batch_id,
+            status_filter,
+            search,
+            diagnostic,
+            settlement_id,
+            start_date=start_date,
+            end_date=end_date,
+            min_amount=min_amount,
+            max_amount=max_amount,
+        )
+        scope = query_scope(
+            batch_id,
+            status_filter.upper(),
+            search.strip(),
+            diagnostic,
+            sort,
+            direction,
+            settlement_id,
+            str(start_date).strip() if start_date else "",
+            str(end_date).strip() if end_date else "",
+            str(min_amount) if min_amount is not None else "",
+            str(max_amount) if max_amount is not None else "",
+        )
         column = columns[sort]
         position = decode_cursor(cursor, scope, sort) if cursor else None
         if anchor_id:

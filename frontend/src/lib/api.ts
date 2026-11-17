@@ -28,6 +28,10 @@ export interface RecordQuery {
   sort: LedgerSort;
   direction: "asc" | "desc";
   settlementId?: string;
+  startDate?: string;
+  endDate?: string;
+  minAmount?: string;
+  maxAmount?: string;
 }
 export interface RecordWindow {
   records: ReconciliationRecordItem[];
@@ -47,6 +51,10 @@ export async function fetchRecordWindow(
   if (cursor) params.set("cursor", cursor);
   if (anchorId) params.set("anchor_id", anchorId);
   if (query.settlementId) params.set("settlement_id", query.settlementId);
+  if (query.startDate) params.set("start_date", query.startDate);
+  if (query.endDate) params.set("end_date", query.endDate);
+  if (query.minAmount) params.set("min_amount", query.minAmount);
+  if (query.maxAmount) params.set("max_amount", query.maxAmount);
   const response = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(query.batchId)}/records?${params}`, {
     cache: "no-store", signal,
   });
@@ -82,7 +90,11 @@ export async function fetchRecords(
   status: string = "ALL",
   search: string = "",
   page: number = 1,
-  pageSize: number = 100
+  pageSize: number = 100,
+  startDate?: string,
+  endDate?: string,
+  minAmount?: string,
+  maxAmount?: string
 ): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
   const params = new URLSearchParams({
     status,
@@ -90,6 +102,10 @@ export async function fetchRecords(
     page: page.toString(),
     page_size: pageSize.toString(),
   });
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  if (minAmount) params.set("min_amount", minAmount);
+  if (maxAmount) params.set("max_amount", maxAmount);
   const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/records?${params}`, {
     cache: "no-store",
   });
