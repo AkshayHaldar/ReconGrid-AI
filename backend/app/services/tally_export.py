@@ -69,11 +69,17 @@ def build_voucher_lines(
     gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
     bank_amount = to_decimal(bank.amount)
     fee, tax = to_decimal(rzp.fees), to_decimal(rzp.tax)
-    has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or "TDS" in (log.diagnostic_note or "").upper()
-    tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if has_tds else ZERO
-    refund = (
-        to_decimal((rzp.raw_payload or {}).get("refund_total")) if log.diagnostic_type == "REFUND_ADJUSTED" else ZERO
+    has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or (
+        log.diagnostic_type == "REFUND_ADJUSTED" and "TDS" in (log.diagnostic_note or "").upper()
     )
+    tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if has_tds else ZERO
+    refund = ZERO
+    if log.diagnostic_type == "REFUND_ADJUSTED":
+        try:
+            refund = max(to_decimal((rzp.raw_payload or {}).get("refund_total")), ZERO)
+        except (ValueError, TypeError):
+            # Invalid source data must not abort an otherwise exportable batch.
+            refund = ZERO
 
     # Diagnostics can match a TDS/refund payout using estimated MDR when the gateway sent
     # no fee fields. Only book that estimate if it restores the exact voucher balance.

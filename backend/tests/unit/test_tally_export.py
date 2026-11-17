@@ -177,6 +177,40 @@ def test_compound_tds_and_refund_settlement_balances():
     assert export.voucher_count == 1 and export.skipped == []
 
 
+@pytest.mark.parametrize("diagnostic_type", ["EXACT_MATCH", "FEE_DEDUCTION"])
+def test_unrelated_tds_note_does_not_add_receivable_debit(diagnostic_type):
+    log = make_log()
+    log.diagnostic_type = diagnostic_type
+    log.diagnostic_note = "UTR TDS-REF-123; no tax deduction in this settlement"
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert TDS_RECEIVABLE_LEDGER not in [name for name, _, _ in entries]
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("refund_total", ["0", "-100.00"])
+def test_nonpositive_refund_total_never_creates_inverted_debit(refund_total):
+    log = make_log()
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    log.rzp_settlement.raw_payload = {"refund_total": refund_total}
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert CUSTOMER_REFUNDS_LEDGER not in [name for name, _, _ in entries]
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("refund_total", ["bad amount", object()])
+def test_malformed_refund_total_cannot_abort_batch_export(refund_total):
+    bad = make_log(setl="setl_bad", bank=Decimal("47100.00"))
+    bad.diagnostic_type = "REFUND_ADJUSTED"
+    bad.rzp_settlement.raw_payload = {"refund_total": refund_total}
+    good = make_log(setl="setl_good")
+    export = build_tally_xml([bad, good])
+    assert export.voucher_count == 1
+    assert export.skipped == ["setl_bad"]
+    assert "setl_good" in export.xml
+
+
 def test_tds_with_estimated_gateway_fees_is_posted_only_when_exactly_balanced():
     log = make_log(
         gross=Decimal("100000.00"),
