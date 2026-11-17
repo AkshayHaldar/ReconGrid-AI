@@ -4,6 +4,11 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.api.v1 import reconciliation as reconciliation_api
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
@@ -15,24 +20,56 @@ from app.services.tally_export import (
 )
 
 
-def make_log(*, bank=Decimal("49100.00"), gross=Decimal("50000.00"), fee=Decimal("762.71"),
-             tax=Decimal("137.29"), status="MATCHED", setl="setl_abc123", with_rzp=True):
+def make_log(
+    *,
+    bank=Decimal("49100.00"),
+    gross=Decimal("50000.00"),
+    fee=Decimal("762.71"),
+    tax=Decimal("137.29"),
+    status="MATCHED",
+    setl="setl_abc123",
+    with_rzp=True,
+):
     now = datetime(2026, 8, 14, tzinfo=UTC)
-    bank_tx = BankTransaction(id="b-" + setl, amount=bank, date=now, direction="CREDIT",
-                              utr="ICIC009283", description="CMS", row_hash="h" + setl)
-    rzp = RazorpaySettlement(id="r-" + setl, settlement_id=setl, amount=bank, gross_amount=gross,
-                             fees=fee, tax=tax, utr="ICIC009283", settlement_created_at=now)
+    bank_tx = BankTransaction(
+        id="b-" + setl,
+        amount=bank,
+        date=now,
+        direction="CREDIT",
+        utr="ICIC009283",
+        description="CMS",
+        row_hash="h" + setl,
+    )
+    rzp = RazorpaySettlement(
+        id="r-" + setl,
+        settlement_id=setl,
+        amount=bank,
+        gross_amount=gross,
+        fees=fee,
+        tax=tax,
+        utr="ICIC009283",
+        settlement_created_at=now,
+    )
     return ReconciliationLog(
-        id="l-" + setl, bank_tx_id=bank_tx.id, rzp_settlement_id=rzp.id, match_status=status,
-        match_tier="TIER_3", delta_amount=Decimal("0.00"), diagnostic_type="FEE_DEDUCTION",
-        diagnostic_note="n", bank_transaction=bank_tx, rzp_settlement=rzp if with_rzp else None,
+        id="l-" + setl,
+        bank_tx_id=bank_tx.id,
+        rzp_settlement_id=rzp.id,
+        match_status=status,
+        match_tier="TIER_3",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="FEE_DEDUCTION",
+        diagnostic_note="n",
+        bank_transaction=bank_tx,
+        rzp_settlement=rzp if with_rzp else None,
         matched_at=now,
     )
 
 
 def amounts(voucher):
-    return [(e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
-            for e in voucher.findall("ALLLEDGERENTRIES.LIST")]
+    return [
+        (e.findtext("LEDGERNAME"), Decimal(e.findtext("AMOUNT")), e.findtext("ISDEEMEDPOSITIVE"))
+        for e in voucher.findall("ALLLEDGERENTRIES.LIST")
+    ]
 
 
 def test_matched_settlement_becomes_balanced_journal_voucher():
@@ -58,9 +95,16 @@ def test_envelope_structure_and_udf_namespace():
 
 
 def test_every_voucher_balances_across_a_batch():
-    logs = [make_log(setl=f"setl_{i}", gross=Decimal(g), bank=Decimal(g) - Decimal("118.00"),
-                     fee=Decimal("100.00"), tax=Decimal("18.00"))
-            for i, g in enumerate(["1000.00", "2500.50", "99999.99"])]
+    logs = [
+        make_log(
+            setl=f"setl_{i}",
+            gross=Decimal(g),
+            bank=Decimal(g) - Decimal("118.00"),
+            fee=Decimal("100.00"),
+            tax=Decimal("18.00"),
+        )
+        for i, g in enumerate(["1000.00", "2500.50", "99999.99"])
+    ]
     root = ET.fromstring(build_tally_xml(logs).xml)
     vouchers = root.findall(".//VOUCHER")
     assert len(vouchers) == 3
@@ -90,3 +134,97 @@ def test_only_matched_records_with_both_sides_are_exported():
 def test_special_characters_are_escaped():
     log = make_log(setl="setl_a&b<c>")
     assert ET.fromstring(build_tally_xml([log]).xml).findtext(".//VOUCHERNUMBER") == "setl_a&b<c>"
+
+
+def test_custom_ledger_names_are_used_without_changing_voucher_balance():
+    export = build_tally_xml(
+        [make_log()],
+        bank_ledger="HDFC Bank Current A/c",
+        charges_ledger="Razorpay Processing Fees",
+        gst_ledger="Input GST & Credits",
+        clearing_ledger="Razorpay Clearing <2026>",
+    )
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "HDFC Bank Current A/c",
+        "Razorpay Processing Fees",
+        "Input GST & Credits",
+        "Razorpay Clearing <2026>",
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("invalid_name", ["Bad\x00Name", "Bad\x0bName", "Bad\ud800Name", "Bad\ufffeName", " "])
+@pytest.mark.parametrize("ledger_key", ["bank_ledger", "charges_ledger", "gst_ledger", "clearing_ledger"])
+def test_invalid_xml_ledger_names_are_rejected(ledger_key, invalid_name):
+    with pytest.raises(ValueError, match="XML 1.0"):
+        build_tally_xml([make_log()], **{ledger_key: invalid_name})
+
+
+def test_export_endpoint_rejects_xml_forbidden_ledger_name(monkeypatch):
+    class StubRepo:
+        async def get_active_logs(self, **kwargs):
+            return [make_log()], 1
+
+    monkeypatch.setattr(reconciliation_api, "ReconciliationRepository", lambda db: StubRepo())
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/default/export-tally-xml",
+            params={"bank_ledger": "Bad\x01Name"},
+        )
+    assert response.status_code == 422
+    assert "XML 1.0" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("ledger_key", ["bank_ledger", "charges_ledger", "gst_ledger", "clearing_ledger"])
+def test_export_endpoint_rejects_overlong_ledger_name(ledger_key):
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/default/export-tally-xml",
+            params={ledger_key: "A" * 256},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == ledger_key
+
+
+def test_export_endpoint_accepts_custom_ledger_query_parameters(monkeypatch):
+    class StubRepo:
+        async def get_active_logs(self, **kwargs):
+            assert kwargs["batch_id"] == "test-batch"
+            return [make_log()], 1
+
+    monkeypatch.setattr(reconciliation_api, "ReconciliationRepository", lambda db: StubRepo())
+    app = FastAPI()
+    app.include_router(reconciliation_api.router)
+    app.dependency_overrides[reconciliation_api.get_db] = lambda: object()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/reconciliation/test-batch/export-tally-xml",
+            params={
+                "bank_ledger": "HDFC Bank Current A/c",
+                "charges_ledger": "Razorpay Processing Fees",
+                "gst_ledger": "Input GST & Credits",
+                "clearing_ledger": "Razorpay Clearing <2026>",
+            },
+        )
+
+    assert response.status_code == 200
+    entries = amounts(ET.fromstring(response.text).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "HDFC Bank Current A/c",
+        "Razorpay Processing Fees",
+        "Input GST & Credits",
+        "Razorpay Clearing <2026>",
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
