@@ -314,6 +314,10 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
 
+  const handleExportXlsx = () => {
+    window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
+  };
+
   const handleExportTally = () => {
     window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
   };
@@ -330,6 +334,7 @@ export default function DashboardPage() {
         onToggleQa={() => setIsQaOpen(!isQaOpen)}
         isQaOpen={isQaOpen}
         onExportTally={handleExportTally}
+        onExportXlsx={handleExportXlsx}
         periodDate={status?.last_reconciled_at}
       />
 

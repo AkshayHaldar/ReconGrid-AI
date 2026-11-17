@@ -22,6 +22,7 @@ from app.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ScorecardResponse,
 )
+from app.services.export_service import XLSX_MEDIA_TYPE, build_reconciliation_workbook
 from app.services.tally_export import (
     BANK_LEDGER,
     CLEARING_LEDGER,
@@ -356,6 +357,22 @@ async def export_reconciliation_csv(
         content=csv_data,
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=recongrid_audit_{batch_id}.csv"},
+    )
+
+
+@router.get("/{batch_id}/export-xlsx")
+async def export_reconciliation_xlsx(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloads a styled Excel workbook: summary, reconciled ledger and exceptions."""
+    repo = ReconciliationRepository(db)
+    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
+    content = build_reconciliation_workbook(batch_id, logs)
+    return Response(
+        content=content,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={"Content-Disposition": f"attachment; filename=recongrid_audit_{batch_id}.xlsx"},
     )
 
 
