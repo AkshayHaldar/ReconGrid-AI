@@ -1,6 +1,26 @@
 """Pytest async configuration and test database fixtures."""
 
+import importlib.util
 import os
+import sys
+
+
+# Ensure fallback to pure-Python implementations if native C-extensions fail to load (e.g., Windows WDAC/AppLocker)
+class _PurePyFinder:
+    @classmethod
+    def find_spec(cls, fullname, path=None, target=None):
+        if "sqlalchemy" in fullname and fullname.endswith("_cy"):
+            name = fullname.split(".")[-1]
+            if path:
+                for p in path:
+                    py_file = os.path.join(p, name + ".py")
+                    if os.path.isfile(py_file):
+                        return importlib.util.spec_from_file_location(fullname, py_file)
+        return None
+
+
+sys.meta_path.insert(0, _PurePyFinder)
+
 from collections.abc import AsyncGenerator
 
 import pytest

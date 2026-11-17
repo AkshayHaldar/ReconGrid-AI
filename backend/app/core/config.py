@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     IS_TEST_MODE: bool = False
     ENABLE_DEMO: bool = False
 
+    # Observability & Metrics Configuration
+    METRICS_BEARER_TOKEN: str = ""
+    METRICS_INTERNAL_IPS: list[str] = [
+        "127.0.0.1",
+        "::1",
+        "localhost",
+    ]
+
     @model_validator(mode="after")
     def validate_production_invariants(self) -> "Settings":
         """Enforces Issue 06 & Issue 08 acceptance criteria for production environments."""
@@ -84,7 +92,11 @@ class Settings(BaseSettings):
                 "your_webhook_secret_here",
             }
 
-            if not self.RAZORPAY_KEY_ID or self.RAZORPAY_KEY_ID in invalid_placeholders or "sample" in self.RAZORPAY_KEY_ID:
+            if (
+                not self.RAZORPAY_KEY_ID
+                or self.RAZORPAY_KEY_ID in invalid_placeholders
+                or "sample" in self.RAZORPAY_KEY_ID
+            ):
                 raise ValueError("Valid RAZORPAY_KEY_ID must be configured for production.")
 
             if not self.RAZORPAY_KEY_SECRET or self.RAZORPAY_KEY_SECRET in invalid_placeholders:
