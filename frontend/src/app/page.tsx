@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Header } from "@/components/Header";
 import { SummaryCards } from "@/components/SummaryCards";
 import { FilterBar } from "@/components/FilterBar";
@@ -25,6 +26,10 @@ import {
   denyRecord,
   resolveConflict,
 } from "@/lib/api";
+import {
+  buildFilterSearchParams,
+  parseFilterSearchParams,
+} from "@/lib/filters";
 
 import { useLedgerRecords } from "@/lib/useLedgerRecords";
 
@@ -36,14 +41,68 @@ interface ToastAction {
   previousRecord: ReconciliationRecordItem;
 }
 
-export default function DashboardPage() {
+function DashboardContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const [status, setStatus] = useState<ReconciliationStatus | null>(null);
-  const [activeTab, setActiveTabState] = useState("ALL");
-  const [selectedDiagnostic, setSelectedDiagnosticState] = useState("ALL");
-  const [searchQuery, setSearchQueryState] = useState("");
+  const [activeTab, setActiveTabState] = useState(
+    () => parseFilterSearchParams(searchParams).status
+  );
+  const [selectedDiagnostic, setSelectedDiagnosticState] = useState(
+    () => parseFilterSearchParams(searchParams).diagnostic
+  );
+  const [searchQuery, setSearchQueryState] = useState(
+    () => parseFilterSearchParams(searchParams).q
+  );
+  const [startDate, setStartDateState] = useState(
+    () => parseFilterSearchParams(searchParams).startDate
+  );
+  const [endDate, setEndDateState] = useState(
+    () => parseFilterSearchParams(searchParams).endDate
+  );
+  const [minAmount, setMinAmountState] = useState(
+    () => parseFilterSearchParams(searchParams).minAmount
+  );
+  const [maxAmount, setMaxAmountState] = useState(
+    () => parseFilterSearchParams(searchParams).maxAmount
+  );
   const [selectedBank, setSelectedBank] = useState("ALL");
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
+
+  // Sync active filters to URL search params for shareable auditor views
+  const lastSyncedQueryRef = useRef<string>(searchParams.toString());
+
+  useEffect(() => {
+    const nextParams = buildFilterSearchParams({
+      status: activeTab,
+      q: searchQuery,
+      diagnostic: selectedDiagnostic,
+      startDate,
+      endDate,
+      minAmount,
+      maxAmount,
+    });
+    const nextQuery = nextParams.toString();
+
+    if (nextQuery === lastSyncedQueryRef.current) return;
+
+    lastSyncedQueryRef.current = nextQuery;
+    const targetUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    router.replace(targetUrl, { scroll: false });
+  }, [
+    activeTab,
+    searchQuery,
+    selectedDiagnostic,
+    startDate,
+    endDate,
+    minAmount,
+    maxAmount,
+    pathname,
+    router,
+  ]);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -62,14 +121,27 @@ export default function DashboardPage() {
   const setActiveTab = (value: string) => { setAnchorId(undefined); setActiveTabState(value); };
   const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
+  const setStartDate = (value: string) => { setAnchorId(undefined); setStartDateState(value); };
+  const setEndDate = (value: string) => { setAnchorId(undefined); setEndDateState(value); };
+  const setMinAmount = (value: string) => { setAnchorId(undefined); setMinAmountState(value); };
+  const setMaxAmount = (value: string) => { setAnchorId(undefined); setMaxAmountState(value); };
+
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
   const conflictRequest = useRef(0);
   const query = useMemo<RecordQuery>(() => ({
-    batchId: "default", status: activeTab, search: searchQuery,
-    diagnostic: selectedDiagnostic, sort, direction,
-  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction]);
+    batchId: "default",
+    status: activeTab,
+    search: searchQuery,
+    diagnostic: selectedDiagnostic,
+    sort,
+    direction,
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
+    minAmount: minAmount.trim() || undefined,
+    maxAmount: maxAmount.trim() || undefined,
+  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction, startDate, endDate, minAmount, maxAmount]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
@@ -112,52 +184,6 @@ export default function DashboardPage() {
     }
   };
 
-  // Toast Auto-Dismiss
-  useEffect(() => {
-    if (toast) {
-      const timer = setTimeout(() => setToast(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast]);
-
-  // Global Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept when typing in inputs/textareas
-      const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") {
-        if (e.key === "Escape") {
-          target.blur();
-        }
-        return;
-      }
-
-      if (e.key === "/") {
-        e.preventDefault();
-        const searchInput = document.getElementById("ledger-search-input");
-        searchInput?.focus();
-      } else if (e.key === "?") {
-        e.preventDefault();
-        setIsQaOpen((prev) => !prev);
-      } else if (e.key === "1") {
-        setActiveTab("ALL");
-      } else if (e.key === "2") {
-        setActiveTab("MATCHED");
-      } else if (e.key === "3") {
-        setActiveTab("SUGGESTED");
-      } else if (e.key === "4") {
-        setActiveTab("CONFLICT");
-      } else if (e.key === "5") {
-        setActiveTab("EXCEPTION");
-      } else if (e.key === "6") {
-        setActiveTab("PENDING_SETTLEMENT_DATA");
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   // Handle single-click Approve with Optimistic UI & Undo Toast
   const handleApprove = async (recordId: string) => {
     const targetRecord = records.find((r) => r.id === recordId);
@@ -171,6 +197,7 @@ export default function DashboardPage() {
               ...r,
               match_status: "MATCHED",
               human_action: "APPROVED",
+              diagnostic_note: `${r.diagnostic_note} [Approved by CA]`,
             }
           : r
       )
@@ -178,7 +205,7 @@ export default function DashboardPage() {
 
     setToast({
       id: `toast-${Date.now()}`,
-      message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
+      message: `Approved ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
       type: "approve",
       recordId,
       previousRecord: targetRecord,
@@ -187,7 +214,7 @@ export default function DashboardPage() {
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      await loadData();
+      await loadStatus();
     } catch (err) {
       console.error("Approve failed:", err);
       // Revert on error
@@ -232,7 +259,7 @@ export default function DashboardPage() {
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
-      await loadData();
+      await loadStatus();
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
@@ -250,24 +277,28 @@ export default function DashboardPage() {
 
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
-    if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
-    let failed = false;
     setActionError(null);
     setBatchApproveLoading(true);
+    let succeeded = 0;
     try {
-      // This explicit whole-selection action must include unloaded matching rows.
-      const candidates = (await collectRecordWindows({ ...query, status: "SUGGESTED" }))
-        .filter(r => (r.confidence_score || 0) >= 0.9);
+      const candidates = (await collectRecordWindows({
+        ...query, status: "SUGGESTED", search: "", diagnostic: "ALL",
+      })).filter(r => (r.confidence_score || 0) >= 0.9);
       for (const rec of candidates) {
-        await approveRecord(rec.id);
+        try {
+          await approveRecord(rec.id);
+          succeeded += 1;
+        } catch {
+          // Keep approving remaining candidates; report total outcomes below.
+        }
       }
-    } catch (err) {
-      failed = true;
-      console.error("Batch approve failed:", err);
-    } finally {
-      // Earlier approvals may have committed before a later request failed.
+      if (succeeded < candidates.length) {
+        setActionError(`Approved ${succeeded} of ${candidates.length} records. Refreshing ledger.`);
+      }
       await loadData();
-      if (failed) setActionError("Batch approval stopped. Some records may already be approved. Refresh before retrying.");
+    } catch {
+      setActionError("Unable to load all suggested records for batch approval.");
+    } finally {
       setBatchApproveLoading(false);
     }
   };
@@ -292,12 +323,25 @@ export default function DashboardPage() {
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
     setSearchQuery("");
+    setStartDate("");
+    setEndDate("");
+    setMinAmount("");
+    setMaxAmount("");
     setSort("date");
     setDirection("desc");
     setAnchorId(recordId);
     // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
     setScrollRequest({ id: recordId, nonce: Date.now() });
   };
+
+  const handleClearFilters = useCallback(() => {
+    setSelectedDiagnostic("ALL");
+    setSearchQuery("");
+    setStartDate("");
+    setEndDate("");
+    setMinAmount("");
+    setMaxAmount("");
+  }, []);
 
   const handleExportCsv = () => {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
@@ -352,13 +396,24 @@ export default function DashboardPage() {
               onTabChange={(tab) => {
                 setActiveTab(tab);
                 setSelectedDiagnostic("ALL");
-             }}
+              }}
               searchQuery={searchQuery}
               onSearchChange={setSearchQuery}
               status={status}
               onExportCsv={handleExportCsv}
               selectedDiagnostic={selectedDiagnostic}
               onDiagnosticChange={setSelectedDiagnostic}
+              startDate={startDate}
+              onStartDateChange={setStartDate}
+              endDate={endDate}
+              onEndDateChange={setEndDate}
+              minAmount={minAmount}
+              onMinAmountChange={setMinAmount}
+              maxAmount={maxAmount}
+              onMaxAmountChange={setMaxAmount}
+              onClearFilters={handleClearFilters}
+              filteredCount={records.length}
+              totalLoadedCount={ledger.totalCount ?? records.length}
               onBatchApprove={handleBatchApprove}
               batchApproveLoading={batchApproveLoading}
             />
@@ -449,5 +504,21 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#090a0f] text-neutral-100 flex items-center justify-center">
+          <div className="text-xs font-mono text-neutral-400">
+            Loading settlement reconciliation console...
+          </div>
+        </div>
+      }
+    >
+      <DashboardContent />
+    </Suspense>
   );
 }
