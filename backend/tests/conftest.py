@@ -71,7 +71,7 @@ def get_engine_args_for_url(db_url: str) -> dict:
 
 
 @pytest.fixture(autouse=True)
-async def setup_test_database(pytestconfig: pytest.Config):
+async def setup_test_database(pytestconfig: pytest.Config, monkeypatch: pytest.MonkeyPatch):
     test_db_url = get_test_database_url(pytestconfig)
     curr_engine_args = get_engine_args_for_url(test_db_url)
     engine = create_async_engine(test_db_url, **curr_engine_args)
@@ -90,6 +90,8 @@ async def setup_test_database(pytestconfig: pytest.Config):
             )
 
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    # Background work owns a fresh session against the same isolated test database.
+    monkeypatch.setattr("app.api.v1.webhooks.async_session_factory", session_factory)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with session_factory() as session:
