@@ -157,3 +157,81 @@ async def test_signed_malformed_payload_does_not_queue_or_persist(payload, monke
     reconcile.assert_not_awaited()
     async with webhooks.async_session_factory() as db:
         assert await db.scalar(select(func.count()).select_from(ProcessedWebhookEvent)) == 0
+
+
+def signed_payload(payload):
+    body = json.dumps(payload).encode()
+    sig = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    return {"content": body, "headers": {"X-Razorpay-Signature": sig, "Content-Type": "application/json"}}
+
+
+@pytest.mark.asyncio
+async def test_missing_entity_is_rejected_without_poisoning_complete_redelivery():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        incomplete = {"id": "evt_background", "event": "settlement.processed"}
+        bad = await client.post("/api/v1/webhooks/razorpay", **signed_payload(incomplete))
+        assert bad.status_code == 400
+        assert await stored_status("evt_background") is None
+        complete = await client.post("/api/v1/webhooks/razorpay", **signed_event())
+        assert complete.status_code == 200
+        assert complete.json()["data"]["status"] == "queued"
+    assert await stored_status("evt_background") == "PROCESSED"
+    assert await settlement_count() == 1
+
+
+@pytest.mark.asyncio
+async def test_fallback_settlement_ids_fit_column_and_do_not_collide_on_long_event_prefixes():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for event_id in [None, "e" * 63 + "a", "e" * 63 + "b"]:
+            payload = json.loads(signed_event(event_id=event_id)["content"])
+            del payload["payload"]["settlement"]["entity"]["id"]
+            response = await client.post("/api/v1/webhooks/razorpay", **signed_payload(payload))
+            assert response.status_code == 200
+            assert await stored_status(response.json()["data"]["event_id"]) == "PROCESSED"
+    async with webhooks.async_session_factory() as db:
+        ids = list((await db.scalars(select(RazorpaySettlement.settlement_id))).all())
+    assert len(ids) == 3
+    assert len(set(ids)) == 3
+    assert all(len(value) == 64 and value.startswith("setl_") for value in ids)
+
+
+@pytest.mark.asyncio
+async def test_distinct_workers_serialize_settlement_snapshots(monkeypatch):
+    first_entered, second_entered, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    snapshots = []
+    monkeypatch.setattr(webhooks.BankRepository, "get_all_by_batch", AsyncMock(return_value=[object()]))
+
+    async def reconcile(self, bank_txs, settlements, **kwargs):
+        snapshots.append(sorted(row.settlement_id for row in settlements))
+        if len(snapshots) == 1:
+            first_entered.set()
+            await release.wait()
+        else:
+            second_entered.set()
+
+    monkeypatch.setattr(webhooks.ReconciliationEngine, "reconcile_batch", reconcile)
+    async with webhooks.async_session_factory() as db:
+        for suffix in ["first", "second"]:
+            payload = json.loads(signed_event(event_id="evt_" + suffix)["content"])
+            payload["payload"]["settlement"]["entity"]["id"] = "setl_" + suffix
+            db.add(
+                ProcessedWebhookEvent(
+                    razorpay_event_id="evt_" + suffix,
+                    event_type="settlement.processed",
+                    processing_status="QUEUED",
+                    payload=payload,
+                )
+            )
+        await db.commit()
+    first = asyncio.create_task(webhooks.reconcile_webhook_event("evt_first"))
+    await asyncio.wait_for(first_entered.wait(), 2)
+    second = asyncio.create_task(webhooks.reconcile_webhook_event("evt_second"))
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(second_entered.wait(), 0.05)
+    finally:
+        release.set()
+        await asyncio.gather(first, second)
+    assert snapshots == [["setl_first"], ["setl_first", "setl_second"]]
+    assert await stored_status("evt_first") == "PROCESSED"
+    assert await stored_status("evt_second") == "PROCESSED"

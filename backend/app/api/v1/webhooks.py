@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,11 @@ async def reconcile_webhook_event(event_id: str) -> None:
     """Process a committed event with a session owned by this background task."""
     async with async_session_factory() as db:
         try:
+            # Serialize default-batch snapshots across API processes, not just coroutines.
+            if db.get_bind().dialect.name == "postgresql":
+                await db.execute(text("SELECT pg_advisory_xact_lock(1380405828)"))
+            elif db.get_bind().dialect.name == "sqlite":
+                await db.execute(text("BEGIN IMMEDIATE"))
             event = await db.scalar(
                 select(ProcessedWebhookEvent).where(ProcessedWebhookEvent.razorpay_event_id == event_id)
             )
@@ -45,7 +50,8 @@ async def reconcile_webhook_event(event_id: str) -> None:
             settlement_repo = SettlementRepository(db)
             setl_obj, _ = await settlement_repo.upsert_settlement(
                 {
-                    "settlement_id": setl_data.get("id", f"setl_{event_id}"),
+                    "settlement_id": setl_data.get("id")
+                    or f"setl_{hashlib.sha256(event_id.encode()).hexdigest()[:59]}",
                     "amount": amount_inr,
                     "gross_amount": gross_inr,
                     "fees": fees_inr,
@@ -96,6 +102,11 @@ async def handle_razorpay_webhook(
         settlement = payload.get("payload", {}).get("settlement", {}).get("entity", {})
         if not isinstance(settlement, dict):
             raise ValueError("Settlement entity must be an object")
+        if payload.get("event") == "settlement.processed" and not settlement:
+            raise ValueError("Settlement events require an entity")
+        settlement_id = settlement.get("id")
+        if settlement_id is not None and (not isinstance(settlement_id, str) or len(settlement_id) > 64):
+            raise ValueError("Invalid settlement ID")
     except (ValueError, UnicodeError, AttributeError):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed JSON webhook body")
 
