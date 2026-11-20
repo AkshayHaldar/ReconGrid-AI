@@ -150,3 +150,48 @@ def test_parse_indian_lakh_crore_comma_amounts():
     assert rows[0]["amount"] == Decimal("123456.78")
     assert rows[1]["amount"] == Decimal("123456789.50")
 
+
+def test_parse_custom_column_mappings():
+    # Non-standard headers e.g. corporate bank portal (Axis / IndusInd / Federal / Yes Bank)
+    csv_lines = [
+        "Value Date,Particulars,Instrument Id,Deposit,Withdrawal,Balance",
+        "24-08-2026,SETTLEMENT RAZORPAY BANGALORE,CMS002938491850,85000.00,0.00,185000.00",
+        "25-08-2026,SMS ALERT CHARGES,INST12345678,0.00,59.00,184941.00",
+    ]
+    custom_mappings = {
+        "date": "Value Date",
+        "narration": "Particulars",
+        "ref": "Instrument Id",
+        "amount": "Deposit",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("85000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS002938491850"
+    assert rows[0]["description"] == "SETTLEMENT RAZORPAY BANGALORE"
+
+
+def test_parse_custom_column_mappings_with_preamble():
+    csv_lines = [
+        "Federal Bank Limited",
+        "Customer Statement for Account 123456789",
+        "Period: 01-Aug-2026 to 31-Aug-2026",
+        "",
+        "Txn Date,Narrative,Doc Number,Paid In,Paid Out,Running Balance",
+        "24/08/2026,RAZORPAY SETTLEMENT CMS8899001122,CMS8899001122,64200.00,0.00,264200.00",
+    ]
+    custom_mappings = {
+        "date": "Txn Date",
+        "narration": "Narrative",
+        "ref": "Doc Number",
+        "amount": "Paid In",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("64200.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS8899001122"
+    assert rows[0]["description"] == "RAZORPAY SETTLEMENT CMS8899001122"
+
+

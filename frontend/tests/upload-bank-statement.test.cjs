@@ -40,3 +40,68 @@ for (const password of [" leading", "trailing ", " both ", " ", "   ", "ordinary
     assert.equal(requests[0].body.get("password"), password === undefined || password === "" ? null : password);
   });
 }
+
+test("upload includes column_mappings when passed as object", async () => {
+  const exports = {};
+  const requests = [];
+  vm.runInNewContext(compiled, {
+    exports,
+    process: { env: {} },
+    window: {},
+    FormData,
+    fetch: async (url, options) => {
+      requests.push({ url, ...options });
+      return Response.json({ data: { inserted_count: 1 } });
+    },
+  });
+
+  const file = new File(["colA,colB\n1,2"], "custom.csv", { type: "text/csv" });
+  const mappings = { date: "colA", amount: "colB", narration: "colA" };
+  const result = await exports.uploadBankStatement(file, "test-batch", undefined, mappings);
+
+  assert.equal(result.inserted_count, 1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].body.get("column_mappings"), JSON.stringify(mappings));
+});
+
+test("upload includes column_mappings when passed as string", async () => {
+  const exports = {};
+  const requests = [];
+  vm.runInNewContext(compiled, {
+    exports,
+    process: { env: {} },
+    window: {},
+    FormData,
+    fetch: async (url, options) => {
+      requests.push({ url, ...options });
+      return Response.json({ data: { inserted_count: 1 } });
+    },
+  });
+
+  const file = new File(["colA,colB\n1,2"], "custom.csv", { type: "text/csv" });
+  const rawString = '{"date":"Value Date","amount":"Deposit"}';
+  await exports.uploadBankStatement(file, "test-batch", undefined, rawString);
+
+  assert.equal(requests[0].body.get("column_mappings"), rawString);
+});
+
+test("upload omits column_mappings when not provided", async () => {
+  const exports = {};
+  const requests = [];
+  vm.runInNewContext(compiled, {
+    exports,
+    process: { env: {} },
+    window: {},
+    FormData,
+    fetch: async (url, options) => {
+      requests.push({ url, ...options });
+      return Response.json({ data: { inserted_count: 1 } });
+    },
+  });
+
+  const file = new File(["colA,colB\n1,2"], "custom.csv", { type: "text/csv" });
+  await exports.uploadBankStatement(file, "test-batch");
+
+  assert.equal(requests[0].body.get("column_mappings"), null);
+});
+

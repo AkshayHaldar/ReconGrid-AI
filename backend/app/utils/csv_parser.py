@@ -239,7 +239,11 @@ class BankCsvParser:
         return mapping
 
     @classmethod
-    def _find_header_and_data_lines(cls, lines: list[str]) -> tuple[list[str], list[str]]:
+    def _find_header_and_data_lines(
+        cls,
+        lines: list[str],
+        custom_mappings: dict[str, str] | None = None,
+    ) -> tuple[list[str], list[str]]:
         """Scans lines to detect and skip preamble metadata, returning (header_row, data_lines)."""
         best_header_idx = -1
         best_header_fields: list[str] = []
@@ -262,6 +266,29 @@ class BankCsvParser:
                     "date" in mapping
                     and ("deposit" in mapping or "withdrawal" in mapping or "amount" in mapping or "narration" in mapping)
                 )
+
+                if custom_mappings:
+                    clean_fields_set = {f.lstrip("﻿").strip().lower() for f in fields if f}
+                    custom_matches = sum(
+                        1
+                        for col in custom_mappings.values()
+                        if col and col.lstrip("﻿").strip().lower() in clean_fields_set
+                    )
+                    if custom_matches > 0:
+                        score += custom_matches * 5
+                        date_target = custom_mappings.get("date", "").strip().lower()
+                        amount_target = (
+                            custom_mappings.get("amount", "")
+                            or custom_mappings.get("deposit", "")
+                            or custom_mappings.get("withdrawal", "")
+                        ).strip().lower()
+                        if (
+                            (date_target and date_target in clean_fields_set)
+                            or (amount_target and amount_target in clean_fields_set)
+                            or custom_matches >= 2
+                        ):
+                            has_essential = True
+
                 if has_essential and score > best_score:
                     best_score = score
                     best_header_idx = idx
@@ -280,13 +307,14 @@ class BankCsvParser:
     def parse_csv_stream(
         cls,
         text_stream: Iterator[str],
+        custom_mappings: dict[str, str] | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Parses CSV text stream row by row yielding canonical records with robust error handling."""
         raw_lines = [l.lstrip("﻿") if idx == 0 else l for idx, l in enumerate(text_stream)]
         if not raw_lines:
             return
 
-        header_fields, table_lines = cls._find_header_and_data_lines(raw_lines)
+        header_fields, table_lines = cls._find_header_and_data_lines(raw_lines, custom_mappings=custom_mappings)
         if not table_lines:
             return
 
@@ -298,6 +326,49 @@ class BankCsvParser:
             return
 
         header_map = cls.detect_headers(list(reader.fieldnames))
+
+        if custom_mappings:
+            alias_map = {
+                "description": "narration",
+                "desc": "narration",
+                "particulars": "narration",
+                "utr": "ref",
+                "reference": "ref",
+                "chq_no": "ref",
+                "ref_no": "ref",
+                "credit": "deposit",
+                "debit": "withdrawal",
+            }
+            normalized_custom: dict[str, str] = {}
+            for k, v in custom_mappings.items():
+                if not k or not v:
+                    continue
+                canon_k = alias_map.get(k.strip().lower(), k.strip().lower())
+                normalized_custom[canon_k] = str(v).strip()
+
+            fieldnames_map = {
+                fn.lstrip("﻿").strip().lower(): fn
+                for fn in reader.fieldnames
+                if fn
+            }
+
+            for canon_key, mapped_col_name in normalized_custom.items():
+                clean_target = mapped_col_name.lstrip("﻿").strip()
+                matched_fn = None
+                if mapped_col_name in reader.fieldnames:
+                    matched_fn = mapped_col_name
+                elif clean_target.lower() in fieldnames_map:
+                    matched_fn = fieldnames_map[clean_target.lower()]
+
+                if matched_fn:
+                    header_map[canon_key] = matched_fn
+
+            # If user explicitly mapped 'amount', clear auto-detected deposit/withdrawal unless explicitly mapped
+            if "amount" in normalized_custom:
+                if "deposit" not in normalized_custom:
+                    header_map.pop("deposit", None)
+                if "withdrawal" not in normalized_custom:
+                    header_map.pop("withdrawal", None)
 
         for row_idx, row in enumerate(reader, start=1):
             if not any(v and str(v).strip() for v in row.values() if v is not None):

@@ -32,6 +32,7 @@ class IngestionService:
         file: UploadFile,
         batch_id: str = "default",
         password: str | None = None,
+        column_mappings: str | dict | None = None,
     ) -> BankUploadResponse:
         """Parses bank statement (CSV or PDF), records transactions, and runs reconciliation."""
         filename = file.filename or "statement.csv"
@@ -113,8 +114,21 @@ class IngestionService:
             except Exception:
                 text_data = contents.decode("latin-1", errors="replace")
 
+            parsed_mappings: dict[str, str] | None = None
+            if column_mappings:
+                if isinstance(column_mappings, str):
+                    try:
+                        import json
+                        loaded = json.loads(column_mappings)
+                        if isinstance(loaded, dict):
+                            parsed_mappings = {str(k).strip(): str(v).strip() for k, v in loaded.items() if v}
+                    except Exception as ex:
+                        logger.warning("invalid_column_mappings_json", error=str(ex))
+                elif isinstance(column_mappings, dict):
+                    parsed_mappings = {str(k).strip(): str(v).strip() for k, v in column_mappings.items() if v}
+
             lines = text_data.splitlines()
-            parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines)))
+            parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines), custom_mappings=parsed_mappings))
 
         if not parsed_rows:
             raise HTTPException(
@@ -183,5 +197,10 @@ class IngestionService:
         )
 
     # Maintain backward compatibility for any direct call
-    async def ingest_csv(self, file: UploadFile, batch_id: str = "default") -> BankUploadResponse:
-        return await self.ingest_statement(file, batch_id=batch_id)
+    async def ingest_csv(
+        self,
+        file: UploadFile,
+        batch_id: str = "default",
+        column_mappings: str | dict | None = None,
+    ) -> BankUploadResponse:
+        return await self.ingest_statement(file, batch_id=batch_id, column_mappings=column_mappings)

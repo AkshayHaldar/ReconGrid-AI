@@ -19,11 +19,14 @@ async def upload_bank_statement(
     file: UploadFile = File(...),
     batch_id: str = Form(default="default"),
     password: str | None = Form(default=None),
+    column_mappings: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Uploads and parses a bank statement (CSV or password-protected PDF)."""
     service = IngestionService(db)
-    result = await service.ingest_statement(file, batch_id=batch_id, password=password)
+    result = await service.ingest_statement(
+        file, batch_id=batch_id, password=password, column_mappings=column_mappings
+    )
     return ApiResponse.ok(result)
 
 
