@@ -14,8 +14,10 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.services.tally_export import (
     CLEARING_LEDGER,
+    CUSTOMER_REFUNDS_LEDGER,
     GATEWAY_CHARGES_LEDGER,
     INPUT_GST_LEDGER,
+    TDS_RECEIVABLE_LEDGER,
     build_tally_xml,
 )
 
@@ -136,6 +138,99 @@ def test_special_characters_are_escaped():
     assert ET.fromstring(build_tally_xml([log]).xml).findtext(".//VOUCHERNUMBER") == "setl_a&b<c>"
 
 
+def test_tds_deduction_adds_receivable_debit():
+    log = make_log(bank=Decimal("48600.00"))
+    log.diagnostic_type = "TDS_194O_DEDUCTION"
+    entries = amounts(ET.fromstring(build_tally_xml([log]).xml).find(".//VOUCHER"))
+    assert (TDS_RECEIVABLE_LEDGER, Decimal("-500.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+
+
+def test_refund_adjustment_adds_suspense_debit_only_when_netted():
+    log = make_log(bank=Decimal("47100.00"))
+    log.rzp_settlement.raw_payload = {"refund_total": "2000.00"}
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    entries = amounts(ET.fromstring(build_tally_xml([log]).xml).find(".//VOUCHER"))
+    assert (CUSTOMER_REFUNDS_LEDGER, Decimal("-2000.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+
+    log.diagnostic_type = "FEE_DEDUCTION"
+    assert build_tally_xml([log]).skipped == [log.rzp_settlement.settlement_id]
+
+
+def test_compound_tds_and_refund_settlement_balances():
+    log = make_log(bank=Decimal("46600.00"))
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    log.diagnostic_note = "Refund clawback + 1% TDS + gateway fee"
+    log.rzp_settlement.raw_payload = {"refund_total": "2000.00"}
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "Bank Account",
+        GATEWAY_CHARGES_LEDGER,
+        INPUT_GST_LEDGER,
+        TDS_RECEIVABLE_LEDGER,
+        CUSTOMER_REFUNDS_LEDGER,
+        CLEARING_LEDGER,
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("diagnostic_type", ["EXACT_MATCH", "FEE_DEDUCTION"])
+def test_unrelated_tds_note_does_not_add_receivable_debit(diagnostic_type):
+    log = make_log()
+    log.diagnostic_type = diagnostic_type
+    log.diagnostic_note = "UTR TDS-REF-123; no tax deduction in this settlement"
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert TDS_RECEIVABLE_LEDGER not in [name for name, _, _ in entries]
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("refund_total", ["0", "-100.00"])
+def test_nonpositive_refund_total_never_creates_inverted_debit(refund_total):
+    log = make_log()
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    log.rzp_settlement.raw_payload = {"refund_total": refund_total}
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert CUSTOMER_REFUNDS_LEDGER not in [name for name, _, _ in entries]
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+@pytest.mark.parametrize("refund_total", ["bad amount", object()])
+def test_malformed_refund_total_cannot_abort_batch_export(refund_total):
+    bad = make_log(setl="setl_bad", bank=Decimal("47100.00"))
+    bad.diagnostic_type = "REFUND_ADJUSTED"
+    bad.rzp_settlement.raw_payload = {"refund_total": refund_total}
+    good = make_log(setl="setl_good")
+    export = build_tally_xml([bad, good])
+    assert export.voucher_count == 1
+    assert export.skipped == ["setl_bad"]
+    assert "setl_good" in export.xml
+
+
+def test_tds_with_estimated_gateway_fees_is_posted_only_when_exactly_balanced():
+    log = make_log(
+        gross=Decimal("100000.00"),
+        bank=Decimal("96640.00"),
+        fee=Decimal("0.00"),
+        tax=Decimal("0.00"),
+    )
+    log.diagnostic_type = "TDS_194O_DEDUCTION"
+    export = build_tally_xml([log])
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert (GATEWAY_CHARGES_LEDGER, Decimal("-2000.00"), "Yes") in entries
+    assert (INPUT_GST_LEDGER, Decimal("-360.00"), "Yes") in entries
+    assert (TDS_RECEIVABLE_LEDGER, Decimal("-1000.00"), "Yes") in entries
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1
+
+    log.bank_transaction.amount = Decimal("96639.99")
+    assert build_tally_xml([log]).skipped == [log.rzp_settlement.settlement_id]
+
+
 def test_custom_ledger_names_are_used_without_changing_voucher_balance():
     export = build_tally_xml(
         [make_log()],
@@ -150,6 +245,32 @@ def test_custom_ledger_names_are_used_without_changing_voucher_balance():
         "Razorpay Processing Fees",
         "Input GST & Credits",
         "Razorpay Clearing <2026>",
+    ]
+    assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
+    assert export.voucher_count == 1 and export.skipped == []
+
+
+def test_compound_deductions_preserve_custom_ledger_names():
+    log = make_log(bank=Decimal("46600.00"))
+    log.diagnostic_type = "REFUND_ADJUSTED"
+    log.diagnostic_note = "Refund clawback + 1% TDS + gateway fee"
+    log.rzp_settlement.raw_payload = {"refund_total": "2000.00"}
+
+    export = build_tally_xml(
+        [log],
+        bank_ledger="HDFC Bank",
+        charges_ledger="Razorpay Fees",
+        gst_ledger="Input GST",
+        clearing_ledger="Razorpay Clearing",
+    )
+    entries = amounts(ET.fromstring(export.xml).find(".//VOUCHER"))
+    assert [name for name, _, _ in entries] == [
+        "HDFC Bank",
+        "Razorpay Fees",
+        "Input GST",
+        TDS_RECEIVABLE_LEDGER,
+        CUSTOMER_REFUNDS_LEDGER,
+        "Razorpay Clearing",
     ]
     assert sum(amount for _, amount, _ in entries) == Decimal("0.00")
     assert export.voucher_count == 1 and export.skipped == []

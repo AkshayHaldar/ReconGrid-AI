@@ -10,15 +10,18 @@ import io
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
+from app.core.config import settings
 from app.models.reconciliation_log import ReconciliationLog
-from app.utils.money import to_decimal
+from app.utils.money import calculate_standard_fees, to_decimal
 
 BANK_LEDGER = "Bank Account"
 GATEWAY_CHARGES_LEDGER = "Payment Gateway Charges"
 INPUT_GST_LEDGER = "Input GST (18%)"
 CLEARING_LEDGER = "Razorpay Clearing Account"
+TDS_RECEIVABLE_LEDGER = "TDS Receivable (Sec 194-O)"
+CUSTOMER_REFUNDS_LEDGER = "Customer Refunds Suspense"
 
 ZERO = Decimal("0.00")
 
@@ -64,11 +67,37 @@ def build_voucher_lines(
     if log.match_status != "MATCHED" or bank is None or rzp is None:
         return None
     gross = to_decimal(rzp.gross_amount) or to_decimal(rzp.amount)
+    bank_amount = to_decimal(bank.amount)
+    fee, tax = to_decimal(rzp.fees), to_decimal(rzp.tax)
+    has_tds = log.diagnostic_type == "TDS_194O_DEDUCTION" or (
+        log.diagnostic_type == "REFUND_ADJUSTED" and "TDS" in (log.diagnostic_note or "").upper()
+    )
+    tds = (gross * settings.TDS_194O_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) if has_tds else ZERO
+    refund = ZERO
+    if log.diagnostic_type == "REFUND_ADJUSTED":
+        try:
+            refund = max(to_decimal((rzp.raw_payload or {}).get("refund_total")), ZERO)
+        except (ValueError, TypeError):
+            # Invalid source data must not abort an otherwise exportable batch.
+            refund = ZERO
+
+    # Diagnostics can match a TDS/refund payout using estimated MDR when the gateway sent
+    # no fee fields. Only book that estimate if it restores the exact voucher balance.
+    if fee + tax == ZERO and (tds > ZERO or refund > ZERO):
+        estimated_fee, estimated_tax, _ = calculate_standard_fees(
+            gross, mdr_rate=settings.DEFAULT_MDR_RATE, gst_rate=settings.GST_RATE
+        )
+        if bank_amount + tds + refund + estimated_fee + estimated_tax == gross:
+            fee, tax = estimated_fee, estimated_tax
+
     debits = [
-        (bank_ledger, to_decimal(bank.amount)),
-        (charges_ledger, to_decimal(rzp.fees)),
-        (gst_ledger, to_decimal(rzp.tax)),
+        (bank_ledger, bank_amount),
+        (charges_ledger, fee),
+        (gst_ledger, tax),
+        (TDS_RECEIVABLE_LEDGER, tds),
+        (CUSTOMER_REFUNDS_LEDGER, refund),
     ]
+
     return [(name, amt) for name, amt in debits if amt != ZERO], (clearing_ledger, gross)
 
 
