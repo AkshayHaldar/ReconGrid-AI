@@ -10,57 +10,91 @@ export interface ColumnMappings {
   withdrawal?: string;
 }
 
+export interface CsvColumn {
+  index: number;
+  name: string;        // original header label from CSV (e.g. "Amount")
+  key: string;         // unique index-based identifier (e.g. "0", "1", "2")
+  label: string;       // display label (e.g. "Amount (Col 3)" if duplicate, or "Amount")
+}
+
 export interface DetectedCsvInfo {
-  headers: string[];
+  headers: string[];   // labels for display and backward compatibility
+  columns: CsvColumn[]; // column descriptors with index-based identities
   dataRows: Record<string, string>[];
   rawRows: string[][];
   headerIndex: number;
 }
 
 /**
- * Lightweight RFC4180-compliant CSV line parser.
- * Handles quoted fields, embedded commas, and escaped quotes without external dependencies.
+ * Robust RFC4180-compliant CSV record parser.
+ * Correctly parses multi-line quoted fields with embedded newlines,
+ * commas inside quotes, escaped quotes (""), and CRLF/LF line endings.
  */
-export function parseCsvLines(text: string, maxLines: number = 50): string[][] {
-  const rows: string[][] = [];
-  const lines = text.split(/\r?\n/);
+export function parseCsvLines(text: string, maxRecords: number = 60): string[][] {
+  const records: string[][] = [];
+  const cleanText = text.replace(/^\uFEFF/, "");
+  if (!cleanText.trim()) return [];
 
-  for (const line of lines) {
-    if (rows.length >= maxLines) break;
-    const cleanLine = line.replace(/^\uFEFF/, "").trim();
-    if (!cleanLine) continue;
+  const len = cleanText.length;
+  let currentRecord: string[] = [];
+  let currentField = "";
+  let inQuotes = false;
+  let i = 0;
 
-    const fields: string[] = [];
-    let current = "";
-    let inQuotes = false;
+  while (i < len && records.length < maxRecords) {
+    const char = cleanText[i];
 
-    for (let i = 0; i < cleanLine.length; i++) {
-      const char = cleanLine[i];
-      if (char === '"') {
-        if (inQuotes && cleanLine[i + 1] === '"') {
-          current += '"';
-          i++; // skip escaped quote
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (char === "," && !inQuotes) {
-        fields.push(current.trim());
-        current = "";
+    if (char === '"') {
+      if (inQuotes && i + 1 < len && cleanText[i + 1] === '"') {
+        currentField += '"';
+        i += 2;
+        continue;
       } else {
-        current += char;
+        inQuotes = !inQuotes;
+        i++;
+        continue;
       }
     }
-    fields.push(current.trim());
-    if (fields.length > 0 && fields.some((f) => f.length > 0)) {
-      rows.push(fields);
+
+    if (char === "," && !inQuotes) {
+      currentRecord.push(currentField.trim());
+      currentField = "";
+      i++;
+      continue;
+    }
+
+    if ((char === "\r" || char === "\n") && !inQuotes) {
+      if (char === "\r" && i + 1 < len && cleanText[i + 1] === "\n") {
+        i++;
+      }
+      currentRecord.push(currentField.trim());
+      currentField = "";
+      if (currentRecord.some((f) => f.length > 0)) {
+        records.push(currentRecord);
+      }
+      currentRecord = [];
+      i++;
+      continue;
+    }
+
+    currentField += char;
+    i++;
+  }
+
+  // Handle trailing record
+  if (currentField.length > 0 || currentRecord.length > 0) {
+    currentRecord.push(currentField.trim());
+    if (currentRecord.some((f) => f.length > 0) && records.length < maxRecords) {
+      records.push(currentRecord);
     }
   }
 
-  return rows;
+  return records;
 }
 
 /**
- * Scans initial rows to detect table header (skipping preamble) and extracts sample rows.
+ * Scans initial rows (up to 30 lines, aligning with backend limit)
+ * to detect table header (skipping preamble) and extracts sample rows.
  */
 export function detectCsvHeaderAndRows(rows: string[][]): DetectedCsvInfo | null {
   if (!rows || rows.length === 0) return null;
@@ -75,7 +109,8 @@ export function detectCsvHeaderAndRows(rows: string[][]): DetectedCsvInfo | null
   let bestIdx = -1;
   let bestScore = -1;
 
-  for (let i = 0; i < Math.min(rows.length, 25); i++) {
+  // Scan up to line 30 to align with backend preamble scanning limit
+  for (let i = 0; i < Math.min(rows.length, 30); i++) {
     const row = rows[i];
     if (row.length < 2) continue;
     let score = 0;
@@ -98,7 +133,7 @@ export function detectCsvHeaderAndRows(rows: string[][]): DetectedCsvInfo | null
 
   // Fallback to first row with >= 2 columns if no keywords found
   if (bestIdx === -1) {
-    for (let i = 0; i < rows.length; i++) {
+    for (let i = 0; i < Math.min(rows.length, 30); i++) {
       if (rows[i].filter((c) => c.trim().length > 0).length >= 2) {
         bestIdx = i;
         break;
@@ -109,31 +144,49 @@ export function detectCsvHeaderAndRows(rows: string[][]): DetectedCsvInfo | null
   if (bestIdx === -1) return null;
 
   const rawHeaders = rows[bestIdx];
-  const seen: Record<string, number> = {};
-  const headers = rawHeaders.map((h, idx) => {
+
+  // Count occurrences of each name to detect duplicates
+  const nameCounts: Record<string, number> = {};
+  rawHeaders.forEach((h) => {
+    const norm = (h.trim() || "Column").toLowerCase();
+    nameCounts[norm] = (nameCounts[norm] || 0) + 1;
+  });
+
+  const seenCounts: Record<string, number> = {};
+  const columns: CsvColumn[] = rawHeaders.map((h, idx) => {
     let name = h.trim();
     if (!name) name = `Column_${idx + 1}`;
-    if (seen[name]) {
-      seen[name]++;
-      return `${name}_${seen[name]}`;
-    }
-    seen[name] = 1;
-    return name;
+    const norm = name.toLowerCase();
+    seenCounts[norm] = (seenCounts[norm] || 0) + 1;
+    const isDuplicate = (nameCounts[norm] || 0) > 1;
+    const label = isDuplicate ? `${name} (Col ${idx + 1})` : name;
+    return {
+      index: idx,
+      name,
+      key: String(idx),
+      label,
+    };
   });
+
+  const headers = columns.map((c) => c.label);
 
   const rawData = rows.slice(bestIdx + 1);
   const dataRows: Record<string, string>[] = [];
   for (const r of rawData) {
     if (!r.some((cell) => cell.trim().length > 0)) continue;
     const rowObj: Record<string, string> = {};
-    headers.forEach((h, colIdx) => {
-      rowObj[h] = r[colIdx] !== undefined ? r[colIdx].trim() : "";
+    columns.forEach((col) => {
+      const val = r[col.index] !== undefined ? r[col.index].trim() : "";
+      rowObj[col.key] = val;    // accessible by unique key "0", "1", "2"
+      rowObj[col.name] = val;   // accessible by name
+      rowObj[col.label] = val;  // accessible by label
     });
     dataRows.push(rowObj);
   }
 
   return {
     headers,
+    columns,
     dataRows,
     rawRows: rows,
     headerIndex: bestIdx,
@@ -144,8 +197,10 @@ export function detectCsvHeaderAndRows(rows: string[][]): DetectedCsvInfo | null
  * Returns true if CSV matches standard banking schemas (HDFC, ICICI, SBI, standard generic)
  * with high confidence, allowing automatic bypass of the mapping dialog.
  */
-export function isStandardBankStatement(headers: string[]): boolean {
-  const lowerHeaders = headers.map((h) => h.toLowerCase().trim());
+export function isStandardBankStatement(headersOrCols: (string | CsvColumn)[]): boolean {
+  const lowerHeaders = headersOrCols.map((h) =>
+    (typeof h === "string" ? h : h.name).toLowerCase().trim()
+  );
 
   // HDFC pattern: Date, Chq/Ref No., Narration, Deposit Amt., Withdrawal Amt.
   const isHdfc =
@@ -179,10 +234,11 @@ export function isStandardBankStatement(headers: string[]): boolean {
 
 /**
  * Deterministic hash of CSV headers for localStorage caching.
+ * Sorts column names to remain stable across column order while preserving duplicate headers.
  */
-export function computeHeaderSignature(headers: string[]): string {
-  const normalized = headers
-    .map((h) => h.trim().toLowerCase())
+export function computeHeaderSignature(headersOrCols: (string | CsvColumn)[]): string {
+  const normalized = headersOrCols
+    .map((h) => (typeof h === "string" ? h : h.name).trim().toLowerCase())
     .filter(Boolean)
     .sort()
     .join("|");
@@ -197,51 +253,78 @@ export function computeHeaderSignature(headers: string[]): string {
 
 /**
  * Best-effort heuristic to guess canonical column roles from header names.
+ * Uses word-boundary matching for short tokens (cr, dr, ref, utr) so that
+ * headers like "Description" are NEVER erroneously matched to credit/amount.
  */
-export function guessColumnMappings(headers: string[]): ColumnMappings {
-  const findMatch = (candidates: string[]): string => {
-    // 1. exact match
+export function guessColumnMappings(headersOrCols: (string | CsvColumn)[]): ColumnMappings {
+  const isStringArray = headersOrCols.length > 0 && typeof headersOrCols[0] === "string";
+  const columns: CsvColumn[] = headersOrCols.map((item, idx) => {
+    if (typeof item === "string") {
+      return { index: idx, name: item, key: String(idx), label: item };
+    }
+    return item;
+  });
+
+  const findMatch = (candidates: string[]): CsvColumn | undefined => {
+    // 1. Exact match (case-insensitive)
     for (const c of candidates) {
-      const match = headers.find((h) => h.toLowerCase().trim() === c.toLowerCase());
+      const match = columns.find((col) => col.name.trim().toLowerCase() === c.toLowerCase());
       if (match) return match;
     }
-    // 2. substring match
+    // 2. Token / word boundary match (prevents "cr" matching inside "Description")
     for (const c of candidates) {
-      const match = headers.find((h) => h.toLowerCase().includes(c.toLowerCase()));
+      const escaped = c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`(^|[^a-zA-Z0-9])${escaped}([^a-zA-Z0-9]|$)`, "i");
+      const match = columns.find((col) => regex.test(col.name));
       if (match) return match;
     }
-    return "";
+    // 3. Substring match only for longer candidates (length > 3 and not short tokens)
+    for (const c of candidates) {
+      if (c.length > 3 && !["ref", "utr", "chq", "cr", "dr"].includes(c.toLowerCase())) {
+        const match = columns.find((col) => col.name.toLowerCase().includes(c.toLowerCase()));
+        if (match) return match;
+      }
+    }
+    return undefined;
   };
 
-  const date = findMatch([
+  const dateCol = findMatch([
     "date", "txn date", "transaction date", "tran date", "value date", "booking date", "posting date"
   ]);
 
-  const narration = findMatch([
+  const narrationCol = findMatch([
     "narration", "description", "transaction remarks", "particulars", "remarks", "details", "narrative", "memo"
   ]);
 
-  const deposit = findMatch([
-    "deposit amt.", "deposit amt", "deposit amount", "deposit", "credit", "cr", "paid in", "cr amount"
+  const depositCol = findMatch([
+    "deposit amt.", "deposit amt", "deposit amount", "deposit", "credit", "cr amount", "paid in", "cr"
   ]);
-  const withdrawal = findMatch([
-    "withdrawal amt.", "withdrawal amt", "withdrawal amount", "withdrawal", "debit", "dr", "paid out", "dr amount"
+
+  const withdrawalCol = findMatch([
+    "withdrawal amt.", "withdrawal amt", "withdrawal amount", "withdrawal", "debit", "dr amount", "paid out", "dr"
   ]);
-  const genericAmount = findMatch([
+
+  const genericAmountCol = findMatch([
     "amount", "net amount", "txn amount", "transaction amount", "total amount"
   ]);
 
-  const amount = deposit || genericAmount || withdrawal || (headers.length > 2 ? headers[2] : headers[0] || "");
+  const amountCol = depositCol || genericAmountCol || withdrawalCol || (columns.length > 2 ? columns[2] : columns[0]);
 
-  const ref = findMatch([
-    "chq/ref no.", "ref no", "reference no", "transaction reference number", "utr", "instrument id", "cheque no", "chqno", "ref", "rrn", "txn ref no"
+  const refCol = findMatch([
+    "chq/ref no.", "ref no", "reference no", "transaction reference number", "utr", "instrument id", "instrument no", "instrument", "cheque no", "chqno", "ref", "rrn", "txn ref no"
   ]);
 
+  const getKeyOrName = (col: CsvColumn | undefined, fallback: CsvColumn | undefined): string => {
+    const chosen = col || fallback;
+    if (!chosen) return "";
+    return isStringArray ? chosen.name : chosen.key;
+  };
+
   return {
-    date: date || (headers.length > 0 ? headers[0] : ""),
-    narration: narration || (headers.length > 1 ? headers[1] : ""),
-    amount: amount || "",
-    ref: ref || "",
-    withdrawal: withdrawal || "",
+    date: getKeyOrName(dateCol, columns[0]),
+    narration: getKeyOrName(narrationCol, columns[1]),
+    amount: amountCol ? (isStringArray ? amountCol.name : amountCol.key) : "",
+    ref: refCol ? (isStringArray ? refCol.name : refCol.key) : "",
+    withdrawal: withdrawalCol ? (isStringArray ? withdrawalCol.name : withdrawalCol.key) : "",
   };
 }

@@ -141,3 +141,103 @@ test("computeHeaderSignature generates deterministic key", () => {
   assert.equal(sig1, sig2);
   assert.match(sig1, /^recongrid_csv_mapping_[a-f0-9]+$/);
 });
+
+test("parseCsvLines preserves embedded newlines in quoted cells across records", () => {
+  const { parseCsvLines } = getExports();
+  const csv = [
+    'Date,Narration,Amount',
+    '24-08-2026,"Invoice 101\nPayment for consultancy",50000.00',
+    '25-08-2026,"Vendor disbursement\nRef: PO-9981",12500.00',
+  ].join("\n");
+
+  const rows = parseCsvLines(csv);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1][1], "Invoice 101\nPayment for consultancy");
+  assert.equal(rows[2][1], "Vendor disbursement\nRef: PO-9981");
+});
+
+test("detectCsvHeaderAndRows disambiguates duplicate headers with column labels and index keys", () => {
+  const { parseCsvLines, detectCsvHeaderAndRows } = getExports();
+  const csv = [
+    "Date,Narration,Amount,Amount,Balance",
+    "24-08-2026,Settlement Alpha,10000.00,0.00,100000.00",
+    "25-08-2026,Fee Beta,0.00,500.00,99500.00",
+  ].join("\n");
+
+  const rows = parseCsvLines(csv);
+  const detected = detectCsvHeaderAndRows(rows);
+  assert.notEqual(detected, null);
+  assert.equal(detected.columns.length, 5);
+
+  // First Amount column
+  assert.equal(detected.columns[2].name, "Amount");
+  assert.equal(detected.columns[2].key, "2");
+  assert.equal(detected.columns[2].label, "Amount (Col 3)");
+
+  // Second Amount column
+  assert.equal(detected.columns[3].name, "Amount");
+  assert.equal(detected.columns[3].key, "3");
+  assert.equal(detected.columns[3].label, "Amount (Col 4)");
+
+  // Data row access by key
+  assert.equal(detected.dataRows[0]["2"], "10000.00");
+  assert.equal(detected.dataRows[0]["3"], "0.00");
+  assert.equal(detected.dataRows[1]["2"], "0.00");
+  assert.equal(detected.dataRows[1]["3"], "500.00");
+});
+
+test("guessColumnMappings uses word boundary so Description never matches credit/amount", () => {
+  const { guessColumnMappings } = getExports();
+  const headers = ["Txn Date", "Description", "Ref Number", "Amount", "Balance"];
+
+  // 1. String array input (backward compatibility)
+  const guessedStr = guessColumnMappings(headers);
+  assert.equal(guessedStr.narration, "Description");
+  assert.notEqual(guessedStr.amount, "Description");
+  assert.equal(guessedStr.amount, "Amount");
+
+  // 2. CsvColumn descriptor input
+  const columns = headers.map((h, idx) => ({
+    index: idx,
+    name: h,
+    key: String(idx),
+    label: h,
+  }));
+  const guessedCol = guessColumnMappings(columns);
+  assert.equal(guessedCol.narration, "1"); // index of Description
+  assert.equal(guessedCol.amount, "3");    // index of Amount (not 1)
+});
+
+test("detectCsvHeaderAndRows scans up to line 30 for table header", () => {
+  const { parseCsvLines, detectCsvHeaderAndRows } = getExports();
+  // 29 preamble lines, header on line 30 (index 29)
+  const preamble = Array.from({ length: 29 }, (_, i) => `Metadata Line ${i + 1}`);
+  const lines = [
+    ...preamble,
+    "Date,Description,Deposit,Withdrawal,Balance",
+    "24-08-2026,Payout CMS123,50000.00,0.00,250000.00",
+  ];
+  const csv = lines.join("\n");
+  const rows = parseCsvLines(csv);
+  const detected = detectCsvHeaderAndRows(rows);
+
+  assert.notEqual(detected, null);
+  assert.equal(detected.headerIndex, 29);
+  assert.equal(detected.columns[0].name, "Date");
+  assert.equal(detected.columns[2].name, "Deposit");
+  assert.equal(detected.dataRows.length, 1);
+  assert.equal(detected.dataRows[0]["Date"], "24-08-2026");
+});
+
+test("guessColumnMappings detects both deposit and withdrawal for dual-column statements", () => {
+  const { guessColumnMappings } = getExports();
+  const headers = ["Value Date", "Description", "Instrument No", "Credit", "Debit", "Balance"];
+  const guessed = guessColumnMappings(headers);
+
+  assert.equal(guessed.date, "Value Date");
+  assert.equal(guessed.narration, "Description");
+  assert.equal(guessed.ref, "Instrument No");
+  assert.equal(guessed.amount, "Credit");
+  assert.equal(guessed.withdrawal, "Debit");
+});
+

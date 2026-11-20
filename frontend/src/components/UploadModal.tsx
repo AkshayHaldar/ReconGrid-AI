@@ -27,6 +27,7 @@ import {
   computeHeaderSignature,
   guessColumnMappings,
   ColumnMappings,
+  CsvColumn,
   DetectedCsvInfo,
 } from "@/lib/csv-mapper";
 
@@ -98,7 +99,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
   // CSV column mapping state
   const [isCsv, setIsCsv] = useState(false);
+  const [isDetectingCsv, setIsDetectingCsv] = useState(false);
+  const fileTokenRef = useRef(0);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvColumns, setCsvColumns] = useState<CsvColumn[]>([]);
   const [csvSampleRows, setCsvSampleRows] = useState<Record<string, string>[]>([]);
   const [headerHash, setHeaderHash] = useState<string>("");
   const [isStandardCsv, setIsStandardCsv] = useState(false);
@@ -129,13 +133,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   }, [isOpen]);
 
   const resetFileState = () => {
+    fileTokenRef.current += 1;
     setFile(null);
     setPassword("");
     setError(null);
     setValidationErrors([]);
     setIsPasswordError(false);
     setIsCsv(false);
+    setIsDetectingCsv(false);
     setCsvHeaders([]);
+    setCsvColumns([]);
     setCsvSampleRows([]);
     setHeaderHash("");
     setIsStandardCsv(false);
@@ -149,11 +156,26 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   };
 
   const processSelectedFile = async (selected: File) => {
+    const currentToken = ++fileTokenRef.current;
+
+    // Reset previous file state immediately to avoid stale mappings if file is unreadable (Finding A)
     setFile(selected);
     setError(null);
     setValidationErrors([]);
     setIsPasswordError(false);
     setSavedMappingLoaded(false);
+    setIsCsv(false);
+    setCsvHeaders([]);
+    setCsvColumns([]);
+    setCsvSampleRows([]);
+    setHeaderHash("");
+    setIsStandardCsv(false);
+    setShowMapper(false);
+    setSelectedDateCol("");
+    setSelectedNarrationCol("");
+    setSelectedAmountCol("");
+    setSelectedRefCol("");
+    setSelectedWithdrawalCol("");
 
     const isPdfFile = selected.name.toLowerCase().endsWith(".pdf");
     const isCsvFile =
@@ -164,29 +186,34 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setIsCsv(isCsvFile);
 
     if (isPdfFile) {
-      setIsStandardCsv(false);
-      setShowMapper(false);
-      setCsvHeaders([]);
-      setCsvSampleRows([]);
+      setIsDetectingCsv(false);
       setTimeout(() => passwordInputRef.current?.focus(), 100);
       return;
     }
 
     if (isCsvFile) {
+      setIsDetectingCsv(true); // Finding C: block upload while detection is pending
       try {
-        const slice = selected.slice(0, 65536);
+        const slice = selected.slice(0, 131072); // 128KB slice
         const text = await slice.text();
-        const parsedRows = parseCsvLines(text, 30);
+
+        // Finding B: Check race condition before applying state
+        if (currentToken !== fileTokenRef.current) return;
+
+        const parsedRows = parseCsvLines(text, 60);
         const detected: DetectedCsvInfo | null = detectCsvHeaderAndRows(parsedRows);
 
-        if (detected && detected.headers.length > 0) {
+        if (currentToken !== fileTokenRef.current) return;
+
+        if (detected && detected.columns.length > 0) {
           setCsvHeaders(detected.headers);
+          setCsvColumns(detected.columns);
           setCsvSampleRows(detected.dataRows.slice(0, 5));
 
-          const signature = computeHeaderSignature(detected.headers);
+          const signature = computeHeaderSignature(detected.columns);
           setHeaderHash(signature);
 
-          const isStandard = isStandardBankStatement(detected.headers);
+          const isStandard = isStandardBankStatement(detected.columns);
           setIsStandardCsv(isStandard);
 
           // Check localStorage cache
@@ -200,19 +227,30 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             // Ignore localStorage retrieval issues
           }
 
+          if (currentToken !== fileTokenRef.current) return;
+
+          const resolveColKey = (val: string | undefined): string => {
+            if (!val || val === "__none__") return "";
+            const byKey = detected.columns.find((c) => c.key === val);
+            if (byKey) return byKey.key;
+            const byName = detected.columns.find((c) => c.name.toLowerCase() === val.toLowerCase());
+            if (byName) return byName.key;
+            return "";
+          };
+
           if (cached) {
-            setSelectedDateCol(cached.date || "");
-            setSelectedNarrationCol(cached.narration || "");
-            setSelectedAmountCol(cached.amount || "");
-            setSelectedRefCol(cached.ref || "");
-            setSelectedWithdrawalCol(cached.withdrawal || "");
+            setSelectedDateCol(resolveColKey(cached.date) || detected.columns[0]?.key || "");
+            setSelectedNarrationCol(resolveColKey(cached.narration) || detected.columns[1]?.key || "");
+            setSelectedAmountCol(resolveColKey(cached.amount) || "");
+            setSelectedRefCol(resolveColKey(cached.ref) || "");
+            setSelectedWithdrawalCol(resolveColKey(cached.withdrawal) || "");
             setSavedMappingLoaded(true);
 
             // If non-standard, show mapper pre-filled
             setShowMapper(!isStandard);
           } else {
-            // Auto-guess initial selections
-            const guessed = guessColumnMappings(detected.headers);
+            // Auto-guess initial selections using CsvColumns
+            const guessed = guessColumnMappings(detected.columns);
             setSelectedDateCol(guessed.date || "");
             setSelectedNarrationCol(guessed.narration || "");
             setSelectedAmountCol(guessed.amount || "");
@@ -220,14 +258,20 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             setSelectedWithdrawalCol(guessed.withdrawal || "");
             setSavedMappingLoaded(false);
 
-            // Non-standard CSV transitions into interactive mapper; standard CSV automatically bypasses
             setShowMapper(!isStandard);
           }
         }
       } catch (err) {
-        // If client-side parse fails, fallback to server upload
-        setShowMapper(false);
+        if (currentToken === fileTokenRef.current) {
+          setShowMapper(false);
+        }
+      } finally {
+        if (currentToken === fileTokenRef.current) {
+          setIsDetectingCsv(false);
+        }
       }
+    } else {
+      setIsDetectingCsv(false);
     }
   };
 
@@ -245,8 +289,8 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   };
 
   const handleResetToAutoDetect = () => {
-    if (csvHeaders.length > 0) {
-      const guessed = guessColumnMappings(csvHeaders);
+    if (csvColumns.length > 0) {
+      const guessed = guessColumnMappings(csvColumns);
       setSelectedDateCol(guessed.date || "");
       setSelectedNarrationCol(guessed.narration || "");
       setSelectedAmountCol(guessed.amount || "");
@@ -421,12 +465,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-400">
-                  <span className="inline-flex items-center gap-1 text-neutral-300">
-                    <Layers className="w-3 h-3 text-neutral-400" />{" "}
-                    {isPdf ? "Multi-Page PDF Engine" : isStandardCsv ? "Standard Bank CSV Parser" : "Custom CSV Mapper"}
-                  </span>
-                  <span>•</span>
-                  <span>Click or drag to replace file</span>
+                  {isDetectingCsv ? (
+                    <span className="inline-flex items-center gap-1.5 text-blue-400 font-mono">
+                      <div className="w-2.5 h-2.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Analyzing statement structure...</span>
+                    </span>
+                  ) : (
+                    <>
+                      <span className="inline-flex items-center gap-1 text-neutral-300">
+                        <Layers className="w-3 h-3 text-neutral-400" />{" "}
+                        {isPdf ? "Multi-Page PDF Engine" : isStandardCsv ? "Standard Bank CSV Parser" : "Custom CSV Mapper"}
+                      </span>
+                      <span>•</span>
+                      <span>Click or drag to replace file</span>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
@@ -492,7 +545,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 </div>
               </div>
 
-              {/* 4 Mapping Dropdowns */}
+              {/* Mapping Dropdowns */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* 1. Date Column */}
                 <div className="space-y-1">
@@ -507,10 +560,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     onChange={(e) => setSelectedDateCol(e.target.value)}
                     className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
                   >
-                    <option value="">-- Select Date Header --</option>
-                    {csvHeaders.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
+                    <option value="">-- Select Date Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
                       </option>
                     ))}
                   </select>
@@ -529,10 +582,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     onChange={(e) => setSelectedNarrationCol(e.target.value)}
                     className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
                   >
-                    <option value="">-- Select Narration Header --</option>
-                    {csvHeaders.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
+                    <option value="">-- Select Narration Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
                       </option>
                     ))}
                   </select>
@@ -551,17 +604,41 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     onChange={(e) => setSelectedAmountCol(e.target.value)}
                     className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
                   >
-                    <option value="">-- Select Amount / Credit Header --</option>
-                    {csvHeaders.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
+                    <option value="">-- Select Amount / Credit Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* 4. Reference / UTR Column */}
+                {/* 4. Withdrawal / Debit Column (Optional) */}
                 <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Withdrawal / Debit Column</span>
+                    {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" ? (
+                      <span className="text-[9px] font-mono text-emerald-400">Mapped</span>
+                    ) : (
+                      <span className="text-[9px] font-mono text-slate-400">Optional</span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedWithdrawalCol}
+                    onChange={(e) => setSelectedWithdrawalCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="__none__">-- (Single generic amount column) --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Reference / UTR Column */}
+                <div className="space-y-1 sm:col-span-2">
                   <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
                     <span>Reference / UTR Column</span>
                     <span className="text-[9px] font-mono text-slate-400">Optional</span>
@@ -572,9 +649,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
                   >
                     <option value="__none__">-- (Auto-extract UTR from narration) --</option>
-                    {csvHeaders.map((h) => (
-                      <option key={h} value={h}>
-                        {h}
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
                       </option>
                     ))}
                   </select>
@@ -601,7 +678,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         <th className="px-2.5 py-1.5 font-medium w-8 text-center">#</th>
                         <th className="px-2.5 py-1.5 font-medium">Date</th>
                         <th className="px-2.5 py-1.5 font-medium">Narration / Description</th>
-                        <th className="px-2.5 py-1.5 font-medium">Amount (₹)</th>
+                        <th className="px-2.5 py-1.5 font-medium">
+                          {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__"
+                            ? "Credit / Deposit (₹)"
+                            : "Amount (₹)"}
+                        </th>
+                        {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" && (
+                          <th className="px-2.5 py-1.5 font-medium text-rose-300">Debit / Withdrawal (₹)</th>
+                        )}
                         <th className="px-2.5 py-1.5 font-medium">Reference / UTR</th>
                       </tr>
                     </thead>
@@ -619,6 +703,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                             <td className="px-2.5 py-1.5 text-emerald-400 font-medium">
                               {r.amount || <span className="text-slate-400 italic">Not mapped</span>}
                             </td>
+                            {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" && (
+                              <td className="px-2.5 py-1.5 text-rose-400 font-medium">
+                                {r.withdrawal || <span className="text-slate-400 italic">—</span>}
+                              </td>
+                            )}
                             <td className="px-2.5 py-1.5 text-slate-300">
                               {r.ref || <span className="text-slate-400 italic">—</span>}
                             </td>
@@ -626,7 +715,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={5} className="px-3 py-3 text-center text-slate-400 italic">
+                          <td colSpan={selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" ? 6 : 5} className="px-3 py-3 text-center text-slate-400 italic">
                             No data rows detected in preview chunk
                           </td>
                         </tr>
@@ -768,6 +857,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             disabled={
               !file ||
               uploading ||
+              isDetectingCsv ||
               (isCsv && showMapper && (!selectedDateCol || !selectedAmountCol || !selectedNarrationCol))
             }
             className="w-full sm:w-auto px-5 py-2 bg-neutral-100 hover:bg-white disabled:opacity-40 text-neutral-900 font-semibold rounded-md shadow-xs transition flex items-center justify-center gap-2 text-center cursor-pointer"
@@ -776,6 +866,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <>
                 <div className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
                 <span>Parsing & Reconciling...</span>
+              </>
+            ) : isDetectingCsv ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
+                <span>Analyzing Statement...</span>
               </>
             ) : (
               <>

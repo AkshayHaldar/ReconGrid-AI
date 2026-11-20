@@ -121,13 +121,13 @@ class IngestionService:
                         import json
                         loaded = json.loads(column_mappings)
                         if isinstance(loaded, dict):
-                            parsed_mappings = {str(k).strip(): str(v).strip() for k, v in loaded.items() if v}
+                            parsed_mappings = {str(k).strip(): str(v).strip() for k, v in loaded.items() if v is not None and str(v).strip() != ""}
                     except Exception as ex:
                         logger.warning("invalid_column_mappings_json", error=str(ex))
                 elif isinstance(column_mappings, dict):
-                    parsed_mappings = {str(k).strip(): str(v).strip() for k, v in column_mappings.items() if v}
+                    parsed_mappings = {str(k).strip(): str(v).strip() for k, v in column_mappings.items() if v is not None and str(v).strip() != ""}
 
-            lines = text_data.splitlines()
+            lines = text_data.splitlines(keepends=True)
             parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines), custom_mappings=parsed_mappings))
 
         if not parsed_rows:
