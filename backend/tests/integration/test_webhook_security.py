@@ -49,7 +49,8 @@ async def test_webhook_valid_signature_and_deduplication():
         assert resp1.status_code == 200
         data1 = resp1.json()
         assert data1["success"] is True
-        assert data1["data"]["action_taken"] == "PROCESSED_AND_RECONCILED"
+        assert data1["data"]["action_taken"] == "RECONCILIATION_QUEUED"
+        assert data1["data"]["status"] == "queued"
 
         # Duplicate delivery with same event_id
         resp2 = await client.post(

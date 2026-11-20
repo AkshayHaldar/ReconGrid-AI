@@ -225,3 +225,15 @@ alembic upgrade head
 # Roll back the most recent migration
 alembic downgrade -1
 ```
+
+### Webhook acknowledgement and background work
+
+`POST /api/v1/webhooks/razorpay` verifies the HMAC and commits a deduplicated event before responding. Settlement events return HTTP 200 with `data.status = "queued"`, the event ID and `action_taken = "RECONCILIATION_QUEUED"` in the existing API envelope. Settlement upsert and reconciliation then run in a FastAPI background task with its own database session; the request session is never passed to the worker. Unsupported events are recorded without scheduling reconciliation.
+
+The stored event status progresses from `QUEUED` to `PROCESSED`. A worker exception rolls back settlement/reconciliation writes, logs `webhook_reconciliation_failed` with the event ID, and records `FAILED`. A redelivery of that same signed event can atomically requeue a failed attempt. Completed or already queued duplicate deliveries are acknowledged without creating another task.
+
+BackgroundTasks runs inside the API process: the event record is durable, but the task queue is not. A process crash can leave a queued event requiring operator recovery; an automatic restart-safe worker/outbox is a separate enhancement. The provider has already received HTTP 200, so do not rely on it automatically retrying a later background failure. No production latency guarantee is implied by local tests.
+
+Default-batch webhook workers acquire a transaction-scoped PostgreSQL advisory lock (key `1380405828`, reserved for this worker) before reading reconciliation inputs. SQLite uses `BEGIN IMMEDIATE` before its reads. This prevents distinct webhook workers from committing an older reconciliation snapshot after a newer one; the lock is released on commit/rollback. Other code paths do not participate in this worker lock. SQLite serializes writers database-wide, so queued work can delay another write there; production latency must be measured with the intended database.
+
+A `settlement.processed` event without a nonempty settlement entity is rejected before an event is recorded, allowing a corrected redelivery. If a provider settlement ID is absent, the fallback uses `setl_` plus a 59-character event-ID digest, keeping the identifier within its 64-character column without truncating common event-ID prefixes.
