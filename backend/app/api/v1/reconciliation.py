@@ -2,6 +2,7 @@
 
 import csv
 import io
+from dataclasses import asdict
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -22,6 +23,7 @@ from app.schemas.reconciliation import (
     ReconciliationStatusResponse,
     ScorecardResponse,
 )
+from app.services.diagnostics import DiagnosticsService
 from app.services.export_service import XLSX_MEDIA_TYPE, build_reconciliation_workbook
 from app.services.tally_export import (
     BANK_LEDGER,
@@ -30,6 +32,7 @@ from app.services.tally_export import (
     INPUT_GST_LEDGER,
     build_tally_xml,
 )
+from app.services.tax_schedule import tax_schedule_csv_rows
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -405,6 +408,48 @@ async def export_tally_xml(
             "Content-Disposition": "attachment; filename=reconciliation_tally_vouchers.xml",
             "X-Skipped-Vouchers": str(len(export.skipped)),
         },
+    )
+
+
+async def _all_active_logs(repo: ReconciliationRepository, batch_id: str, page_size: int = 1000):
+    """Every active log in the batch, fetched page by page so large batches are not truncated."""
+    logs: list = []
+    page = 1
+    while True:
+        chunk, total = await repo.get_active_logs(batch_id=batch_id, page=page, page_size=page_size)
+        logs.extend(chunk)
+        if not chunk or len(logs) >= total:
+            return logs
+        page += 1
+
+
+@router.get("/{batch_id}/tax-schedule")
+async def get_tax_schedule(
+    batch_id: str = "default",
+    intra_state: bool = Query(True, description="Split GST into CGST+SGST (true) or report it as IGST (false)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Section 194-O TDS and GST input tax credit totals for the batch, with TDS deviations."""
+    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
+    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    return ApiResponse.ok(asdict(schedule))
+
+
+@router.get("/{batch_id}/tax-schedule/export")
+async def export_tax_schedule(
+    batch_id: str = "default",
+    intra_state: bool = Query(True, description="Split GST into CGST+SGST (true) or report it as IGST (false)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """CSV of the tax schedule with a CA signature and UDIN attestation block."""
+    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
+    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    output = io.StringIO()
+    csv.writer(output).writerows(tax_schedule_csv_rows(schedule, _csv_text))
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=recongrid_tax_schedule_{batch_id}.csv"},
     )
 
 

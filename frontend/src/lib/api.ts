@@ -1,4 +1,4 @@
-import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus } from "./types";
+import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
 
 /**
  * Resolves the API base URL depending on execution environment:
@@ -75,6 +75,18 @@ export async function fetchStatus(batchId: string = "default"): Promise<Reconcil
   if (!res.ok) throw new Error("Failed to fetch reconciliation status");
   const json: ApiResponse<ReconciliationStatus> = await res.json();
   return json.data;
+}
+
+export async function fetchTaxSchedule(batchId: string = "default", intraState: boolean = true): Promise<TaxSchedule> {
+  const base = getApiBase();
+  const res = await fetch(`${base}/reconciliation/${batchId}/tax-schedule?intra_state=${intraState}`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to fetch tax schedule");
+  const json: ApiResponse<TaxSchedule> = await res.json();
+  return json.data;
+}
+
+export function taxScheduleExportUrl(batchId: string = "default", intraState: boolean = true): string {
+  return `${getApiBase()}/reconciliation/${batchId}/tax-schedule/export?intra_state=${intraState}`;
 }
 
 export async function fetchRecords(

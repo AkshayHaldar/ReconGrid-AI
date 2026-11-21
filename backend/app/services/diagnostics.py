@@ -13,6 +13,7 @@ from typing import NamedTuple
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
+from app.services.tax_schedule import TaxSchedule, build_tax_schedule
 from app.utils.money import calculate_standard_fees, format_inr, is_amount_matching, to_decimal
 
 GST_RATE = settings.GST_RATE  # GST standard for payment gateway processing fees
@@ -28,6 +29,11 @@ class DiagnosticResult(NamedTuple):
 
 
 class DiagnosticsService:
+    @classmethod
+    def calculate_batch_tax_schedule(cls, batch_id, logs, *, intra_state: bool = True) -> TaxSchedule:
+        """Section 194-O TDS and GST input-credit totals across every settlement in `logs`."""
+        return build_tax_schedule(batch_id, logs, intra_state=intra_state)
+
     @classmethod
     def evaluate_delta(
         cls,

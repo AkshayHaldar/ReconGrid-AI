@@ -19,9 +19,11 @@ import {
 import { DiagnosticType, ReconciliationRecordItem, ReconciliationStatus } from "@/lib/types";
 import { formatINR } from "@/lib/formatters";
 import { FeeWaterfallBar } from "./FeeWaterfallBar";
+import { TaxScheduleCard } from "./TaxScheduleCard";
 
 interface SummaryCardsProps {
   status: ReconciliationStatus | null;
+  batchId?: string;
   records?: ReconciliationRecordItem[];
   activeDiagnostic?: DiagnosticType | "ALL" | string;
   activeTab?: string;
@@ -33,6 +35,7 @@ interface SummaryCardsProps {
 
 export const SummaryCards: React.FC<SummaryCardsProps> = ({
   status,
+  batchId = "default",
   records = [],
   activeDiagnostic = "ALL",
   activeTab = "ALL",
@@ -294,6 +297,11 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
         activeTab={activeTab}
         onSelectDiagnostic={onSelectDiagnostic}
         onFilterTab={onFilterTab}
+      />
+
+      <TaxScheduleCard
+        batchId={batchId}
+        refreshKey={`${status.total_records}-${status.matched_count}-${status.exception_count}`}
       />
 
       {/* Visual Ledger Distribution Bar */}
