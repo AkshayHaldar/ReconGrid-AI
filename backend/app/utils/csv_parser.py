@@ -239,7 +239,11 @@ class BankCsvParser:
         return mapping
 
     @classmethod
-    def _find_header_and_data_lines(cls, lines: list[str]) -> tuple[list[str], list[str]]:
+    def _find_header_and_data_lines(
+        cls,
+        lines: list[str],
+        custom_mappings: dict[str, Any] | None = None,
+    ) -> tuple[list[str], list[str]]:
         """Scans lines to detect and skip preamble metadata, returning (header_row, data_lines)."""
         best_header_idx = -1
         best_header_fields: list[str] = []
@@ -255,13 +259,29 @@ class BankCsvParser:
                 if not fields or len(fields) < 2:
                     continue
                 mapping = cls.detect_headers(fields)
-                # Score based on how many canonical columns were identified
                 score = len(mapping)
-                # Header must contain at least a date or narration or amount/deposit/withdrawal
                 has_essential = (
                     "date" in mapping
                     and ("deposit" in mapping or "withdrawal" in mapping or "amount" in mapping or "narration" in mapping)
                 )
+
+                if custom_mappings:
+                    clean_fields_set = {f.lstrip("﻿").strip().lower() for f in fields if f}
+                    custom_matches = 0
+                    for col_val in custom_mappings.values():
+                        if col_val is None or col_val == "" or col_val == "__none__":
+                            continue
+                        col_str = str(col_val).strip()
+                        if (isinstance(col_val, int) or col_str.isdigit()) and int(col_str) < len(fields):
+                            custom_matches += 1
+                        elif col_str.lower() in clean_fields_set:
+                            custom_matches += 1
+
+                    if custom_matches > 0:
+                        score += custom_matches * 5
+                        if custom_matches >= 2 or score >= 2:
+                            has_essential = True
+
                 if has_essential and score > best_score:
                     best_score = score
                     best_header_idx = idx
@@ -280,89 +300,183 @@ class BankCsvParser:
     def parse_csv_stream(
         cls,
         text_stream: Iterator[str],
+        custom_mappings: dict[str, Any] | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Parses CSV text stream row by row yielding canonical records with robust error handling."""
         raw_lines = [l.lstrip("﻿") if idx == 0 else l for idx, l in enumerate(text_stream)]
         if not raw_lines:
             return
 
-        header_fields, table_lines = cls._find_header_and_data_lines(raw_lines)
+        header_fields, table_lines = cls._find_header_and_data_lines(raw_lines, custom_mappings=custom_mappings)
         if not table_lines:
             return
 
         if table_lines:
             table_lines = [table_lines[0].lstrip("﻿")] + table_lines[1:]
 
-        reader = csv.DictReader(table_lines)
-        if not reader.fieldnames:
+        reader = csv.reader(table_lines)
+        raw_header_row = next(reader, None)
+        if not raw_header_row:
             return
 
-        header_map = cls.detect_headers(list(reader.fieldnames))
+        clean_header_row = [h.lstrip("﻿").strip() for h in raw_header_row]
+        num_cols = len(clean_header_row)
 
-        for row_idx, row in enumerate(reader, start=1):
-            if not any(v and str(v).strip() for v in row.values() if v is not None):
-                continue  # Skip blank and whitespace-only lines
+        target_indices: dict[str, int] = {}
+        alias_map = {
+            "description": "narration",
+            "desc": "narration",
+            "particulars": "narration",
+            "remarks": "narration",
+            "details": "narration",
+            "memo": "narration",
+            "narrative": "narration",
+            "utr": "ref",
+            "reference": "ref",
+            "chq_no": "ref",
+            "ref_no": "ref",
+            "cheque_no": "ref",
+            "credit": "deposit",
+            "debit": "withdrawal",
+            "deposit_amount": "deposit",
+            "withdrawal_amount": "withdrawal",
+            "cr": "deposit",
+            "dr": "withdrawal",
+        }
+
+        if custom_mappings:
+            for raw_k, raw_v in custom_mappings.items():
+                if raw_k is None or raw_v is None or raw_v == "" or raw_v == "__none__":
+                    continue
+                k = str(raw_k).strip().lower()
+                canon_k = alias_map.get(k, k)
+
+                col_idx: int | None = None
+                val_str = str(raw_v).strip()
+
+                if isinstance(raw_v, int):
+                    col_idx = raw_v
+                elif val_str.isdigit():
+                    col_idx = int(val_str)
+                elif val_str.startswith("col_") and val_str[4:].isdigit():
+                    col_idx = int(val_str[4:])
+                elif val_str.startswith("__col_") and val_str[6:].rstrip("_").isdigit():
+                    col_idx = int(val_str[6:].rstrip("_"))
+                else:
+                    # Match Col index pattern e.g. "Amount (Col 3)"
+                    col_match = re.search(r"\(Col\s+(\d+)\)", val_str, re.IGNORECASE)
+                    if col_match:
+                        col_idx = int(col_match.group(1)) - 1
+                    else:
+                        dup_match = re.search(r"^(.+)_(\d+)$", val_str)
+                        if dup_match:
+                            base_name = dup_match.group(1).lower()
+                            occ_target = int(dup_match.group(2))
+                            occ = 0
+                            for idx, h in enumerate(clean_header_row):
+                                if h.lower() == base_name:
+                                    occ += 1
+                                    if occ == occ_target:
+                                        col_idx = idx
+                                        break
+
+                    if col_idx is None:
+                        for idx, h in enumerate(clean_header_row):
+                            if h == val_str:
+                                col_idx = idx
+                                break
+                    if col_idx is None:
+                        for idx, h in enumerate(clean_header_row):
+                            if h.lower() == val_str.lower():
+                                col_idx = idx
+                                break
+
+                if col_idx is not None and 0 <= col_idx < num_cols:
+                    target_indices[canon_k] = col_idx
+
+            # If user mapped both amount and withdrawal, amount acts as the deposit column
+            if "amount" in target_indices and "withdrawal" in target_indices:
+                if "deposit" not in target_indices:
+                    target_indices["deposit"] = target_indices.pop("amount")
+        else:
+            detected_map = cls.detect_headers(clean_header_row)
+            for canon_k, raw_h in detected_map.items():
+                for idx, h in enumerate(clean_header_row):
+                    if h == raw_h:
+                        target_indices[canon_k] = idx
+                        break
+
+        for row_idx, row_values in enumerate(reader, start=1):
+            if not any(v and str(v).strip() for v in row_values if v is not None):
+                continue
 
             try:
-                # Extract Date
-                date_col = header_map.get("date")
-                raw_date = str(row.get(date_col, "")).strip() if date_col else ""
+                def get_cell(col_idx: int | None) -> str:
+                    if col_idx is not None and 0 <= col_idx < len(row_values):
+                        return str(row_values[col_idx]).strip()
+                    return ""
+
+                raw_date = get_cell(target_indices.get("date"))
                 parsed_date = parse_flexible_date(raw_date) if raw_date else datetime.now(UTC)
 
-                # Extract Description / Narration
-                desc_col = header_map.get("narration")
-                description = (str(row.get(desc_col, "")).strip()) if desc_col else ""
-
-                # Extract UTR / Ref No
-                ref_col = header_map.get("ref")
-                raw_ref = (str(row.get(ref_col, "")).strip()) if ref_col else ""
+                description = get_cell(target_indices.get("narration"))
+                raw_ref = get_cell(target_indices.get("ref"))
                 utr = raw_ref or extract_utr_from_text(description)
 
-                # Extract Amount & Direction (Credit vs Debit)
+                raw_dep = get_cell(target_indices.get("deposit"))
+                raw_wdr = get_cell(target_indices.get("withdrawal"))
+                raw_amt = get_cell(target_indices.get("amount"))
+                raw_dir = get_cell(target_indices.get("direction"))
+
                 amount = Decimal("0.00")
                 direction: Literal["CREDIT", "DEBIT"] = "CREDIT"
 
-                dep_col = header_map.get("deposit")
-                wdr_col = header_map.get("withdrawal")
-                amt_col = header_map.get("amount")
-                dir_col = header_map.get("direction")
-
-                # Check Deposit column first
-                if dep_col and row.get(dep_col) and str(row.get(dep_col)).strip():
-                    raw_dep = str(row.get(dep_col)).strip()
+                # 1. Check Deposit column
+                if raw_dep:
                     val, dep_dir = parse_amount_and_direction(raw_dep)
                     if val > Decimal("0.00"):
-                        validate_raw_amount_format(raw_dep, col_name=dep_col, row_idx=row_idx)
+                        dep_name = clean_header_row[target_indices["deposit"]] if "deposit" in target_indices else "Deposit"
+                        validate_raw_amount_format(raw_dep, col_name=dep_name, row_idx=row_idx)
                         amount = val
                         direction = dep_dir if dep_dir == "DEBIT" else "CREDIT"
 
-                # Check Withdrawal column if amount is still 0
-                if amount == Decimal("0.00") and wdr_col and row.get(wdr_col) and str(row.get(wdr_col)).strip():
-                    raw_wdr = str(row.get(wdr_col)).strip()
+                # 2. Check Withdrawal column (for debit rows)
+                if amount == Decimal("0.00") and raw_wdr:
                     val, wdr_dir = parse_amount_and_direction(raw_wdr)
                     if val > Decimal("0.00"):
-                        validate_raw_amount_format(raw_wdr, col_name=wdr_col, row_idx=row_idx)
+                        wdr_name = clean_header_row[target_indices["withdrawal"]] if "withdrawal" in target_indices else "Withdrawal"
+                        validate_raw_amount_format(raw_wdr, col_name=wdr_name, row_idx=row_idx)
                         amount = val
                         direction = "DEBIT"
 
-                # Check Generic Amount column if deposit/withdrawal not found
-                if amount == Decimal("0.00") and amt_col and row.get(amt_col) and str(row.get(amt_col)).strip():
-                    raw_amt_str = str(row.get(amt_col)).strip()
-                    val, detected_dir = parse_amount_and_direction(raw_amt_str)
+                # 3. Check Generic Amount column if deposit/withdrawal not found
+                if amount == Decimal("0.00") and raw_amt:
+                    val, detected_dir = parse_amount_and_direction(raw_amt)
                     if val > Decimal("0.00"):
-                        validate_raw_amount_format(raw_amt_str, col_name=amt_col, row_idx=row_idx)
+                        amt_name = clean_header_row[target_indices["amount"]] if "amount" in target_indices else "Amount"
+                        validate_raw_amount_format(raw_amt, col_name=amt_name, row_idx=row_idx)
                         amount = val
-                        if dir_col and row.get(dir_col):
-                            dir_str = str(row.get(dir_col)).strip().upper()
-                            direction = "DEBIT" if dir_str.startswith("D") else "CREDIT"
+                        if raw_dir:
+                            direction = "DEBIT" if raw_dir.upper().startswith("D") else "CREDIT"
                         else:
                             direction = detected_dir
 
                 if amount == Decimal("0.00"):
-                    # Skip rows with zero or missing amount
                     continue
 
                 row_hash = compute_row_hash(parsed_date, amount, direction, utr, description)
+
+                seen_keys: dict[str, int] = {}
+                raw_csv_row: dict[str, Any] = {}
+                for idx, val in enumerate(row_values):
+                    h_name = clean_header_row[idx] if idx < len(clean_header_row) and clean_header_row[idx] else f"Column_{idx + 1}"
+                    if h_name in seen_keys:
+                        seen_keys[h_name] += 1
+                        key = f"{h_name}_{seen_keys[h_name]}"
+                    else:
+                        seen_keys[h_name] = 1
+                        key = h_name
+                    raw_csv_row[key] = val
 
                 yield {
                     "row_index": row_idx,
@@ -372,14 +486,14 @@ class BankCsvParser:
                     "direction": direction,
                     "utr": utr if utr else None,
                     "description": description,
-                    "raw_csv_row": row,
+                    "raw_csv_row": raw_csv_row,
                 }
             except UnscaledPaiseAmountError as ex:
                 logger.warning("csv_row_unscaled_paise_error", row_index=row_idx, error=str(ex))
                 yield {
                     "row_index": row_idx,
                     "validation_error": str(ex),
-                    "raw_csv_row": row,
+                    "raw_csv_row": raw_csv_row if "raw_csv_row" in locals() else {},
                 }
                 continue
             except ValueError as ex:
@@ -387,7 +501,7 @@ class BankCsvParser:
                 yield {
                     "row_index": row_idx,
                     "validation_error": f"Row {row_idx}: {ex!s}",
-                    "raw_csv_row": row,
+                    "raw_csv_row": raw_csv_row if "raw_csv_row" in locals() else {},
                 }
                 continue
             except Exception as ex:
@@ -395,6 +509,6 @@ class BankCsvParser:
                 yield {
                     "row_index": row_idx,
                     "validation_error": f"Row {row_idx}: Unexpected error parsing row: {ex!s}",
-                    "raw_csv_row": row,
+                    "raw_csv_row": raw_csv_row if "raw_csv_row" in locals() else {},
                 }
                 continue

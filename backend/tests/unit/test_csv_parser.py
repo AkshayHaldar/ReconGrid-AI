@@ -150,3 +150,159 @@ def test_parse_indian_lakh_crore_comma_amounts():
     assert rows[0]["amount"] == Decimal("123456.78")
     assert rows[1]["amount"] == Decimal("123456789.50")
 
+
+def test_parse_custom_column_mappings():
+    # Non-standard headers e.g. corporate bank portal (Axis / IndusInd / Federal / Yes Bank)
+    csv_lines = [
+        "Value Date,Particulars,Instrument Id,Deposit,Withdrawal,Balance",
+        "24-08-2026,SETTLEMENT RAZORPAY BANGALORE,CMS002938491850,85000.00,0.00,185000.00",
+        "25-08-2026,SMS ALERT CHARGES,INST12345678,0.00,59.00,184941.00",
+    ]
+    custom_mappings = {
+        "date": "Value Date",
+        "narration": "Particulars",
+        "ref": "Instrument Id",
+        "amount": "Deposit",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("85000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS002938491850"
+    assert rows[0]["description"] == "SETTLEMENT RAZORPAY BANGALORE"
+
+
+def test_parse_custom_column_mappings_with_preamble():
+    csv_lines = [
+        "Federal Bank Limited",
+        "Customer Statement for Account 123456789",
+        "Period: 01-Aug-2026 to 31-Aug-2026",
+        "",
+        "Txn Date,Narrative,Doc Number,Paid In,Paid Out,Running Balance",
+        "24/08/2026,RAZORPAY SETTLEMENT CMS8899001122,CMS8899001122,64200.00,0.00,264200.00",
+    ]
+    custom_mappings = {
+        "date": "Txn Date",
+        "narration": "Narrative",
+        "ref": "Doc Number",
+        "amount": "Paid In",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("64200.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS8899001122"
+    assert rows[0]["description"] == "RAZORPAY SETTLEMENT CMS8899001122"
+
+
+def test_parse_duplicate_headers_with_index_mapping():
+    """Verify duplicate headers disambiguated by column indices correctly map credit and debit columns."""
+    csv_lines = [
+        "Date,Narration,Amount,Amount,Balance",
+        "24/08/2026,Credit Txn,5000.00,0.00,15000.00",
+        "25/08/2026,Debit Txn,0.00,2000.00,13000.00",
+    ]
+    # Column 2 is deposit (Amount), Column 3 is withdrawal (Amount)
+    custom_mappings = {
+        "date": 0,
+        "narration": 1,
+        "amount": 2,
+        "withdrawal": 3,
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 2
+
+    # Row 1 is a credit of 5000.00
+    assert rows[0]["amount"] == Decimal("5000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["description"] == "Credit Txn"
+
+    # Row 2 is a debit of 2000.00
+    assert rows[1]["amount"] == Decimal("2000.00")
+    assert rows[1]["direction"] == "DEBIT"
+    assert rows[1]["description"] == "Debit Txn"
+
+
+def test_parse_separate_credit_and_debit_columns():
+    """Verify statements with separate credit (Paid In) and debit (Paid Out) columns capture both directions."""
+    csv_lines = [
+        "Txn Date,Particulars,Instrument ID,Paid In,Paid Out,Balance",
+        "24/08/2026,Customer Inward CMS002938491850,CMS002938491850,85000.00,0.00,185000.00",
+        "25/08/2026,Vendor Outward CMS002938491851,CMS002938491851,0.00,34000.00,151000.00",
+    ]
+    custom_mappings = {
+        "date": "Txn Date",
+        "narration": "Particulars",
+        "ref": "Instrument ID",
+        "amount": "Paid In",
+        "withdrawal": "Paid Out",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 2
+
+    assert rows[0]["amount"] == Decimal("85000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS002938491850"
+
+    assert rows[1]["amount"] == Decimal("34000.00")
+    assert rows[1]["direction"] == "DEBIT"
+    assert rows[1]["utr"] == "CMS002938491851"
+
+
+def test_parse_multiline_quoted_narration():
+    """Verify multiline quoted fields with embedded newlines are preserved in description without breaking row count."""
+    csv_lines = [
+        "Date,Narration,Deposit Amt.,Withdrawal Amt.\n",
+        "24/08/2026,\"Settlement for Order #99102\nClient: ACME Corp Bangalore\",42000.00,0.00\n",
+        "25/08/2026,Direct Debit Bank Charge,0.00,150.00\n",
+    ]
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
+    assert len(rows) == 2
+    assert "Settlement for Order #99102" in rows[0]["description"]
+    assert "Client: ACME Corp Bangalore" in rows[0]["description"]
+    assert rows[0]["amount"] == Decimal("42000.00")
+    assert rows[1]["amount"] == Decimal("150.00")
+
+
+def test_parse_generic_signed_amount_with_explicit_direction():
+    """Verify generic amount with explicit CR/DR direction column."""
+    csv_lines = [
+        "Value Date,Narrative,Reference,Amount,CR_DR_Flag",
+        "24/08/2026,Incoming NEFT CMS0011223344,CMS0011223344,12000.00,CR",
+        "25/08/2026,Outgoing Payment CMS0011223355,CMS0011223355,4500.00,DR",
+    ]
+    custom_mappings = {
+        "date": "Value Date",
+        "narration": "Narrative",
+        "ref": "Reference",
+        "amount": "Amount",
+        "direction": "CR_DR_Flag",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines), custom_mappings=custom_mappings))
+    assert len(rows) == 2
+    assert rows[0]["amount"] == Decimal("12000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[1]["amount"] == Decimal("4500.00")
+    assert rows[1]["direction"] == "DEBIT"
+
+
+def test_parse_preamble_up_to_30_lines():
+    """Verify preamble detection searches up to line 30 for the header row."""
+    lines = [f"Metadata Header Line {i}" for i in range(1, 30)]  # 29 metadata lines
+    lines.append("Posting Date,Description,Ref Number,Credit,Debit")  # Line 30 (header)
+    lines.append("24/08/2026,Razorpay Batch CMS1122334455,CMS1122334455,75000.00,0.00")
+    custom_mappings = {
+        "date": "Posting Date",
+        "narration": "Description",
+        "ref": "Ref Number",
+        "amount": "Credit",
+        "withdrawal": "Debit",
+    }
+    rows = list(BankCsvParser.parse_csv_stream(iter(lines), custom_mappings=custom_mappings))
+    assert len(rows) == 1
+    assert rows[0]["amount"] == Decimal("75000.00")
+    assert rows[0]["direction"] == "CREDIT"
+    assert rows[0]["utr"] == "CMS1122334455"
+
+
+

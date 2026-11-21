@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   X,
   UploadCloud,
@@ -14,8 +14,22 @@ import {
   ChevronUp,
   Layers,
   KeyRound,
+  Sliders,
+  Sparkles,
+  RotateCcw,
+  Table,
 } from "lucide-react";
 import { uploadBankStatement, fetchBankPasswordHints, API_BASE } from "@/lib/api";
+import {
+  parseCsvLines,
+  detectCsvHeaderAndRows,
+  isStandardBankStatement,
+  computeHeaderSignature,
+  guessColumnMappings,
+  ColumnMappings,
+  CsvColumn,
+  DetectedCsvInfo,
+} from "@/lib/csv-mapper";
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -83,6 +97,25 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const passwordInputRef = useRef<HTMLInputElement>(null);
 
+  // CSV column mapping state
+  const [isCsv, setIsCsv] = useState(false);
+  const [isDetectingCsv, setIsDetectingCsv] = useState(false);
+  const fileTokenRef = useRef(0);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvColumns, setCsvColumns] = useState<CsvColumn[]>([]);
+  const [csvSampleRows, setCsvSampleRows] = useState<Record<string, string>[]>([]);
+  const [headerHash, setHeaderHash] = useState<string>("");
+  const [isStandardCsv, setIsStandardCsv] = useState(false);
+  const [showMapper, setShowMapper] = useState(false);
+  const [savedMappingLoaded, setSavedMappingLoaded] = useState(false);
+
+  // Active mappings
+  const [selectedDateCol, setSelectedDateCol] = useState<string>("");
+  const [selectedNarrationCol, setSelectedNarrationCol] = useState<string>("");
+  const [selectedAmountCol, setSelectedAmountCol] = useState<string>("");
+  const [selectedRefCol, setSelectedRefCol] = useState<string>("");
+  const [selectedWithdrawalCol, setSelectedWithdrawalCol] = useState<string>("");
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isOpen) onClose();
@@ -99,34 +132,171 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  const resetFileState = () => {
+    fileTokenRef.current += 1;
+    setFile(null);
+    setPassword("");
+    setError(null);
+    setValidationErrors([]);
+    setIsPasswordError(false);
+    setIsCsv(false);
+    setIsDetectingCsv(false);
+    setCsvHeaders([]);
+    setCsvColumns([]);
+    setCsvSampleRows([]);
+    setHeaderHash("");
+    setIsStandardCsv(false);
+    setShowMapper(false);
+    setSavedMappingLoaded(false);
+    setSelectedDateCol("");
+    setSelectedNarrationCol("");
+    setSelectedAmountCol("");
+    setSelectedRefCol("");
+    setSelectedWithdrawalCol("");
+  };
 
-  const isPdf = file?.name.toLowerCase().endsWith(".pdf");
+  const processSelectedFile = async (selected: File) => {
+    const currentToken = ++fileTokenRef.current;
+
+    // Reset previous file state immediately to avoid stale mappings if file is unreadable (Finding A)
+    setFile(selected);
+    setError(null);
+    setValidationErrors([]);
+    setIsPasswordError(false);
+    setSavedMappingLoaded(false);
+    setIsCsv(false);
+    setCsvHeaders([]);
+    setCsvColumns([]);
+    setCsvSampleRows([]);
+    setHeaderHash("");
+    setIsStandardCsv(false);
+    setShowMapper(false);
+    setSelectedDateCol("");
+    setSelectedNarrationCol("");
+    setSelectedAmountCol("");
+    setSelectedRefCol("");
+    setSelectedWithdrawalCol("");
+
+    const isPdfFile = selected.name.toLowerCase().endsWith(".pdf");
+    const isCsvFile =
+      selected.name.toLowerCase().endsWith(".csv") ||
+      selected.name.toLowerCase().endsWith(".txt") ||
+      selected.type.includes("csv");
+
+    setIsCsv(isCsvFile);
+
+    if (isPdfFile) {
+      setIsDetectingCsv(false);
+      setTimeout(() => passwordInputRef.current?.focus(), 100);
+      return;
+    }
+
+    if (isCsvFile) {
+      setIsDetectingCsv(true); // Finding C: block upload while detection is pending
+      try {
+        const slice = selected.slice(0, 131072); // 128KB slice
+        const text = await slice.text();
+
+        // Finding B: Check race condition before applying state
+        if (currentToken !== fileTokenRef.current) return;
+
+        const parsedRows = parseCsvLines(text, 60);
+        const detected: DetectedCsvInfo | null = detectCsvHeaderAndRows(parsedRows);
+
+        if (currentToken !== fileTokenRef.current) return;
+
+        if (detected && detected.columns.length > 0) {
+          setCsvHeaders(detected.headers);
+          setCsvColumns(detected.columns);
+          setCsvSampleRows(detected.dataRows.slice(0, 5));
+
+          const signature = computeHeaderSignature(detected.columns);
+          setHeaderHash(signature);
+
+          const isStandard = isStandardBankStatement(detected.columns);
+          setIsStandardCsv(isStandard);
+
+          // Check localStorage cache
+          let cached: ColumnMappings | null = null;
+          try {
+            const rawStored = localStorage.getItem(`recongrid_csv_mapping_${signature}`);
+            if (rawStored) {
+              cached = JSON.parse(rawStored);
+            }
+          } catch {
+            // Ignore localStorage retrieval issues
+          }
+
+          if (currentToken !== fileTokenRef.current) return;
+
+          const resolveColKey = (val: string | undefined): string => {
+            if (!val || val === "__none__") return "";
+            const byKey = detected.columns.find((c) => c.key === val);
+            if (byKey) return byKey.key;
+            const byName = detected.columns.find((c) => c.name.toLowerCase() === val.toLowerCase());
+            if (byName) return byName.key;
+            return "";
+          };
+
+          if (cached) {
+            setSelectedDateCol(resolveColKey(cached.date) || detected.columns[0]?.key || "");
+            setSelectedNarrationCol(resolveColKey(cached.narration) || detected.columns[1]?.key || "");
+            setSelectedAmountCol(resolveColKey(cached.amount) || "");
+            setSelectedRefCol(resolveColKey(cached.ref) || "");
+            setSelectedWithdrawalCol(resolveColKey(cached.withdrawal) || "");
+            setSavedMappingLoaded(true);
+
+            // If non-standard, show mapper pre-filled
+            setShowMapper(!isStandard);
+          } else {
+            // Auto-guess initial selections using CsvColumns
+            const guessed = guessColumnMappings(detected.columns);
+            setSelectedDateCol(guessed.date || "");
+            setSelectedNarrationCol(guessed.narration || "");
+            setSelectedAmountCol(guessed.amount || "");
+            setSelectedRefCol(guessed.ref || "");
+            setSelectedWithdrawalCol(guessed.withdrawal || "");
+            setSavedMappingLoaded(false);
+
+            setShowMapper(!isStandard);
+          }
+        }
+      } catch (err) {
+        if (currentToken === fileTokenRef.current) {
+          setShowMapper(false);
+        }
+      } finally {
+        if (currentToken === fileTokenRef.current) {
+          setIsDetectingCsv(false);
+        }
+      }
+    } else {
+      setIsDetectingCsv(false);
+    }
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const selected = e.target.files[0];
-      setFile(selected);
-      setError(null);
-      setValidationErrors([]);
-      setIsPasswordError(false);
-      if (selected.name.toLowerCase().endsWith(".pdf")) {
-        setTimeout(() => passwordInputRef.current?.focus(), 100);
-      }
+      processSelectedFile(e.target.files[0]);
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const selected = e.dataTransfer.files[0];
-      setFile(selected);
-      setError(null);
-      setValidationErrors([]);
-      setIsPasswordError(false);
-      if (selected.name.toLowerCase().endsWith(".pdf")) {
-        setTimeout(() => passwordInputRef.current?.focus(), 100);
-      }
+      processSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleResetToAutoDetect = () => {
+    if (csvColumns.length > 0) {
+      const guessed = guessColumnMappings(csvColumns);
+      setSelectedDateCol(guessed.date || "");
+      setSelectedNarrationCol(guessed.narration || "");
+      setSelectedAmountCol(guessed.amount || "");
+      setSelectedRefCol(guessed.ref || "");
+      setSelectedWithdrawalCol(guessed.withdrawal || "");
+      setSavedMappingLoaded(false);
     }
   };
 
@@ -142,7 +312,40 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     setIsPasswordError(false);
 
     try {
-      await uploadBankStatement(file, "default", password);
+      let customMappings: Record<string, string> | undefined = undefined;
+
+      // Attach custom mappings if mapping was configured or file is non-standard CSV
+      if (
+        isCsv &&
+        (showMapper || !isStandardCsv) &&
+        (selectedDateCol || selectedAmountCol || selectedNarrationCol)
+      ) {
+        customMappings = {
+          date: selectedDateCol,
+          narration: selectedNarrationCol,
+          amount: selectedAmountCol,
+        };
+        if (selectedRefCol && selectedRefCol !== "__none__") {
+          customMappings.ref = selectedRefCol;
+        }
+        if (selectedWithdrawalCol && selectedWithdrawalCol !== "__none__") {
+          customMappings.withdrawal = selectedWithdrawalCol;
+        }
+
+        // Cache in localStorage
+        if (headerHash) {
+          try {
+            localStorage.setItem(
+              `recongrid_csv_mapping_${headerHash}`,
+              JSON.stringify(customMappings)
+            );
+          } catch {
+            // Ignore localStorage save failures
+          }
+        }
+      }
+
+      await uploadBankStatement(file, "default", password, customMappings);
       onUploadSuccess();
       onClose();
     } catch (err: any) {
@@ -171,9 +374,42 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     window.open(`${API_BASE}/demo/sample-statement?bank=${bank}`, "_blank");
   };
 
+  // Compute live 3-row data preview
+  const livePreviewRows = useMemo(() => {
+    if (!csvSampleRows || csvSampleRows.length === 0) return [];
+    return csvSampleRows.slice(0, 3).map((row) => ({
+      date: selectedDateCol ? row[selectedDateCol] || "" : "",
+      narration: selectedNarrationCol ? row[selectedNarrationCol] || "" : "",
+      amount: selectedAmountCol ? row[selectedAmountCol] || "" : "",
+      ref:
+        selectedRefCol && selectedRefCol !== "__none__"
+          ? row[selectedRefCol] || ""
+          : "(Auto-detect)",
+      withdrawal:
+        selectedWithdrawalCol && selectedWithdrawalCol !== "__none__"
+          ? row[selectedWithdrawalCol] || ""
+          : "",
+    }));
+  }, [
+    csvSampleRows,
+    selectedDateCol,
+    selectedNarrationCol,
+    selectedAmountCol,
+    selectedRefCol,
+    selectedWithdrawalCol,
+  ]);
+
+  if (!isOpen) return null;
+
+  const isPdf = file?.name.toLowerCase().endsWith(".pdf");
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-3 sm:p-4">
-      <div className="bg-[#0c0e12] border border-[#1e222d] rounded-xl max-w-lg w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col">
+      <div
+        className={`bg-[#0c0e12] border border-[#1e222d] rounded-xl ${
+          showMapper ? "max-w-2xl" : "max-w-lg"
+        } w-full overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col`}
+      >
         {/* Header */}
         <div className="p-4 bg-[#111318] border-b border-[#1e222d] flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -188,7 +424,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 </span>
               </h3>
               <p className="text-[11px] text-neutral-400 font-mono">
-                Multi-page statement parsing, auto-decryption & OCR enabled
+                Multi-page statement parsing, auto-decryption & custom column mapping
               </p>
             </div>
           </div>
@@ -229,11 +465,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </span>
                 </div>
                 <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-400">
-                  <span className="inline-flex items-center gap-1 text-neutral-300">
-                    <Layers className="w-3 h-3 text-neutral-400" /> {isPdf ? "Multi-Page PDF Engine" : "Streaming CSV Parser"}
-                  </span>
-                  <span>•</span>
-                  <span>Click or drag to replace file</span>
+                  {isDetectingCsv ? (
+                    <span className="inline-flex items-center gap-1.5 text-blue-400 font-mono">
+                      <div className="w-2.5 h-2.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Analyzing statement structure...</span>
+                    </span>
+                  ) : (
+                    <>
+                      <span className="inline-flex items-center gap-1 text-neutral-300">
+                        <Layers className="w-3 h-3 text-neutral-400" />{" "}
+                        {isPdf ? "Multi-Page PDF Engine" : isStandardCsv ? "Standard Bank CSV Parser" : "Custom CSV Mapper"}
+                      </span>
+                      <span>•</span>
+                      <span>Click or drag to replace file</span>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
@@ -242,82 +488,317 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   Click to browse or drag & drop bank statement
                 </p>
                 <p className="text-[10px] text-slate-400 font-mono">
-                  Supports password-protected PDFs & multi-page statements (HDFC, ICICI, SBI, Axis, etc.)
+                  Supports corporate portals (Axis, IndusInd, Federal, Yes Bank) & standard formats (HDFC, ICICI, SBI)
                 </p>
               </div>
             )}
           </div>
 
-          {/* Password Protection Section */}
-          <div
-            className={`p-3.5 rounded-xl border transition-colors ${
-              isPasswordError ? "bg-rose-950/20 border-rose-700/80" : "bg-[#090e18] border-[#162438]"
-            }`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span>PDF Password (if protected)</span>
-              </label>
+          {/* Standard CSV Detected Banner (when mapping is hidden) */}
+          {file && isCsv && isStandardCsv && !showMapper && (
+            <div className="p-3 bg-emerald-950/20 border border-emerald-800/40 rounded-xl flex items-center justify-between text-xs animate-in fade-in">
+              <div className="flex items-center gap-2 text-emerald-300">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="font-medium">Standard bank statement format recognized</span>
+                <span className="text-[10px] text-emerald-400/80 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/60">
+                  Autodetected
+                </span>
+              </div>
               <button
                 type="button"
-                onClick={() => setShowHints(!showHints)}
-                className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono transition"
+                onClick={() => setShowMapper(true)}
+                className="text-[11px] text-blue-400 hover:text-blue-300 font-mono underline cursor-pointer"
               >
-                <HelpCircle className="w-3 h-3" />
-                <span>Password Formulas Guide</span>
-                {showHints ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                Configure Mappings
               </button>
             </div>
+          )}
 
-            <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                <Lock className="w-3.5 h-3.5" />
+          {/* Interactive Column Mapping Dialog */}
+          {file && isCsv && showMapper && (
+            <div className="p-3.5 bg-[#090e18] border border-[#18263a] rounded-xl space-y-3.5 animate-in fade-in">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#18263a]">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-blue-400 shrink-0" />
+                  <div>
+                    <h4 className="text-xs font-semibold text-slate-200">Interactive Column Mapper</h4>
+                    <p className="text-[10px] text-slate-400 font-mono">
+                      Map CSV columns to canonical transaction fields for ingestion
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {savedMappingLoaded && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-mono bg-emerald-950/40 border border-emerald-800/60 px-2 py-0.5 rounded">
+                      <Sparkles className="w-3 h-3" /> Auto-loaded saved mapping
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleResetToAutoDetect}
+                    className="inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-blue-300 font-mono px-2 py-1 rounded bg-[#0c121e] border border-[#18263a] transition cursor-pointer"
+                    title="Reset to heuristic column match"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5" />
+                    Reset
+                  </button>
+                </div>
               </div>
-              <input
-                ref={passwordInputRef}
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password (e.g. DOB, CustID, PAN, Name+DDMM)"
-                className="w-full pl-9 pr-10 py-2 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition shadow-inner font-mono"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 transition"
-              >
-                {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              </button>
+
+              {/* Mapping Dropdowns */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* 1. Date Column */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Date Column <span className="text-rose-400">*</span></span>
+                    {selectedDateCol && (
+                      <span className="text-[9px] font-mono text-emerald-400">Mapped</span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedDateCol}
+                    onChange={(e) => setSelectedDateCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="">-- Select Date Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Narration / Description */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Narration / Description <span className="text-rose-400">*</span></span>
+                    {selectedNarrationCol && (
+                      <span className="text-[9px] font-mono text-emerald-400">Mapped</span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedNarrationCol}
+                    onChange={(e) => setSelectedNarrationCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="">-- Select Narration Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Amount / Credit Column */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Amount / Credit Column <span className="text-rose-400">*</span></span>
+                    {selectedAmountCol && (
+                      <span className="text-[9px] font-mono text-emerald-400">Mapped</span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedAmountCol}
+                    onChange={(e) => setSelectedAmountCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="">-- Select Amount / Credit Column --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 4. Withdrawal / Debit Column (Optional) */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Withdrawal / Debit Column</span>
+                    {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" ? (
+                      <span className="text-[9px] font-mono text-emerald-400">Mapped</span>
+                    ) : (
+                      <span className="text-[9px] font-mono text-slate-400">Optional</span>
+                    )}
+                  </label>
+                  <select
+                    value={selectedWithdrawalCol}
+                    onChange={(e) => setSelectedWithdrawalCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="__none__">-- (Single generic amount column) --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Reference / UTR Column */}
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-[11px] font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Reference / UTR Column</span>
+                    <span className="text-[9px] font-mono text-slate-400">Optional</span>
+                  </label>
+                  <select
+                    value={selectedRefCol}
+                    onChange={(e) => setSelectedRefCol(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-lg text-xs text-slate-100 font-mono focus:outline-none"
+                  >
+                    <option value="__none__">-- (Auto-extract UTR from narration) --</option>
+                    {csvColumns.map((col) => (
+                      <option key={col.key} value={col.key}>
+                        {col.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Live 3-Row Data Preview Table */}
+              <div className="space-y-1.5 pt-2">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                  <div className="flex items-center gap-1.5 text-slate-300">
+                    <Table className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="font-semibold">Live Data Preview</span>
+                    <span className="text-[10px] text-slate-400">(First 3 rows)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">
+                    {csvSampleRows.length} rows previewed
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto border border-[#18263a] rounded-lg bg-[#060a12]">
+                  <table className="w-full text-[11px] text-left">
+                    <thead className="bg-[#0c121e] text-slate-400 font-mono text-[10px] border-b border-[#18263a]">
+                      <tr>
+                        <th className="px-2.5 py-1.5 font-medium w-8 text-center">#</th>
+                        <th className="px-2.5 py-1.5 font-medium">Date</th>
+                        <th className="px-2.5 py-1.5 font-medium">Narration / Description</th>
+                        <th className="px-2.5 py-1.5 font-medium">
+                          {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__"
+                            ? "Credit / Deposit (₹)"
+                            : "Amount (₹)"}
+                        </th>
+                        {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" && (
+                          <th className="px-2.5 py-1.5 font-medium text-rose-300">Debit / Withdrawal (₹)</th>
+                        )}
+                        <th className="px-2.5 py-1.5 font-medium">Reference / UTR</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#18263a]/60 font-mono">
+                      {livePreviewRows.length > 0 ? (
+                        livePreviewRows.map((r, idx) => (
+                          <tr key={idx} className="hover:bg-[#0c1424]">
+                            <td className="px-2.5 py-1.5 text-slate-400 text-center">{idx + 1}</td>
+                            <td className="px-2.5 py-1.5 text-slate-200">
+                              {r.date || <span className="text-slate-400 italic">Not mapped</span>}
+                            </td>
+                            <td className="px-2.5 py-1.5 text-slate-300 truncate max-w-[160px]">
+                              {r.narration || <span className="text-slate-400 italic">Not mapped</span>}
+                            </td>
+                            <td className="px-2.5 py-1.5 text-emerald-400 font-medium">
+                              {r.amount || <span className="text-slate-400 italic">Not mapped</span>}
+                            </td>
+                            {selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" && (
+                              <td className="px-2.5 py-1.5 text-rose-400 font-medium">
+                                {r.withdrawal || <span className="text-slate-400 italic">—</span>}
+                              </td>
+                            )}
+                            <td className="px-2.5 py-1.5 text-slate-300">
+                              {r.ref || <span className="text-slate-400 italic">—</span>}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={selectedWithdrawalCol && selectedWithdrawalCol !== "__none__" ? 6 : 5} className="px-3 py-3 text-center text-slate-400 italic">
+                            No data rows detected in preview chunk
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
+          )}
 
-            {/* Bank Password Logic Cheat Sheet */}
-            {showHints && (
-              <div className="mt-3 pt-3 border-t border-[#18263a] space-y-2 animate-in fade-in duration-200">
-                <div className="text-[10px] font-bold text-slate-300 uppercase tracking-wider font-mono">
-                  <span>Common Bank Password Formulas</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
-                  {hints.map((h, i) => (
-                    <div
-                      key={i}
-                      className="p-2 bg-[#0c121e] border border-[#18263a] rounded-lg text-[10px]"
-                    >
-                      <div className="font-semibold text-blue-300 flex items-center justify-between">
-                        <span>{h.bank}</span>
-                      </div>
-                      <div className="text-slate-300 text-[9px] mt-0.5 line-clamp-2">
-                        {h.pattern}
-                      </div>
-                      <div className="text-slate-500 text-[8px] font-mono mt-0.5">
-                        e.g. <span className="text-slate-400 font-semibold">{h.example}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          {/* Password Protection Section (for PDF files) */}
+          {(!file || isPdf) && (
+            <div
+              className={`p-3.5 rounded-xl border transition-colors ${
+                isPasswordError ? "bg-rose-950/20 border-rose-700/80" : "bg-[#090e18] border-[#162438]"
+              }`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                  <span>PDF Password (if protected)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowHints(!showHints)}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono transition"
+                >
+                  <HelpCircle className="w-3 h-3" />
+                  <span>Password Formulas Guide</span>
+                  {showHints ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
               </div>
-            )}
-          </div>
+
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                  <Lock className="w-3.5 h-3.5" />
+                </div>
+                <input
+                  ref={passwordInputRef}
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password (e.g. DOB, CustID, PAN, Name+DDMM)"
+                  className="w-full pl-9 pr-10 py-2 bg-[#060a12] border border-[#18263a] focus:border-blue-500 rounded-xl text-xs text-slate-100 placeholder-slate-500 focus:outline-none transition shadow-inner font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-200 transition"
+                >
+                  {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              {/* Bank Password Logic Cheat Sheet */}
+              {showHints && (
+                <div className="mt-3 pt-3 border-t border-[#18263a] space-y-2 animate-in fade-in duration-200">
+                  <div className="text-[10px] font-bold text-slate-300 uppercase tracking-wider font-mono">
+                    <span>Common Bank Password Formulas</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                    {hints.map((h, i) => (
+                      <div
+                        key={i}
+                        className="p-2 bg-[#0c121e] border border-[#18263a] rounded-lg text-[10px]"
+                      >
+                        <div className="font-semibold text-blue-300 flex items-center justify-between">
+                          <span>{h.bank}</span>
+                        </div>
+                        <div className="text-slate-300 text-[9px] mt-0.5 line-clamp-2">
+                          {h.pattern}
+                        </div>
+                        <div className="text-slate-500 text-[8px] font-mono mt-0.5">
+                          e.g. <span className="text-slate-400 font-semibold">{h.example}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Sample Templates */}
           <div className="bg-[#090e18] p-3 rounded-xl border border-[#162438] space-y-2">
@@ -333,7 +814,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   key={b}
                   type="button"
                   onClick={() => downloadSample(b)}
-                  className="px-3 py-1.5 bg-[#060a12] hover:bg-[#0c1424] border border-[#18263a] text-slate-300 hover:text-blue-300 rounded-lg text-[10px] font-mono flex items-center gap-1.5 transition shadow-2xs"
+                  className="px-3 py-1.5 bg-[#060a12] hover:bg-[#0c1424] border border-[#18263a] text-slate-300 hover:text-blue-300 rounded-lg text-[10px] font-mono flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
                 >
                   <Download className="w-3 h-3 text-blue-400" />
                   {b} Statement.csv
@@ -373,13 +854,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!file || uploading}
+            disabled={
+              !file ||
+              uploading ||
+              isDetectingCsv ||
+              (isCsv && showMapper && (!selectedDateCol || !selectedAmountCol || !selectedNarrationCol))
+            }
             className="w-full sm:w-auto px-5 py-2 bg-neutral-100 hover:bg-white disabled:opacity-40 text-neutral-900 font-semibold rounded-md shadow-xs transition flex items-center justify-center gap-2 text-center cursor-pointer"
           >
             {uploading ? (
               <>
                 <div className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
                 <span>Parsing & Reconciling...</span>
+              </>
+            ) : isDetectingCsv ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-neutral-900 border-t-transparent rounded-full animate-spin"></div>
+                <span>Analyzing Statement...</span>
               </>
             ) : (
               <>

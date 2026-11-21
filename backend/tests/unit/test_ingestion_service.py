@@ -40,3 +40,35 @@ async def test_ingestion_service_hdfc_csv(db_session: AsyncSession):
     assert resp2.total_rows_parsed == 2
     assert resp2.inserted_count == 0
     assert resp2.duplicate_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ingestion_service_custom_column_mappings_json(db_session: AsyncSession):
+    import json
+
+    service = IngestionService(db_session)
+
+    csv_content = (
+        b"Federal Bank Corporate Statement\n"
+        b"Account 9876543210\n"
+        b"\n"
+        b"Value Date,Particulars,Instrument Id,Deposit,Withdrawal,Balance\n"
+        b"24-08-2026,RAZORPAY SETTLEMENT BANGALORE,CMS002938491899,92500.00,0.00,192500.00\n"
+    )
+
+    file = UploadFile(
+        filename="federal_custom_statement.csv",
+        file=io.BytesIO(csv_content),
+        headers={"content-type": "text/csv"},
+    )
+
+    mappings_json = json.dumps({
+        "date": "Value Date",
+        "narration": "Particulars",
+        "ref": "Instrument Id",
+        "amount": "Deposit",
+    })
+
+    resp = await service.ingest_statement(file, batch_id="test_custom_batch", column_mappings=mappings_json)
+    assert resp.total_rows_parsed == 1
+    assert resp.inserted_count == 1

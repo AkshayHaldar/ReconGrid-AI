@@ -175,13 +175,20 @@ export async function resolveConflict(
 export async function uploadBankStatement(
   file: File,
   batchId: string = "default",
-  password?: string
+  password?: string,
+  columnMappings?: Record<string, string> | string
 ): Promise<any> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("batch_id", batchId);
   if (password) {
     formData.append("password", password);
+  }
+  if (columnMappings) {
+    formData.append(
+      "column_mappings",
+      typeof columnMappings === "string" ? columnMappings : JSON.stringify(columnMappings)
+    );
   }
 
   const res = await fetch(`${getApiBase()}/bank/upload`, {
