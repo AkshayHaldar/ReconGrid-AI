@@ -1,10 +1,14 @@
 """Application configuration using Pydantic Settings."""
 
+import base64
+import binascii
 from decimal import Decimal
 from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.core.secret_format import sealed_blob
 
 
 class Settings(BaseSettings):
@@ -18,6 +22,8 @@ class Settings(BaseSettings):
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
     RAZORPAY_WEBHOOK_SECRET: str = ""
+    # Urlsafe base64 of 32 random bytes. Secrets stored as "enc:..." are decrypted with it at use time.
+    ENCRYPTION_MASTER_KEY: str = ""
 
     # Database: Defaults to SQLite for zero-friction local run/tests, easily points to PostgreSQL
     DATABASE_URL: str = "sqlite+aiosqlite:///./recongrid.db"
@@ -105,7 +111,23 @@ class Settings(BaseSettings):
             if not self.RAZORPAY_WEBHOOK_SECRET or self.RAZORPAY_WEBHOOK_SECRET in invalid_placeholders:
                 raise ValueError("Valid RAZORPAY_WEBHOOK_SECRET must be configured for production.")
 
+        self._validate_encryption_key()
         return self
+
+    def _validate_encryption_key(self) -> None:
+        """Fail at startup, not on the first Razorpay call, if encrypted secrets have no usable key."""
+        if not any(
+            sealed_blob(secret) is not None for secret in (self.RAZORPAY_KEY_SECRET, self.RAZORPAY_WEBHOOK_SECRET)
+        ):
+            return
+        try:
+            key = base64.urlsafe_b64decode(self.ENCRYPTION_MASTER_KEY.encode("ascii"))
+        except (binascii.Error, UnicodeEncodeError):
+            key = b""
+        if len(key) != 32:
+            raise ValueError(
+                "ENCRYPTION_MASTER_KEY must be set to urlsafe base64 of 32 bytes when any secret is stored as 'enc:...'."
+            )
 
 
 settings = Settings()
