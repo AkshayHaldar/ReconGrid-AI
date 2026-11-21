@@ -9,6 +9,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.core.security import resolve_secret
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
@@ -50,7 +51,7 @@ class RazorpayClient:
         resp = await client.get(
             f"{self.base_url}/settlements",
             params={"count": count, "skip": skip},
-            auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
+            auth=(settings.RAZORPAY_KEY_ID, resolve_secret(settings.RAZORPAY_KEY_SECRET)),
             timeout=10.0,
         )
         if resp.status_code == 429:
