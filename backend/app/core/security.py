@@ -13,9 +13,7 @@ from fastapi import Header, HTTPException, Request, status
 
 from app.core.config import settings
 from app.core.logging import logger
-
-ENCRYPTED_PREFIX = "enc:"
-_NONCE_BYTES = 12
+from app.core.secret_format import ENCRYPTED_PREFIX, NONCE_BYTES, sealed_blob
 
 
 def _master_key() -> bytes:
@@ -34,7 +32,7 @@ def _master_key() -> bytes:
 
 def encrypt_secret(plaintext: str) -> str:
     """Encrypts a secret with AES-256-GCM. Output is `enc:` + urlsafe base64(nonce + ciphertext)."""
-    nonce = os.urandom(_NONCE_BYTES)
+    nonce = os.urandom(NONCE_BYTES)
     sealed = AESGCM(_master_key()).encrypt(nonce, plaintext.encode("utf-8"), None)
     return ENCRYPTED_PREFIX + base64.urlsafe_b64encode(nonce + sealed).decode("ascii")
 
@@ -44,14 +42,18 @@ def decrypt_secret(ciphertext: str) -> str:
     token = ciphertext[len(ENCRYPTED_PREFIX) :] if ciphertext.startswith(ENCRYPTED_PREFIX) else ciphertext
     try:
         blob = base64.urlsafe_b64decode(token.encode("ascii"))
-        return AESGCM(_master_key()).decrypt(blob[:_NONCE_BYTES], blob[_NONCE_BYTES:], None).decode("utf-8")
+        return AESGCM(_master_key()).decrypt(blob[:NONCE_BYTES], blob[NONCE_BYTES:], None).decode("utf-8")
     except (binascii.Error, UnicodeError, InvalidTag) as exc:
         raise ValueError("Unable to decrypt secret") from exc
 
 
 def resolve_secret(value: str) -> str:
-    """Returns the plaintext for a configured secret, decrypting it only if it is stored as `enc:...`."""
-    if value.startswith(ENCRYPTED_PREFIX):
+    """Returns the plaintext for a configured secret, decrypting it only if it is stored as `enc:...`.
+
+    A value that starts with `enc:` but is too short to hold a nonce and GCM tag cannot be
+    ciphertext, so it is returned as the plaintext it must be.
+    """
+    if sealed_blob(value) is not None:
         return decrypt_secret(value)
     return value
 
@@ -63,7 +65,9 @@ def mask_secret(value: str, visible_prefix: int = 8, visible_suffix: int = 4) ->
     if len(value) <= visible_prefix + visible_suffix:
         return "•" * len(value)
     hidden = len(value) - visible_prefix - visible_suffix
-    return value[:visible_prefix] + "•" * hidden + value[-visible_suffix:]
+    # value[-0:] is the whole string, so a zero-length suffix must be handled explicitly.
+    tail = value[-visible_suffix:] if visible_suffix > 0 else ""
+    return value[:visible_prefix] + "•" * hidden + tail
 
 
 def is_internal_ip(client_ip: str | None) -> bool:
