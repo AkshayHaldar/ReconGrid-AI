@@ -28,3 +28,14 @@ test("returns undefined when nothing usable was observed", () => {
   assert.equal(observedBlockSize({ contentRect: { height: 0 } }), undefined);
   assert.equal(observedBlockSize({ contentRect: { height: NaN } }), undefined);
 });
+
+test("spacer colSpan matches the number of table header columns", () => {
+  const src = readFileSync(
+    path.join(__dirname, "../src/components/ReconciliationTable.tsx"),
+    "utf8",
+  );
+  const span = Number(/const SPACER_COLSPAN = (\d+);/.exec(src)[1]);
+  const thead = /<thead[\s\S]*?<\/thead>/.exec(src)[0];
+  const headers = (thead.match(/<th[\s>]/g) || []).length;
+  assert.equal(span, headers);
+});

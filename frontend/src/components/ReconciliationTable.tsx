@@ -50,7 +50,7 @@ type SortOrder = "asc" | "desc";
 // Estimated height of a collapsed row; real heights are measured after render.
 const ROW_HEIGHT = 53;
 // An empty <tr> with only a height collapses to 0 in WebKit; the spacer needs a real cell spanning every column.
-const SPACER_COLSPAN = 10;
+const SPACER_COLSPAN = 9;
 
 // Skip the synchronous getBoundingClientRect() the default measurer does when a
 // row mounts (it forces a table layout per row while scrolling). The
