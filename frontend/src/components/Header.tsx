@@ -21,6 +21,7 @@ interface HeaderProps {
   onToggleQa: () => void;
   isQaOpen: boolean;
   onExportTally?: () => void;
+  onExportXlsx?: () => void;
   /** The active batch's date. The fiscal period follows it, or today when it is missing. */
   periodDate?: string | Date | null;
 }
@@ -33,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleQa,
   isQaOpen,
   onExportTally,
+  onExportXlsx,
   periodDate,
 }) => {
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -162,6 +164,19 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <FileText className="w-3.5 h-3.5 text-neutral-400" />
                   <span className="hidden sm:inline">Export to Tally (XML)</span>
+                </button>
+              )}
+
+              {/* Excel workbook export (outline) */}
+              {onExportXlsx && (
+                <button
+                  onClick={onExportXlsx}
+                  className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-transparent hover:bg-[#161922] border border-neutral-700 hover:border-neutral-500 text-neutral-200 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
+                  title="Download a styled Excel workbook with summary, ledger and exceptions"
+                  aria-label="Export Excel (.xlsx)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-neutral-400" />
+                  <span className="hidden sm:inline">Export Excel (.xlsx)</span>
                 </button>
               )}
 
