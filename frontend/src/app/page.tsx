@@ -10,6 +10,7 @@ import { DemoSyncModal } from "@/components/DemoSyncModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
+import { ExportConfirmModal } from "@/components/ExportConfirmModal";
 import { CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react";
 import {
   ReconciliationRecordItem,
@@ -50,6 +51,7 @@ export default function DashboardPage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isQaOpen, setIsQaOpen] = useState(false);
+  const [isXlsxConfirmOpen, setIsXlsxConfirmOpen] = useState(false);
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
 
@@ -314,9 +316,13 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
 
-  const handleExportXlsx = () => {
+  const handleExportXlsx = () => setIsXlsxConfirmOpen(true);
+
+  const confirmExportXlsx = () => {
+    setIsXlsxConfirmOpen(false);
     window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
   };
+  const cancelExportXlsx = useCallback(() => setIsXlsxConfirmOpen(false), []);
 
   const handleExportTally = () => {
     window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
@@ -336,6 +342,16 @@ export default function DashboardPage() {
         onExportTally={handleExportTally}
         onExportXlsx={handleExportXlsx}
         periodDate={status?.last_reconciled_at}
+      />
+
+      <ExportConfirmModal
+        isOpen={isXlsxConfirmOpen}
+        title="Download Reconciliation Audit Workbook"
+        status={status}
+        batchId="default"
+        confirmLabel="Download Excel (.xlsx)"
+        onConfirm={confirmExportXlsx}
+        onCancel={cancelExportXlsx}
       />
 
       {/* Main Financial Workspace */}
