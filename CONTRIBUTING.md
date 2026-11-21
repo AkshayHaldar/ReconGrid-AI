@@ -13,8 +13,8 @@ Thank you for your interest in contributing! This guide covers everything you ne
 5. [Branch and Commit Conventions](#branch-and-commit-conventions)
 6. [Pull Request Requirements](#pull-request-requirements)
 7. [Extension Points](#extension-points)
-   - [Adding a Bank Parser](#adding-a-bank-parser)
-   - [Adding a Settlement Provider](#adding-a-settlement-provider)
+   - [Adding Support for a New Bank (CSV / PDF)](#adding-support-for-a-new-bank-csv--pdf)
+   - [Adding a New Payment Gateway Adapter](#adding-a-new-payment-gateway-adapter)
 8. [Working with Fixtures](#working-with-fixtures)
 9. [Database Migrations](#database-migrations)
 
