@@ -48,7 +48,8 @@ async def validate_upload_file(file: UploadFile, request: Request | None = None)
         req_content_length = request.headers.get("content-length")
         if req_content_length:
             try:
-                if int(req_content_length) > MAX_FILE_SIZE_BYTES:
+                # Allow a 64 KB margin to account for multipart boundaries and form fields
+                if int(req_content_length) > MAX_FILE_SIZE_BYTES + 64 * 1024:
                     raise HTTPException(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                         detail="File size exceeds the 15 MB limit. Please split the statement or contact support.",
