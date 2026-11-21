@@ -91,3 +91,46 @@ def test_logs_without_settlement_are_ignored():
     schedule = build_tax_schedule("b1", [ReconciliationLog(id="l-x")])
     assert schedule.settlement_count == 0
     assert schedule.gross_volume == Decimal("0.00")
+
+
+def test_zero_actual_tds_is_flagged_as_missed_deduction():
+    # Gross is known and the net credited leaves no room for any TDS: expected Rs 1000, actual Rs 0.
+    logs = [make_log("setl_miss", Decimal("100000.00"), Decimal("2000.00"), Decimal("360.00"), Decimal("97640.00"))]
+    schedule = build_tax_schedule("b1", logs)
+    assert schedule.actual_tds == Decimal("0.00")
+    assert [d.settlement_id for d in schedule.tds_deviations] == ["setl_miss"]
+    assert schedule.tds_deviations[0].difference == Decimal("-1000.00")
+
+
+def test_gateway_reported_zero_tds_is_flagged():
+    logs = [
+        make_log(
+            "setl_zero",
+            Decimal("100000.00"),
+            Decimal("2000.00"),
+            Decimal("360.00"),
+            Decimal("96640.00"),
+            payload={"tds": "0"},
+        )
+    ]
+    schedule = build_tax_schedule("b1", logs)
+    assert [d.settlement_id for d in schedule.tds_deviations] == ["setl_zero"]
+
+
+def test_inferred_gross_without_reported_tds_is_not_flagged():
+    # gross_amount missing: gross is rebuilt from net + fees + tax so TDS can't be recovered.
+    logs = [make_log("setl_nogross", Decimal("0.00"), Decimal("2000.00"), Decimal("360.00"), Decimal("96640.00"))]
+    schedule = build_tax_schedule("b1", logs)
+    assert schedule.tds_deviations == []
+    assert schedule.tds_unverifiable == 1
+
+
+def test_csv_rows_include_deviations_and_attestation():
+    from app.services.tax_schedule import tax_schedule_csv_rows
+
+    logs = [make_log("setl_miss", Decimal("100000.00"), Decimal("2000.00"), Decimal("360.00"), Decimal("97640.00"))]
+    rows = tax_schedule_csv_rows(build_tax_schedule("b1", logs))
+    flat = [cell for row in rows for cell in row]
+    assert "setl_miss" in flat
+    assert "UDIN:" in flat
+    assert "Signature:" in flat

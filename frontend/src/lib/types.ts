@@ -142,3 +142,27 @@ export interface FeeWaterfallBreakdown {
 
   stages: FeeWaterfallStage[];
 }
+
+export interface TdsDeviation {
+  settlement_id: string;
+  gross_amount: string;
+  expected_tds: string;
+  actual_tds: string;
+  difference: string;
+  note: string;
+}
+
+export interface TaxSchedule {
+  batch_id: string;
+  settlement_count: number;
+  gross_volume: string;
+  expected_tds: string;
+  actual_tds: string;
+  mdr_fees: string;
+  gst_on_fees: string;
+  cgst: string;
+  sgst: string;
+  igst: string;
+  tds_deviations: TdsDeviation[];
+  tds_unverifiable: number;
+}

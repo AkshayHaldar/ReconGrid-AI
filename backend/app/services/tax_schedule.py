@@ -40,6 +40,8 @@ class TaxSchedule:
     sgst: Decimal = ZERO
     igst: Decimal = ZERO
     tds_deviations: list[TdsDeviation] = field(default_factory=list)
+    # Settlements with no reported TDS and no reported gross: TDS cannot be derived, so none is flagged.
+    tds_unverifiable: int = 0
 
 
 def _quantize(value: Decimal) -> Decimal:
@@ -51,8 +53,9 @@ def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intr
 
     Actual TDS is read from the settlement payload (`tds` or `tds_deducted`) when the
     gateway reports it, otherwise it is the residual of gross - net - fees - GST - refunds.
-    A settlement is flagged when actual TDS is present and differs from the statutory
-    rate by more than Rs 1.00. With `intra_state` the GST is split into CGST and SGST,
+    A settlement is flagged when actual TDS differs from the statutory rate by more than
+    Rs 1.00, including when nothing was deducted at all (a missed 194-O deduction). That check
+    is skipped when neither TDS nor gross was reported, since TDS cannot be recovered then. With `intra_state` the GST is split into CGST and SGST,
     otherwise it is reported as IGST.
     """
     schedule = TaxSchedule(batch_id=batch_id)
@@ -70,7 +73,8 @@ def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intr
         gross = to_decimal(setl.gross_amount)
         payload = setl.raw_payload or {}
         refunds = to_decimal(payload.get("refund_total", ZERO))
-        if gross <= ZERO:
+        gross_reported = gross > ZERO
+        if not gross_reported:
             gross = net + fees + tax
 
         expected = _quantize(gross * settings.TDS_194O_RATE) if gross > ZERO else ZERO
@@ -87,7 +91,12 @@ def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intr
         schedule.mdr_fees += fees
         schedule.gst_on_fees += tax
 
-        if (reported is not None or actual > ZERO) and abs(actual - expected) > TDS_DEVIATION_TOLERANCE:
+        # A real gross (or a gateway-reported TDS) makes zero TDS meaningful, so a missing 194-O
+        # deduction is flagged. With an inferred gross the residual is always 0 and proves nothing.
+        verifiable = reported is not None or gross_reported
+        if not verifiable:
+            schedule.tds_unverifiable += 1
+        if verifiable and abs(actual - expected) > TDS_DEVIATION_TOLERANCE:
             schedule.tds_deviations.append(
                 TdsDeviation(
                     settlement_id=setl.settlement_id,
@@ -105,3 +114,49 @@ def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intr
     else:
         schedule.igst = schedule.gst_on_fees
     return schedule
+
+
+ATTESTATION_LINES = (
+    "I have verified the above figures against Form 26AS and GSTR-2B / GSTR-3B.",
+    "Chartered Accountant Name:",
+    "Membership No.:",
+    "UDIN:",
+    "Signature:",
+    "Date:",
+)
+
+
+def tax_schedule_csv_rows(schedule: TaxSchedule, sanitize=lambda v: v) -> list[list[str]]:
+    """Rows for the CA-facing CSV: summary, TDS deviations and the attestation block."""
+    rows: list[list[str]] = [
+        ["Tax & Statutory Schedule", sanitize(schedule.batch_id)],
+        [],
+        ["Settlements", str(schedule.settlement_count)],
+        ["Gross volume", f"{schedule.gross_volume:.2f}"],
+        ["Expected TDS (194-O)", f"{schedule.expected_tds:.2f}"],
+        ["Actual TDS", f"{schedule.actual_tds:.2f}"],
+        ["Gateway MDR fees", f"{schedule.mdr_fees:.2f}"],
+        ["GST on fees", f"{schedule.gst_on_fees:.2f}"],
+        ["CGST", f"{schedule.cgst:.2f}"],
+        ["SGST", f"{schedule.sgst:.2f}"],
+        ["IGST", f"{schedule.igst:.2f}"],
+        ["Settlements with TDS not verifiable", str(schedule.tds_unverifiable)],
+        [],
+        ["TDS deviations"],
+        ["Settlement ID", "Gross", "Expected TDS", "Actual TDS", "Difference", "Note"],
+    ]
+    for d in schedule.tds_deviations:
+        rows.append(
+            [
+                sanitize(d.settlement_id),
+                f"{d.gross_amount:.2f}",
+                f"{d.expected_tds:.2f}",
+                f"{d.actual_tds:.2f}",
+                f"{d.difference:.2f}",
+                sanitize(d.note),
+            ]
+        )
+    rows.append([])
+    rows.append(["CA attestation"])
+    rows.extend([line] for line in ATTESTATION_LINES)
+    return rows
