@@ -226,3 +226,85 @@ test('Undo toast triggers revertRecord on backend before refreshing ledger', asy
   assert.deepEqual(reverted, ['rec-undo-1']);
   assert.equal(refreshes, 2);
 });
+
+test('selecting record from QA resets filter to ALL, anchors cited record, requests scroll and closes drawer', () => {
+  const state = [];
+  let cursor = 0;
+  const hooks = {
+    ...React,
+    useState: initial => {
+      const i = cursor++;
+      if (!(i in state)) state[i] = initial;
+      return [state[i], next => { state[i] = typeof next === 'function' ? next(state[i]) : next; }];
+    },
+    useMemo: fn => fn(),
+    useCallback: fn => fn,
+    useEffect() {},
+    useRef: value => ({ current: value }),
+  };
+  const exports = {};
+  const source = readFileSync(path.join(__dirname, '../src/app/page.tsx'), 'utf8');
+  const code = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText;
+  const render = () => {
+    cursor = 0;
+    vm.runInNewContext(code, {
+      exports, console: { error() {} },
+      require(name) {
+        if (name === 'react') return hooks;
+        if (name === 'react/jsx-runtime') return require(name);
+        if (name === '@/lib/api') return {
+          fetchStatus: async () => ({}),
+        };
+        if (name === '@/lib/useLedgerRecords') return {
+          useLedgerRecords: () => ({ records: [], loading: false, pager: { setRecords() {}, reload: async () => {} } }),
+        };
+        return new Proxy({}, { get: (_, key) => key });
+      },
+    });
+    return exports.default();
+  };
+  const find = (node, type) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === type) return node.props;
+    for (const child of React.Children.toArray(node.props?.children)) {
+      const res = find(child, type);
+      if (res) return res;
+    }
+  };
+
+  // Initially set non-default tab, diagnostic filter, and search query
+  let root = render();
+  const filterBar = find(root, 'FilterBar');
+  assert.ok(filterBar, 'FilterBar component should be mounted');
+  filterBar.onTabChange('CONFLICT');
+  filterBar.onDiagnosticChange('MISSING_BANK');
+  filterBar.onSearchChange('query123');
+
+  // Trigger onSelectRecord from QA drawer
+  root = render();
+  const qaPanel = find(root, 'SettlementQaPanel');
+  assert.ok(qaPanel, 'SettlementQaPanel component should be mounted');
+  qaPanel.onSelectRecord('rec-target-456');
+
+  // Re-render and verify resulting component props
+  root = render();
+  const updatedFilterBar = find(root, 'FilterBar');
+  const updatedTable = find(root, 'ReconciliationTable');
+  const updatedQaPanel = find(root, 'SettlementQaPanel');
+
+  // Assert activeTab is reset strictly to ALL on FilterBar
+  assert.equal(updatedFilterBar.activeTab, 'ALL', 'FilterBar activeTab prop must be reset to ALL');
+  assert.equal(updatedFilterBar.selectedDiagnostic, 'ALL', 'FilterBar selectedDiagnostic prop must be reset to ALL');
+  assert.equal(updatedFilterBar.searchQuery, '', 'FilterBar searchQuery prop must be reset to empty');
+
+  // Assert highlightedRecordId and scrollRequest on ReconciliationTable
+  assert.equal(updatedTable.highlightedRecordId, 'rec-target-456', 'ReconciliationTable highlightedRecordId prop must receive target record');
+  assert.ok(updatedTable.scrollRequest, 'ReconciliationTable scrollRequest prop must be set');
+  assert.equal(updatedTable.scrollRequest.id, 'rec-target-456', 'Scroll request must target the selected record');
+  assert.equal(typeof updatedTable.scrollRequest.nonce, 'number', 'Scroll request must include numeric nonce');
+
+  // Assert SettlementQaPanel drawer is closed
+  assert.equal(updatedQaPanel.isOpen, false, 'SettlementQaPanel isOpen prop must be false after selection');
+});

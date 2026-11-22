@@ -114,9 +114,9 @@ const LedgerRow = React.memo(function LedgerRow({
             onClick={() => onToggle(r.id)}
             className={`border-b border-[#161922] hover:bg-[#141720] cursor-pointer transition-colors duration-100 ${
               index % 2 === 0 ? "table-row-even" : "table-row-odd"
-            } ${isHighlighted ? "citation-highlight" : ""} ${
-              isDebit ? "bg-rose-950/20 hover:bg-rose-950/30" : ""
-            }`}
+            } ${
+              isHighlighted ? "citation-highlight" : ""
+            } ${isDebit ? "bg-rose-950/20 hover:bg-rose-950/30" : ""}`}
           >
             {/* Expand/Collapse Chevron */}
             <td className="py-2.5 px-2 text-center text-neutral-500 hover:text-neutral-300">
@@ -419,8 +419,14 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [activeHighlightId, setActiveHighlightId] = useState<string | null>(highlightedRecordId);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const pendingScroll = useRef<number | null>(null);
+  const pendingScrollTarget = useRef<{ id: string; nonce: number } | null>(null);
+
+  useEffect(() => {
+    const target = scrollRequest?.id || highlightedRecordId;
+    setActiveHighlightId(target);
+  }, [highlightedRecordId, scrollRequest]);
 
   const handleCopy = useCallback((text: string, id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -484,26 +490,53 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
     getItemKey,
   });
 
+  const isTargetPresent = Boolean(activeHighlightId && sortedRecords.some((r) => r.id === activeHighlightId));
+
+  // The 2.5s highlight countdown starts only once the target record is actually present in sortedRecords.
+  useEffect(() => {
+    if (!activeHighlightId || !isTargetPresent) return;
+    const target = activeHighlightId;
+    const timer = setTimeout(() => {
+      setActiveHighlightId((curr) => (curr === target ? null : curr));
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [activeHighlightId, isTargetPresent, scrollRequest?.nonce]);
+
   // Jump to a record (e.g. from an Audit Assistant citation). The row may not be
   // mounted, so scroll by index; wait until the record is in the current list.
   useEffect(() => {
-    if (scrollRequest) pendingScroll.current = scrollRequest.nonce;
-  }, [scrollRequest]);
+    if (scrollRequest) {
+      pendingScrollTarget.current = { id: scrollRequest.id, nonce: scrollRequest.nonce };
+    } else if (highlightedRecordId) {
+      pendingScrollTarget.current = { id: highlightedRecordId, nonce: Date.now() };
+    }
+  }, [scrollRequest, highlightedRecordId]);
 
   useEffect(() => {
-    if (!scrollRequest || pendingScroll.current !== scrollRequest.nonce) return;
-    const index = sortedRecords.findIndex((r) => r.id === scrollRequest.id);
+    const targetId = pendingScrollTarget.current?.id;
+    if (!targetId) return;
+
+    const index = sortedRecords.findIndex((r) => r.id === targetId);
     if (index < 0) return;
-    pendingScroll.current = null;
+
+    pendingScrollTarget.current = null;
     virtualizer.scrollToIndex(index, { align: "center" });
+
     // Once the row is mounted, also bring the ledger itself into view on the page.
-    const timer = setTimeout(() => {
-      document
-        .getElementById(`record-${scrollRequest.id}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [scrollRequest, sortedRecords, virtualizer]);
+    const tryScrollIntoView = () => {
+      const el = document.getElementById(`record-${targetId}`);
+      if (el) {
+        el.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        return true;
+      }
+      return false;
+    };
+
+    if (!tryScrollIntoView()) {
+      const timer = setTimeout(tryScrollIntoView, 60);
+      return () => clearTimeout(timer);
+    }
+  }, [scrollRequest, highlightedRecordId, sortedRecords, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const lastVisibleIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
@@ -630,7 +663,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                   key={r.id}
                   r={r}
                   index={vi.index}
-                  isHighlighted={highlightedRecordId === r.id}
+                  isHighlighted={r.id === activeHighlightId}
                   isExpanded={expandedRowId === r.id}
                   copiedKey={copiedId === `utr-${r.id}` || copiedId === `setl-${r.id}` ? copiedId : null}
                   measureRef={virtualizer.measureElement}

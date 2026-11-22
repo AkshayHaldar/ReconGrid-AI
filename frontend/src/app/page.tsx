@@ -350,7 +350,8 @@ export default function DashboardPage() {
   // Handle source record jump from Q&A
   const handleSelectRecordFromQa = (recordId: string) => {
     setHighlightedId(recordId);
-    setActiveTab("ALL"); // Reset filter so record is visible
+    // If the record is currently filtered out by status, ensure page resets the filter to ALL
+    setActiveTab("ALL");
     setSelectedDiagnostic("ALL");
     setSearchQuery("");
     setFromDate(undefined);
@@ -360,6 +361,7 @@ export default function DashboardPage() {
     setAnchorId(recordId);
     // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
     setScrollRequest({ id: recordId, nonce: Date.now() });
+    setIsQaOpen(false);
   };
 
   const handleExportCsv = () => {
