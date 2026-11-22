@@ -60,9 +60,16 @@ export default function DashboardPage() {
   const [sort, setSort] = useState<LedgerSort>("date");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [anchorId, setAnchorId] = useState<string>();
+  const [fromDate, setFromDate] = useState<string | undefined>();
+  const [toDate, setToDate] = useState<string | undefined>();
   const setActiveTab = (value: string) => { setAnchorId(undefined); setActiveTabState(value); };
   const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
+  const handleDateRangeChange = (from?: string, to?: string) => {
+    setAnchorId(undefined);
+    setFromDate(from);
+    setToDate(to);
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
@@ -70,7 +77,8 @@ export default function DashboardPage() {
   const query = useMemo<RecordQuery>(() => ({
     batchId: "default", status: activeTab, search: searchQuery,
     diagnostic: selectedDiagnostic, sort, direction,
-  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction]);
+    fromDate, toDate,
+  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction, fromDate, toDate]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
@@ -303,6 +311,8 @@ export default function DashboardPage() {
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
     setSearchQuery("");
+    setFromDate(undefined);
+    setToDate(undefined);
     setSort("date");
     setDirection("desc");
     setAnchorId(recordId);
@@ -377,6 +387,10 @@ export default function DashboardPage() {
               onDiagnosticChange={setSelectedDiagnostic}
               onBatchApprove={handleBatchApprove}
               batchApproveLoading={batchApproveLoading}
+              fromDate={fromDate}
+              toDate={toDate}
+              onDateRangeChange={handleDateRangeChange}
+              periodDate={status?.last_reconciled_at}
             />
 
              <ReconciliationTable
