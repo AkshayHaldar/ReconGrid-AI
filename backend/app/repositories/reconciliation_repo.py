@@ -94,7 +94,28 @@ class ReconciliationRepository:
             .returning(ReconciliationLog.id)
         )
         result = await self.session.execute(stmt)
-        return len(result.scalars().all())
+        approved_ids = list(result.scalars().all())
+        # The bulk UPDATE bypasses the ORM, so re-seal the touched rows' audit hashes here.
+        if approved_ids:
+            touched = await self.session.execute(
+                select(ReconciliationLog)
+                .where(ReconciliationLog.id.in_(approved_ids))
+                .execution_options(populate_existing=True)
+            )
+            for log in touched.scalars():
+                log.seal()
+            await self.session.flush()
+        return len(approved_ids)
+
+    async def get_chain_logs(self, batch_id: str) -> Sequence[ReconciliationLog]:
+        """Every log of the batch (superseded ones included) in audit-chain order, read fresh from the DB."""
+        stmt = (
+            select(ReconciliationLog)
+            .where(ReconciliationLog.batch_id == batch_id)
+            .order_by(ReconciliationLog.created_at, ReconciliationLog.id)
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalars().all()
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""

@@ -3,9 +3,13 @@
 No LLM involvement — pure deterministic rules and Decimal arithmetic.
 """
 
+import hashlib
+import hmac
+import json
 import re
 import time
 from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -496,7 +500,8 @@ class ReconciliationEngine:
                             f"Locked until human merges or resolves."
                         )
 
-            # Bulk supersede and persist immutable logs to database
+            # Bulk supersede and persist immutable logs to database.
+            # Each new log is sealed onto the batch's SHA-256 audit chain in the ReconciliationLog before_flush hook.
             with tracer.start_as_current_span("recon.db_bulk_upsert"):
                 bank_tx_ids = [r["bank_tx_id"] for r in results]
                 await self.recon_repo.supersede_batch_logs(bank_tx_ids)
@@ -526,3 +531,87 @@ class ReconciliationEngine:
                 rows_per_second=round(measured_rps, 1),
             )
             return saved_logs
+
+
+@dataclass
+class AuditChainResult:
+    """Outcome of walking a batch's SHA-256 audit chain from the first row."""
+
+    status: str  # VERIFIED | COMPROMISED
+    tampered: bool
+    total_records: int
+    verified_records: int
+    chain_head: str | None = None
+    failed_at_id: str | None = None
+    expected_hash: str | None = None
+    actual_hash: str | None = None
+    reason: str | None = None
+
+
+def verify_chain(logs: Sequence[ReconciliationLog]) -> AuditChainResult:
+    """Checks, in chain order, that every row links to its predecessor and still matches its own entry_hash.
+
+    O(N): each row is hashed once. Stops at the first broken row so the caller gets its exact id.
+    """
+    total = len(logs)
+    expected_previous: str | None = None
+    for index, log in enumerate(logs):
+        if log.previous_hash != expected_previous:
+            # A row was deleted, inserted or reordered (or its predecessor's identity was edited).
+            return AuditChainResult(
+                status="COMPROMISED",
+                tampered=True,
+                total_records=total,
+                verified_records=index,
+                failed_at_id=log.id,
+                expected_hash=expected_previous,
+                actual_hash=log.previous_hash,
+                reason="BROKEN_CHAIN_LINK",
+            )
+        recomputed = log.compute_entry_hash()
+        if recomputed != log.entry_hash:
+            return AuditChainResult(
+                status="COMPROMISED",
+                tampered=True,
+                total_records=total,
+                verified_records=index,
+                failed_at_id=log.id,
+                expected_hash=recomputed,
+                actual_hash=log.entry_hash,
+                reason="ENTRY_HASH_MISMATCH",
+            )
+        expected_previous = log.compute_link_hash()
+    return AuditChainResult(
+        status="VERIFIED",
+        tampered=False,
+        total_records=total,
+        verified_records=total,
+        chain_head=expected_previous,
+    )
+
+
+async def verify_batch_audit_chain(recon_repo: ReconciliationRepository, batch_id: str) -> AuditChainResult:
+    """Verifies the whole SHA-256 audit chain of a batch against what is actually stored in the database."""
+    logs = await recon_repo.get_chain_logs(batch_id)
+    return verify_chain(logs)
+
+
+def build_audit_certificate(batch_id: str, result: AuditChainResult, signing_key: str = "") -> dict:
+    """Audit Compliance Certificate: the verification result plus a content hash and, when a key is set, an HMAC."""
+    body = {
+        "certificate_type": "RECONGRID_AUDIT_COMPLIANCE_CERTIFICATE",
+        "version": 1,
+        "batch_id": batch_id,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "hash_algorithm": "SHA-256",
+        "verification": asdict(result),
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    signed = bool(signing_key)
+    return {
+        **body,
+        "content_sha256": hashlib.sha256(canonical).hexdigest(),
+        "signed": signed,
+        "signature_algorithm": "HMAC-SHA256" if signed else None,
+        "signature": hmac.new(signing_key.encode(), canonical, hashlib.sha256).hexdigest() if signed else None,
+    }
