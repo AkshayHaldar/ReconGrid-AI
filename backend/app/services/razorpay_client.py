@@ -18,6 +18,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.razorpay import RazorpayRefundPayload, RazorpaySyncResponse
+from app.services.batch_lock import BatchLockedError
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import paise_to_rupees
 
@@ -250,12 +251,16 @@ class RazorpayClient:
         bank_txs = await self.bank_repo.get_all_by_batch(batch_id)
         reconciliation_triggered = False
         if bank_txs and all_settlements:
-            await self.engine.reconcile_batch(
-                bank_transactions=bank_txs,
-                settlements=all_settlements,
-                batch_id=batch_id,
-            )
-            reconciliation_triggered = True
+            try:
+                await self.engine.reconcile_batch(
+                    bank_transactions=bank_txs,
+                    settlements=all_settlements,
+                    batch_id=batch_id,
+                )
+                reconciliation_triggered = True
+            except BatchLockedError:
+                # Settlements are stored, but a signed-off period is never re-matched.
+                logger.warning("razorpay_sync_reconciliation_skipped_batch_locked", batch_id=batch_id)
 
         return RazorpaySyncResponse(
             fetched_count=total_fetched,

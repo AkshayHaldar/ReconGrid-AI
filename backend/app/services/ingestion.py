@@ -9,6 +9,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.bank import BankUploadResponse
+from app.services.batch_lock import ensure_batch_unlocked
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.csv_parser import BankCsvParser
 from app.utils.pdf_parser import (
@@ -35,6 +36,8 @@ class IngestionService:
         column_mappings: str | dict | None = None,
     ) -> BankUploadResponse:
         """Parses bank statement (CSV or PDF), records transactions, and runs reconciliation."""
+        # A signed-off period takes no new rows, so an upload cannot overwrite approved decisions.
+        await ensure_batch_unlocked(self.recon_repo, batch_id)
         filename = file.filename or "statement.csv"
         ext = filename.lower().split(".")[-1] if "." in filename else ""
 

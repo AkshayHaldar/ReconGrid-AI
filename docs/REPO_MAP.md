@@ -103,6 +103,8 @@ All frontend API calls are routed to `http://localhost:8000/api/v1` via `fronten
 | `POST` | `/reconciliation/deny/{id}` | CA deny suggestion → exception | None | `ReconciliationRecordItem` |
 | `POST` | `/reconciliation/batch-approve` | Bulk approve suggestions (confidence ≥ 0.90) | None | `{ approved_count: number }` |
 | `POST` | `/reconciliation/resolve-conflict` | Resolve multi-candidate conflict | `{ record_id: string, chosen_settlement_id: string, note?: string }` | `{ status: string, resolved_record: ..., displaced_records: [...] }` |
+| `GET` | `/reconciliation/{batch_id}/lock` | Sign-off record of a locked batch, or the live pre-flight checklist | None | `BatchLockStatus` |
+| `POST` | `/reconciliation/{batch_id}/lock` | Close and sign off the period (422 if pre-flight fails, 409 if already locked). Locked batches answer 423 to approve, deny, resolve-conflict, batch-approve and uploads | `{ locked_by: string, lock_note?: string }` | `BatchLockStatus` |
 | `POST` | `/bank/upload` | Ingest bank statement CSV/PDF | `FormData` (`file`, `batch_id`, `password`) | `BankUploadResponse` |
 | `GET` | `/bank/password-hints` | Bank password formula cheat sheet | None | `BankPasswordHint[]` |
 | `POST` | `/razorpay/sync` | Trigger REST sync & auto-matching | `count?: number` | `RazorpaySyncResponse` |

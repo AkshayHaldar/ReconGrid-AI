@@ -21,11 +21,19 @@ from app.schemas.reconciliation import (
     ActionRequest,
     BatchApproveRequest,
     BatchApproveResponse,
+    BatchLockStatus,
     ConflictResolveRequest,
+    LockBatchRequest,
     ReconciliationRecordItem,
     ReconciliationRecordListResponse,
     ReconciliationStatusResponse,
     ScorecardResponse,
+)
+from app.services.batch_lock import (
+    evaluate_preflight,
+    guard_batch_unlocked,
+    guard_record_unlocked,
+    lock_batch,
 )
 from app.services.diagnostics import DiagnosticsService
 from app.services.export_service import XLSX_MEDIA_TYPE, build_reconciliation_workbook
@@ -93,7 +101,50 @@ async def get_batch_status(
     """Returns aggregated summary metrics for the dashboard summary cards."""
     repo = ReconciliationRepository(db)
     summary = await repo.get_summary_metrics(batch_id)
+    batch = await repo.get_batch(batch_id)
+    if batch is not None and batch.is_locked:
+        summary.update(is_locked=True, locked_at=batch.locked_at, locked_by=batch.locked_by, lock_note=batch.lock_note)
     return ApiResponse.ok(ReconciliationStatusResponse(**summary))
+
+
+def _lock_status(batch_id: str, batch) -> BatchLockStatus:
+    return BatchLockStatus(
+        batch_id=batch_id,
+        is_locked=True,
+        locked_at=batch.locked_at,
+        locked_by=batch.locked_by,
+        lock_note=batch.lock_note,
+        closing_totals=batch.closing_totals,
+    )
+
+
+@router.get("/{batch_id}/lock", response_model=ApiResponse[BatchLockStatus])
+async def get_batch_lock(
+    batch_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sign-off record for a locked batch, or the live pre-flight checklist for an open one."""
+    repo = ReconciliationRepository(db)
+    batch = await repo.get_batch(batch_id)
+    if batch is not None and batch.is_locked:
+        return ApiResponse.ok(_lock_status(batch_id, batch))
+    preflight = evaluate_preflight(await repo.get_summary_metrics(batch_id))
+    return ApiResponse.ok(BatchLockStatus(batch_id=batch_id, is_locked=False, preflight=preflight))
+
+
+@router.post("/{batch_id}/lock", response_model=ApiResponse[BatchLockStatus])
+async def lock_reconciliation_batch(
+    batch_id: str,
+    lock_req: LockBatchRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Close and sign off a period: runs the pre-flight checks, then makes the batch read-only.
+
+    422 PREFLIGHT_FAILED when conflicts, pending items or a non-zero trial balance remain,
+    409 BATCH_ALREADY_LOCKED when the period was already closed.
+    """
+    batch = await lock_batch(ReconciliationRepository(db), batch_id, lock_req.locked_by, lock_req.lock_note)
+    return ApiResponse.ok(_lock_status(batch_id, batch))
 
 
 @router.get("/{batch_id}/scorecard", response_model=ApiResponse[ScorecardResponse])
@@ -217,7 +268,11 @@ async def get_reconciliation_records(
     )
 
 
-@router.post("/records/{record_id}/approve", response_model=ApiResponse[ReconciliationRecordItem])
+@router.post(
+    "/records/{record_id}/approve",
+    response_model=ApiResponse[ReconciliationRecordItem],
+    dependencies=[Depends(guard_record_unlocked)],
+)
 async def approve_suggested_match(
     record_id: str,
     action_req: ActionRequest = ActionRequest(),
@@ -237,7 +292,11 @@ async def approve_suggested_match(
     return ApiResponse.ok(_map_log_to_item(log))
 
 
-@router.post("/{batch_id}/batch-approve", response_model=ApiResponse[BatchApproveResponse])
+@router.post(
+    "/{batch_id}/batch-approve",
+    response_model=ApiResponse[BatchApproveResponse],
+    dependencies=[Depends(guard_batch_unlocked)],
+)
 async def batch_approve_suggested_matches(
     batch_id: str,
     request: BatchApproveRequest,
@@ -249,7 +308,11 @@ async def batch_approve_suggested_matches(
     return ApiResponse.ok(BatchApproveResponse(approved_count=count, batch_id=batch_id))
 
 
-@router.post("/records/{record_id}/deny", response_model=ApiResponse[ReconciliationRecordItem])
+@router.post(
+    "/records/{record_id}/deny",
+    response_model=ApiResponse[ReconciliationRecordItem],
+    dependencies=[Depends(guard_record_unlocked)],
+)
 async def deny_suggested_match(
     record_id: str,
     action_req: ActionRequest = ActionRequest(),
@@ -270,7 +333,11 @@ async def deny_suggested_match(
     return ApiResponse.ok(_map_log_to_item(log))
 
 
-@router.post("/records/{record_id}/revert", response_model=ApiResponse[ReconciliationRecordItem])
+@router.post(
+    "/records/{record_id}/revert",
+    response_model=ApiResponse[ReconciliationRecordItem],
+    dependencies=[Depends(guard_record_unlocked)],
+)
 async def revert_human_action(
     record_id: str,
     action_req: ActionRequest = ActionRequest(),
@@ -302,7 +369,11 @@ async def revert_human_action(
     return ApiResponse.ok(_map_log_to_item(log))
 
 
-@router.post("/records/{record_id}/resolve-conflict", response_model=ApiResponse[ReconciliationRecordItem])
+@router.post(
+    "/records/{record_id}/resolve-conflict",
+    response_model=ApiResponse[ReconciliationRecordItem],
+    dependencies=[Depends(guard_record_unlocked)],
+)
 async def resolve_conflict(
     record_id: str,
     resolve_req: ConflictResolveRequest,

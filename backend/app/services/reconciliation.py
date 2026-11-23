@@ -28,6 +28,7 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import AUDITED_FIELDS, ReconciliationLog, compute_entry_hash, compute_link_hash
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
+from app.services.batch_lock import ensure_batch_unlocked
 from app.services.diagnostics import DiagnosticResult, DiagnosticsService
 from app.utils.fuzzy import is_fuzzy_match
 from app.utils.money import format_inr, is_amount_matching, to_decimal
@@ -117,7 +118,11 @@ class ReconciliationEngine:
         *,
         incremental: bool = False,
     ) -> list[ReconciliationLog]:
-        """Runs the deterministic multi-tier matching pipeline across the dataset."""
+        """Runs the deterministic multi-tier matching pipeline across the dataset.
+
+        Raises BatchLockedError (HTTP 423) if the batch was signed off: a closed period is never re-matched.
+        """
+        await ensure_batch_unlocked(self.recon_repo, batch_id)
         with recon_batch_duration_seconds.time():
             t_start = time.perf_counter()
             tolerance = settings.RECONCILIATION_TOLERANCE_INR

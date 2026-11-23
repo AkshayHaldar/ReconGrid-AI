@@ -18,6 +18,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
+from app.services.batch_lock import guard_batch_unlocked
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import calculate_standard_fees, to_decimal
 
@@ -49,7 +50,7 @@ router = APIRouter(
 )
 
 
-@router.post("/reset", response_model=ApiResponse[dict])
+@router.post("/reset", response_model=ApiResponse[dict], dependencies=[Depends(guard_batch_unlocked)])
 async def reset_demo_dataset(
     batch_id: str = "default",
     db: AsyncSession = Depends(get_db),
@@ -62,7 +63,7 @@ async def reset_demo_dataset(
     return ApiResponse.ok({"status": "reset", "batch_id": batch_id})
 
 
-@router.post("/seed", response_model=ApiResponse[dict])
+@router.post("/seed", response_model=ApiResponse[dict], dependencies=[Depends(guard_batch_unlocked)])
 async def seed_demo_dataset(
     count: int = 60,
     batch_id: str = "default",
