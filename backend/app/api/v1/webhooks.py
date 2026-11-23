@@ -42,14 +42,19 @@ def _as_utc(value: datetime) -> datetime:
 async def record_rejected_delivery(raw_body: bytes, reason: str) -> None:
     """Remember a refused delivery with its own session; never let bookkeeping change the 400."""
     try:
-        text_body = raw_body.decode("utf-8", errors="replace")
+        # Refused bodies are attacker controlled: cap what is decoded and parsed before anything else.
+        # A UTF-8 character is at most 4 bytes, so this window always holds the stored characters.
+        window = raw_body[: MAX_STORED_BODY_CHARS * 4]
+        text_body = window.decode("utf-8", errors="replace")
+        truncated = len(raw_body) > len(window) or len(text_body) > MAX_STORED_BODY_CHARS
         event_type = "unknown"
-        try:
-            parsed = json.loads(text_body)
-            if isinstance(parsed, dict) and isinstance(parsed.get("event"), str):
-                event_type = parsed["event"][:64]
-        except ValueError:
-            pass
+        if len(raw_body) <= len(window):  # an oversized body is never parsed, so no event type for it
+            try:
+                parsed = json.loads(text_body)
+                if isinstance(parsed, dict) and isinstance(parsed.get("event"), str):
+                    event_type = parsed["event"][:64]
+            except ValueError:
+                pass
         row_id = "rej_" + hashlib.sha256(raw_body).hexdigest()[:60]
         now = datetime.now(UTC)
         async with async_session_factory() as db:
@@ -68,7 +73,7 @@ async def record_rejected_delivery(raw_body: bytes, reason: str) -> None:
                         processing_status=reason,
                         payload={
                             "raw_body": text_body[:MAX_STORED_BODY_CHARS],
-                            "truncated": len(text_body) > MAX_STORED_BODY_CHARS,
+                            "truncated": truncated,
                         },
                         received_at=now,
                     )

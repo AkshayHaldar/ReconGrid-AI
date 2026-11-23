@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -208,6 +209,41 @@ async def test_rejected_bodies_are_truncated(client):
     assert len(item["payload"]["raw_body"]) == webhooks.MAX_STORED_BODY_CHARS
     assert item["payload"]["truncated"] is True
     assert item["event_type"] == "unknown"
+
+
+async def test_an_oversized_rejected_body_is_never_parsed(client, monkeypatch):
+    parsed_sizes = []
+    real_loads = json.loads
+
+    def spy(value, *args, **kwargs):
+        parsed_sizes.append(len(value))
+        return real_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(webhooks, "json", SimpleNamespace(loads=spy))
+    body = b'{"event": "settlement.processed", "pad": "' + b"a" * 2_000_000 + b'"}'
+    resp = await post(client, body, signature="bad")
+    assert resp.status_code == 400
+    assert resp.json()["error"]["message"] == "Invalid webhook signature"
+    assert parsed_sizes == []
+    item = (await client.get("/api/v1/webhooks/recent")).json()["data"][0]
+    assert len(item["payload"]["raw_body"]) == webhooks.MAX_STORED_BODY_CHARS
+    assert item["payload"]["truncated"] is True
+    assert item["event_type"] == "unknown"
+
+
+async def test_multibyte_rejected_body_is_cut_on_characters(client):
+    body = ("\U0001f600" * (webhooks.MAX_STORED_BODY_CHARS + 10)).encode()  # 4 bytes per character
+    await post(client, body, signature="bad")
+    item = (await client.get("/api/v1/webhooks/recent")).json()["data"][0]
+    assert item["payload"]["raw_body"] == "\U0001f600" * webhooks.MAX_STORED_BODY_CHARS
+    assert item["payload"]["truncated"] is True
+
+
+async def test_a_small_rejected_body_still_gets_its_event_type(client):
+    await post(client, settlement_event(event_id="evt_small"), signature="bad")
+    item = (await client.get("/api/v1/webhooks/recent")).json()["data"][0]
+    assert item["event_type"] == "settlement.processed"
+    assert item["payload"]["truncated"] is False
 
 
 async def test_the_same_rejected_delivery_is_stored_once(client):
