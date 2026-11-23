@@ -156,7 +156,11 @@ async def test_signed_malformed_payload_does_not_queue_or_persist(payload, monke
     assert result.status_code == 400
     reconcile.assert_not_awaited()
     async with webhooks.async_session_factory() as db:
-        assert await db.scalar(select(func.count()).select_from(ProcessedWebhookEvent)) == 0
+        # Only the rejection record for the pulse drawer may exist, never an event that could dedupe or queue.
+        accepted = select(func.count()).where(
+            ProcessedWebhookEvent.processing_status.not_in(webhooks.REJECTED_STATUSES)
+        )
+        assert await db.scalar(accepted.select_from(ProcessedWebhookEvent)) == 0
 
 
 def signed_payload(payload):

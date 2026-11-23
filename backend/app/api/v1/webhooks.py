@@ -2,10 +2,11 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from sqlalchemy import select, text, update
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,11 +18,89 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
-from app.schemas.webhook import WebhookAckResponse
+from app.schemas.webhook import WebhookAckResponse, WebhookEventItem, WebhookHealth
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import paise_to_rupees
 
 router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+
+# Deliveries refused before they were accepted are stored with these statuses so the UI can show them.
+REJECTED_SIGNATURE = "REJECTED_SIGNATURE"
+REJECTED_MALFORMED = "REJECTED_MALFORMED"
+REJECTED_STATUSES = (REJECTED_SIGNATURE, REJECTED_MALFORMED)
+MAX_REJECTED_ROWS = 50  # unauthenticated callers can create these, so only the newest are kept
+MAX_STORED_BODY_CHARS = 4096
+IDLE_AFTER = timedelta(hours=24)
+RECENT_EVENTS_DEFAULT = 15
+
+
+def _as_utc(value: datetime) -> datetime:
+    """SQLite hands back naive datetimes; everything stored here is UTC."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def record_rejected_delivery(raw_body: bytes, reason: str) -> None:
+    """Remember a refused delivery with its own session; never let bookkeeping change the 400."""
+    try:
+        text_body = raw_body.decode("utf-8", errors="replace")
+        event_type = "unknown"
+        try:
+            parsed = json.loads(text_body)
+            if isinstance(parsed, dict) and isinstance(parsed.get("event"), str):
+                event_type = parsed["event"][:64]
+        except ValueError:
+            pass
+        row_id = "rej_" + hashlib.sha256(raw_body).hexdigest()[:60]
+        now = datetime.now(UTC)
+        async with async_session_factory() as db:
+            existing = await db.scalar(
+                select(ProcessedWebhookEvent).where(ProcessedWebhookEvent.razorpay_event_id == row_id)
+            )
+            if existing is not None:
+                # The gateway retrying the same bad delivery only moves the timestamp.
+                existing.received_at = now
+                existing.processing_status = reason
+            else:
+                db.add(
+                    ProcessedWebhookEvent(
+                        razorpay_event_id=row_id,
+                        event_type=event_type,
+                        processing_status=reason,
+                        payload={
+                            "raw_body": text_body[:MAX_STORED_BODY_CHARS],
+                            "truncated": len(text_body) > MAX_STORED_BODY_CHARS,
+                        },
+                        received_at=now,
+                    )
+                )
+            await db.flush()
+            keep = (
+                select(ProcessedWebhookEvent.id)
+                .where(ProcessedWebhookEvent.processing_status.in_(REJECTED_STATUSES))
+                .order_by(ProcessedWebhookEvent.received_at.desc())
+                .limit(MAX_REJECTED_ROWS)
+            )
+            await db.execute(
+                delete(ProcessedWebhookEvent).where(
+                    ProcessedWebhookEvent.processing_status.in_(REJECTED_STATUSES),
+                    ProcessedWebhookEvent.id.not_in(keep),
+                )
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("webhook_rejection_record_failed", reason=reason)
+
+
+async def recording_webhook_guard(
+    request: Request,
+    x_razorpay_signature: str = Header(default="", alias="X-Razorpay-Signature"),
+) -> bytes:
+    """razorpay_webhook_guard, plus a record of the delivery when the signature is refused."""
+    try:
+        return await razorpay_webhook_guard(request, x_razorpay_signature)
+    except HTTPException:
+        await record_rejected_delivery(await request.body(), REJECTED_SIGNATURE)
+        raise
 
 
 async def reconcile_webhook_event(event_id: str) -> None:
@@ -91,7 +170,7 @@ async def reconcile_webhook_event(event_id: str) -> None:
 async def handle_razorpay_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
-    raw_body: bytes = Depends(razorpay_webhook_guard),
+    raw_body: bytes = Depends(recording_webhook_guard),
     db: AsyncSession = Depends(get_db),
 ):
     """Verify and commit the event before acknowledging; reconcile after response."""
@@ -108,12 +187,14 @@ async def handle_razorpay_webhook(
         if settlement_id is not None and (not isinstance(settlement_id, str) or len(settlement_id) > 64):
             raise ValueError("Invalid settlement ID")
     except (ValueError, UnicodeError, AttributeError):
+        await record_rejected_delivery(raw_body, REJECTED_MALFORMED)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed JSON webhook body")
 
     # Stable across processes and restarts, unlike Python's randomized hash().
     event_id = payload.get("id") or payload.get("event_id") or hashlib.sha256(raw_body).hexdigest()
     event_type = payload.get("event", "unknown")
     if not isinstance(event_id, str) or len(event_id) > 64 or not isinstance(event_type, str) or len(event_type) > 64:
+        await record_rejected_delivery(raw_body, REJECTED_MALFORMED)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook event metadata")
     stmt = select(ProcessedWebhookEvent).where(ProcessedWebhookEvent.razorpay_event_id == event_id)
     existing = (await db.execute(stmt)).scalar_one_or_none()
@@ -161,5 +242,103 @@ async def handle_razorpay_webhook(
             status="queued" if should_queue else "ok",
             event_id=event_id,
             action_taken="RECONCILIATION_QUEUED" if should_queue else "EVENT_RECORDED",
+        )
+    )
+
+
+def _settlement_entity(payload: Any) -> dict[str, Any]:
+    """Settlement entity of a stored payload, or {} when the payload is not shaped like one."""
+    try:
+        entity = payload["payload"]["settlement"]["entity"]
+    except (KeyError, TypeError):
+        return {}
+    return entity if isinstance(entity, dict) else {}
+
+
+def _event_item(event: ProcessedWebhookEvent) -> WebhookEventItem:
+    entity = _settlement_entity(event.payload)
+    settlement_id, utr = entity.get("id"), entity.get("utr")
+    if event.processing_status == REJECTED_SIGNATURE:
+        signature, ingestion = "INVALID", "REJECTED"
+    elif event.processing_status == REJECTED_MALFORMED:
+        # The signature matched, the body did not make sense.
+        signature, ingestion = "MALFORMED", "REJECTED"
+    elif event.processing_status == "FAILED":
+        signature, ingestion = "VALID", "FAILED"
+    elif event.event_type == "settlement.processed" and entity:
+        signature, ingestion = "VALID", "RECONCILIATION_TRIGGERED"
+    else:
+        signature, ingestion = "VALID", "IGNORED"
+    return WebhookEventItem(
+        event_id=event.razorpay_event_id,
+        event_type=event.event_type,
+        received_at=_as_utc(event.received_at),
+        settlement_id=settlement_id if isinstance(settlement_id, str) else None,
+        utr=utr if isinstance(utr, str) else None,
+        signature_status=signature,  # type: ignore[arg-type]
+        ingestion_status=ingestion,  # type: ignore[arg-type]
+        processing_status=event.processing_status,
+        payload=event.payload if isinstance(event.payload, dict) else {},
+    )
+
+
+@router.get("/recent", response_model=ApiResponse[list[WebhookEventItem]])
+async def list_recent_webhook_events(
+    limit: int = Query(default=RECENT_EVENTS_DEFAULT, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Newest webhook deliveries first, including the ones refused for a bad signature or body."""
+    stmt = (
+        select(ProcessedWebhookEvent)
+        .order_by(ProcessedWebhookEvent.received_at.desc(), ProcessedWebhookEvent.created_at.desc())
+        .limit(limit)
+    )
+    events = (await db.execute(stmt)).scalars().all()
+    return ApiResponse.ok([_event_item(event) for event in events])
+
+
+@router.get("/health", response_model=ApiResponse[WebhookHealth])
+async def webhook_health(db: AsyncSession = Depends(get_db)):
+    """Heartbeat for the header: live, idle, or warning when the newest delivery was refused."""
+    rejected = ProcessedWebhookEvent.processing_status.in_(REJECTED_STATUSES)
+    last_verified = await db.scalar(select(func.max(ProcessedWebhookEvent.received_at)).where(~rejected))
+    last_rejected = await db.scalar(select(func.max(ProcessedWebhookEvent.received_at)).where(rejected))
+    last_verified = _as_utc(last_verified) if last_verified else None
+    last_rejected = _as_utc(last_rejected) if last_rejected else None
+    now = datetime.now(UTC)
+
+    reason = None
+    if last_rejected is not None:
+        reason_status = await db.scalar(
+            select(ProcessedWebhookEvent.processing_status)
+            .where(rejected)
+            .order_by(ProcessedWebhookEvent.received_at.desc())
+            .limit(1)
+        )
+        reason = "INVALID_SIGNATURE" if reason_status == REJECTED_SIGNATURE else "MALFORMED_PAYLOAD"
+
+    rejection_is_current = (
+        last_rejected is not None
+        and now - last_rejected <= IDLE_AFTER
+        and (last_verified is None or last_rejected > last_verified)
+    )
+    if rejection_is_current:
+        pulse = "warning"
+        message = (
+            "Webhook Signature Verification Failed. Verify the webhook secret in Settings."
+            if reason == "INVALID_SIGNATURE"
+            else "A webhook was rejected because its payload was malformed."
+        )
+    elif last_verified is not None and now - last_verified <= IDLE_AFTER:
+        pulse, message = "live", "Verified webhook received in the last 24 hours."
+    else:
+        pulse, message = "idle", "No webhook received in the last 24 hours."
+    return ApiResponse.ok(
+        WebhookHealth(
+            status=pulse,  # type: ignore[arg-type]
+            last_verified_at=last_verified,
+            last_rejected_at=last_rejected,
+            last_rejection_reason=reason,  # type: ignore[arg-type]
+            message=message,
         )
     )

@@ -369,6 +369,8 @@ All routes are under `/api/v1`:
 | `POST` | `/razorpay/sync` | Trigger settlement pull from Razorpay REST API |
 | `GET` | `/razorpay/settlements` | List stored settlements |
 | `POST` | `/webhooks/razorpay` | Ingest real-time webhooks (HMAC-SHA256 verified) |
+| `GET` | `/webhooks/recent` | Last 15 webhook deliveries with signature and ingestion status (including rejected ones) |
+| `GET` | `/webhooks/health` | Gateway pulse: `live`, `idle` (nothing in 24h) or `warning` (latest delivery rejected) |
 | `GET` | `/reconciliation/{batch_id}/status` | Summary metrics (match rate, ₹ reconciled) |
 | `GET` | `/reconciliation/{batch_id}/scorecard` | Audit scorecard with separate Tier 0/1/1.5/2/3 breakdown |
 | `GET` | `/reconciliation/{batch_id}/records` | Paginated records filtered by status or diagnostic code |
