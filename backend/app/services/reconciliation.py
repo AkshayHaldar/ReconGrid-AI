@@ -8,10 +8,11 @@ import hmac
 import json
 import re
 import time
-from collections.abc import Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -24,7 +25,7 @@ from app.core.telemetry import (
 )
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
+from app.models.reconciliation_log import AUDITED_FIELDS, ReconciliationLog, compute_entry_hash, compute_link_hash
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.diagnostics import DiagnosticResult, DiagnosticsService
 from app.utils.fuzzy import is_fuzzy_match
@@ -548,52 +549,78 @@ class AuditChainResult:
     reason: str | None = None
 
 
-def verify_chain(logs: Sequence[ReconciliationLog]) -> AuditChainResult:
+class _ChainWalker:
+    """Takes log rows in chain order, one at a time, and remembers the first one that is broken.
+
+    Works on ORM logs or plain rows: it only reads the audited columns, previous_hash and entry_hash.
+    """
+
+    def __init__(self) -> None:
+        self.expected_previous: str | None = None
+        self.total = 0
+        self.verified = 0
+        self.failure: AuditChainResult | None = None
+
+    def feed(self, log: Any) -> None:
+        self.total += 1
+        if self.failure is not None:
+            return  # already compromised: only keep counting so total_records stays the batch size
+        values = {name: getattr(log, name) for name in AUDITED_FIELDS}
+        if log.previous_hash != self.expected_previous:
+            # A row was deleted, inserted or reordered (or its predecessor's identity was edited).
+            self.failure = self._broken(log, "BROKEN_CHAIN_LINK", self.expected_previous, log.previous_hash)
+            return
+        recomputed = compute_entry_hash(values, log.previous_hash)
+        if recomputed != log.entry_hash:
+            self.failure = self._broken(log, "ENTRY_HASH_MISMATCH", recomputed, log.entry_hash)
+            return
+        self.expected_previous = compute_link_hash(values, log.previous_hash)
+        self.verified += 1
+
+    def _broken(self, log: Any, reason: str, expected: str | None, actual: str | None) -> AuditChainResult:
+        return AuditChainResult(
+            status="COMPROMISED",
+            tampered=True,
+            total_records=0,  # filled in by result() once every row has been counted
+            verified_records=self.verified,
+            failed_at_id=log.id,
+            expected_hash=expected,
+            actual_hash=actual,
+            reason=reason,
+        )
+
+    def result(self) -> AuditChainResult:
+        if self.failure is not None:
+            return replace(self.failure, total_records=self.total)
+        return AuditChainResult(
+            status="VERIFIED",
+            tampered=False,
+            total_records=self.total,
+            verified_records=self.verified,
+            chain_head=self.expected_previous,
+        )
+
+
+def verify_chain(logs: Iterable[Any]) -> AuditChainResult:
     """Checks, in chain order, that every row links to its predecessor and still matches its own entry_hash.
 
-    O(N): each row is hashed once. Stops at the first broken row so the caller gets its exact id.
+    O(N): each row is hashed once. Reports the first broken row so the caller gets its exact id.
     """
-    total = len(logs)
-    expected_previous: str | None = None
-    for index, log in enumerate(logs):
-        if log.previous_hash != expected_previous:
-            # A row was deleted, inserted or reordered (or its predecessor's identity was edited).
-            return AuditChainResult(
-                status="COMPROMISED",
-                tampered=True,
-                total_records=total,
-                verified_records=index,
-                failed_at_id=log.id,
-                expected_hash=expected_previous,
-                actual_hash=log.previous_hash,
-                reason="BROKEN_CHAIN_LINK",
-            )
-        recomputed = log.compute_entry_hash()
-        if recomputed != log.entry_hash:
-            return AuditChainResult(
-                status="COMPROMISED",
-                tampered=True,
-                total_records=total,
-                verified_records=index,
-                failed_at_id=log.id,
-                expected_hash=recomputed,
-                actual_hash=log.entry_hash,
-                reason="ENTRY_HASH_MISMATCH",
-            )
-        expected_previous = log.compute_link_hash()
-    return AuditChainResult(
-        status="VERIFIED",
-        tampered=False,
-        total_records=total,
-        verified_records=total,
-        chain_head=expected_previous,
-    )
+    walker = _ChainWalker()
+    for log in logs:
+        walker.feed(log)
+    return walker.result()
 
 
 async def verify_batch_audit_chain(recon_repo: ReconciliationRepository, batch_id: str) -> AuditChainResult:
-    """Verifies the whole SHA-256 audit chain of a batch against what is actually stored in the database."""
-    logs = await recon_repo.get_chain_logs(batch_id)
-    return verify_chain(logs)
+    """Verifies the whole SHA-256 audit chain of a batch against what is actually stored in the database.
+
+    Rows are streamed from the database in chunks, so memory stays flat however many logs the batch holds.
+    """
+    walker = _ChainWalker()
+    async for row in recon_repo.stream_chain_rows(batch_id):
+        walker.feed(row)
+    return walker.result()
 
 
 def build_audit_certificate(batch_id: str, result: AuditChainResult, signing_key: str = "") -> dict:

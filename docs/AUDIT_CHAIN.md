@@ -12,13 +12,13 @@ Every row in `reconciliation_logs` is part of a per-batch hash chain, so a row e
 Audited fields: `id, batch_id, bank_tx_id, rzp_settlement_id, match_status, match_tier, confidence_score, delta_amount, diagnostic_type, diagnostic_note, matched_at, human_action, created_at`.
 `superseded`, `superseded_by_id` and `updated_at` are bookkeeping that the engine flips on old rows, so they are not hashed.
 
-The link hash is a second SHA-256 over only `id, batch_id, bank_tx_id, created_at` and the row's own `previous_hash`. It is kept separate from `entry_hash` on purpose: approve, deny, conflict resolution and batch-approve edit a row in place, so they only re-seal that row's `entry_hash`. Chain order (`created_at`, strictly increasing per batch) and the links are never rewritten.
+The link hash is a second SHA-256 over only `id, batch_id, bank_tx_id, created_at` and the row's own `previous_hash`. It is kept separate from `entry_hash` on purpose: approve, deny, conflict resolution and batch-approve edit a row in place, so they only re-seal that row's `entry_hash`, and only if the stored row still matched its seal before the edit. A row changed with plain SQL stays flagged even after a later approve or deny. Chain order (`created_at`, strictly increasing per batch) and the links are never rewritten.
 
 Hashes are computed in a SQLAlchemy `before_flush` hook (`app/models/reconciliation_log.py`), so every writer is covered: the reconciliation engine, the manual action endpoints and anything else that adds a `ReconciliationLog`. Values are canonicalised (UTC microsecond timestamps, 2dp decimals) so a hash computed before insert matches the one recomputed from the stored row, on SQLite and PostgreSQL.
 
 ## Endpoints
 
-`GET /api/v1/reconciliation/{batch_id}/verify-audit-chain` walks the whole batch (superseded rows included) in O(N).
+`GET /api/v1/reconciliation/{batch_id}/verify-audit-chain` walks the whole batch (superseded rows included) in O(N), streaming the rows from the database in chunks so memory stays flat.
 
 ```json
 { "success": true, "data": { "status": "VERIFIED", "tampered": false, "total_records": 120, "verified_records": 120, "chain_head": "..." } }

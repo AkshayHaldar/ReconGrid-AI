@@ -325,6 +325,95 @@ async def test_manual_action_then_sql_edit_is_still_caught(db_session: AsyncSess
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "deny"])
+async def test_sql_edit_before_a_manual_action_stays_compromised(db_session: AsyncSession, action: str):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        records = await _api_batch(client)
+        rec_id = records[0]["id"]
+        assert (await _verify_api(client))["status"] == "VERIFIED"
+
+        await db_session.execute(
+            text(
+                "UPDATE reconciliation_logs SET delta_amount = 0.01, diagnostic_note = 'edited in SQL' WHERE id = :id"
+            ),
+            {"id": rec_id},
+        )
+        await db_session.commit()
+
+        resp = await client.post(f"/api/v1/reconciliation/records/{rec_id}/{action}", json={"note": "routine"})
+        assert resp.status_code == 200
+
+        data = await _verify_api(client)
+        assert data["status"] == "COMPROMISED"
+        assert data["failed_at_id"] == rec_id
+        assert data["reason"] == "ENTRY_HASH_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_sql_edit_before_batch_approve_stays_compromised(db_session: AsyncSession):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await _api_batch(client)
+        victim = (
+            (
+                await db_session.execute(
+                    select(ReconciliationLog).where(
+                        ReconciliationLog.match_status == "SUGGESTED", ReconciliationLog.superseded == False
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert victim is not None, "fixture batch should contain a SUGGESTED row"
+        victim_id = victim.id
+        db_session.expunge_all()
+        await db_session.execute(
+            text("UPDATE reconciliation_logs SET confidence_score = 0.99 WHERE id = :id"), {"id": victim_id}
+        )
+        await db_session.commit()
+
+        resp = await client.post("/api/v1/reconciliation/default/batch-approve", json={"min_confidence": 0.0})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["approved_count"] > 0
+
+        data = await _verify_api(client)
+        assert data["status"] == "COMPROMISED"
+        assert data["failed_at_id"] == victim_id
+
+
+@pytest.mark.asyncio
+async def test_verify_streams_rows_in_chunks_without_loading_orm_objects(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    from app.repositories import reconciliation_repo
+
+    monkeypatch.setattr(reconciliation_repo, "CHAIN_STREAM_CHUNK", 2)
+    await _seed_and_reconcile(db_session)
+    db_session.expunge_all()
+
+    result = await _verify(db_session)
+    assert result.status == "VERIFIED"
+    assert result.total_records == result.verified_records == 5
+    assert len(db_session.identity_map) == 0
+
+    victim = (
+        (await db_session.execute(select(ReconciliationLog).order_by(ReconciliationLog.created_at))).scalars().all()[1]
+    )
+    victim_id = victim.id
+    db_session.expunge_all()
+    await db_session.execute(
+        text("UPDATE reconciliation_logs SET diagnostic_note = 'x' WHERE id = :id"), {"id": victim_id}
+    )
+    await db_session.commit()
+
+    result = await _verify(db_session)
+    assert result.status == "COMPROMISED"
+    assert result.failed_at_id == victim_id
+    assert result.verified_records == 1
+    assert result.total_records == 5  # rows after the break are still counted
+
+
+@pytest.mark.asyncio
 async def test_batch_approve_reseals_rows(db_session: AsyncSession):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await _api_batch(client)

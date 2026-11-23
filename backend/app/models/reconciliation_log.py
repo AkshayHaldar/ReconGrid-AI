@@ -7,7 +7,8 @@ Every row carries a SHA-256 audit chain so out-of-band edits (plain SQL) are det
   A link hash only covers a row's identity (id, batch_id, bank_tx_id, created_at) plus its own previous_hash.
 
 Human decisions (approve / deny / resolve) edit a row in place, so they re-seal that one row's ``entry_hash``
-without touching its neighbours. Deleting, inserting or reordering rows breaks the link hashes instead.
+without touching its neighbours, but only when the stored row still matched its seal beforehand: a row that was
+edited with plain SQL stays COMPROMISED after a later approve. Deleting, inserting or reordering rows breaks the link hashes instead.
 ``superseded``, ``superseded_by_id`` and ``updated_at`` are lifecycle bookkeeping and are not audited.
 """
 
@@ -20,6 +21,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Numeric, String, Text, event, select, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from app.core.database import Base
@@ -182,15 +184,58 @@ def _utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
+def _audited_fields_changed(log: ReconciliationLog) -> bool:
+    """True when an audited column has a pending net change (lifecycle columns like superseded do not count)."""
+    attrs = sa_inspect(log).attrs
+    return any(attrs[name].history.has_changes() for name in AUDITED_FIELDS)
+
+
+def audit_columns() -> list[Any]:
+    """Every column needed to recompute a row's entry_hash, plus the stored seal itself."""
+    return [
+        *(getattr(ReconciliationLog, name) for name in AUDITED_FIELDS),
+        ReconciliationLog.previous_hash,
+        ReconciliationLog.entry_hash,
+    ]
+
+
+def row_matches_seal(row: Any) -> bool:
+    """True when a row selected with ``audit_columns()`` still hashes to its stored entry_hash."""
+    return compute_entry_hash(row._mapping, row.previous_hash) == row.entry_hash
+
+
+def _ids_with_intact_stored_row(session: Session, ids: list[str]) -> set[str]:
+    """Ids whose row, as currently stored in the database, still matches its own entry_hash.
+
+    Reads the stored columns (not the pending ORM values), so a plain-SQL edit made after the row was
+    sealed shows up here even if the application is now changing the same row through the ORM.
+    """
+    connection = session.connection()
+    intact: set[str] = set()
+    for start in range(0, len(ids), 500):
+        stmt = select(*audit_columns()).where(ReconciliationLog.id.in_(ids[start : start + 500]))
+        intact.update(row.id for row in connection.execute(stmt) if row_matches_seal(row))
+    return intact
+
+
 @event.listens_for(Session, "before_flush")
 def _chain_reconciliation_logs(session: Session, flush_context: Any, instances: Any) -> None:
     """Seal new logs onto their batch's chain and re-seal logs whose audited fields were edited.
 
     Runs for every writer (engine, approve/deny/resolve handlers, tests), so no log is ever stored unchained.
     """
-    for obj in session.dirty:
-        if isinstance(obj, ReconciliationLog) and obj.entry_hash is not None and session.is_modified(obj):
-            obj.seal()
+    edited = [
+        o
+        for o in session.dirty
+        if isinstance(o, ReconciliationLog) and o.entry_hash is not None and _audited_fields_changed(o)
+    ]
+    if edited:
+        intact = _ids_with_intact_stored_row(session, [o.id for o in edited])
+        for obj in edited:
+            # A row whose stored state no longer matches its seal was edited out of band: leave the old
+            # entry_hash in place so verification keeps reporting it instead of blessing the tampered values.
+            if obj.id in intact:
+                obj.seal()
 
     new_logs = [o for o in session.new if isinstance(o, ReconciliationLog) and o.entry_hash is None]
     if not new_logs:
