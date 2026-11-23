@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { formatFiscalPeriod } from "@/lib/formatters";
 import { fetchGatewayHealth } from "@/lib/api";
 import { GATEWAY_POLL_MS, formatRelative, pulseView } from "@/lib/gatewayPulse";
@@ -45,17 +45,20 @@ export const Header: React.FC<HeaderProps> = ({
   const [health, setHealth] = useState<GatewayHealth | null>(null);
   const [healthFailed, setHealthFailed] = useState(false);
   const [pulseOpen, setPulseOpen] = useState(false);
+  const latestPoll = useRef(0);
 
   // Heartbeat: ask the backend for webhook health now and every 30 seconds.
   useEffect(() => {
     const controller = new AbortController();
     const poll = async () => {
+      const pollId = ++latestPoll.current; // a slow older poll must not overwrite a newer answer
       try {
         const next = await fetchGatewayHealth(controller.signal);
+        if (pollId !== latestPoll.current) return;
         setHealth(next);
         setHealthFailed(false);
       } catch {
-        if (!controller.signal.aborted) setHealthFailed(true);
+        if (!controller.signal.aborted && pollId === latestPoll.current) setHealthFailed(true);
       }
     };
     poll();

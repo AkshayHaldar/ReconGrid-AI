@@ -42,7 +42,7 @@ export function ingestionLabel(status: WebhookIngestionStatus): string {
   }
 }
 
-/** "just now", "5 min ago", "3 h ago", "2 d ago". Future or unreadable times fall back to "--". */
+/** "just now", "5 min ago", "3 h ago", "2 d ago". A time slightly in the future (clock skew) reads as "just now"; missing or unreadable times give "--". */
 export function formatRelative(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return "--";
   const then = new Date(iso).getTime();
@@ -73,13 +73,22 @@ export function formatEventTimestamp(iso: string | null | undefined): string {
   });
 }
 
+/** Events arrive newest first. A refusal only counts until a verified delivery has come in after it. */
+function refusedSinceLastVerified(events: WebhookEventItem[], status: WebhookSignatureStatus): boolean {
+  for (const e of events) {
+    if (e.signature_status === "VALID") return false;
+    if (e.signature_status === status) return true;
+  }
+  return false;
+}
+
 /** True when the drawer should show the signature failure banner. */
 export function hasSignatureFailure(events: WebhookEventItem[]): boolean {
-  return events.some((e) => e.signature_status === "INVALID");
+  return refusedSinceLastVerified(events, "INVALID");
 }
 
 export function hasMalformedPayload(events: WebhookEventItem[]): boolean {
-  return events.some((e) => e.signature_status === "MALFORMED");
+  return refusedSinceLastVerified(events, "MALFORMED");
 }
 
 /** Rejected deliveries store the body as text because it could not be trusted or parsed. */

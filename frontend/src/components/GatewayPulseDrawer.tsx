@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { X, Activity, AlertTriangle, ChevronRight, ChevronDown, RefreshCw, ShieldCheck, ShieldX } from "lucide-react";
 import { GatewayHealth, WebhookEventItem } from "@/lib/types";
 import { fetchRecentWebhookEvents } from "@/lib/api";
@@ -169,17 +169,22 @@ export const GatewayPulseDrawer: React.FC<GatewayPulseDrawerProps> = ({ open, he
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Only the newest request may update state, so a slow older response cannot overwrite fresher rows.
+  const latestRequest = useRef(0);
+
   const load = useCallback(async (signal?: AbortSignal) => {
+    const requestId = ++latestRequest.current;
     setLoading(true);
     try {
       const rows = await fetchRecentWebhookEvents(signal);
+      if (requestId !== latestRequest.current) return;
       setEvents(rows);
       setError(null);
     } catch (e) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || requestId !== latestRequest.current) return;
       setError("Could not load webhook activity. Retrying automatically.");
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && requestId === latestRequest.current) setLoading(false);
     }
   }, []);
 

@@ -72,10 +72,19 @@ test("timestamps are shown in India's time zone", () => {
 
 test("banner helpers look at the signature status", () => {
   const ev = (signature_status) => ({ signature_status });
-  assert.equal(hasSignatureFailure([ev("VALID"), ev("INVALID")]), true);
+  assert.equal(hasSignatureFailure([ev("INVALID"), ev("VALID")]), true);
+  assert.equal(hasSignatureFailure([ev("INVALID"), ev("MALFORMED")]), true);
   assert.equal(hasSignatureFailure([ev("VALID"), ev("MALFORMED")]), false);
   assert.equal(hasMalformedPayload([ev("MALFORMED")]), true);
   assert.equal(hasMalformedPayload([]), false);
+});
+
+test("a verified delivery after a refusal clears its banner", () => {
+  const ev = (signature_status) => ({ signature_status });
+  // newest first: a good delivery arrived after the old failures
+  assert.equal(hasSignatureFailure([ev("VALID"), ev("INVALID")]), false);
+  assert.equal(hasMalformedPayload([ev("VALID"), ev("MALFORMED")]), false);
+  assert.equal(hasSignatureFailure([ev("MALFORMED"), ev("VALID"), ev("INVALID")]), false);
 });
 
 test("rejected deliveries expose their raw text", () => {
