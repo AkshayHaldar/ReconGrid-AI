@@ -108,6 +108,24 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const INDIA_TIME_ZONE = "Asia/Kolkata";
 
 /**
+ * The calendar month of a period as 'Aug 2026', read in India's time zone like formatFiscalPeriod.
+ * Uses the given date, or today when it is missing or unreadable.
+ */
+export function formatPeriodLabel(date?: string | Date | null): string {
+  let d = date ? new Date(date) : new Date();
+  if (isNaN(d.getTime())) d = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: INDIA_TIME_ZONE,
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(d);
+  const year = Number(parts.find((p) => p.type === "year")?.value);
+  const month = Number(parts.find((p) => p.type === "month")?.value) - 1;
+  return `${MONTH_NAMES[month]} ${year}`;
+}
+
+/**
  * The accounting period shown in the header, in the Indian fiscal year (April to March):
  * 'Aug 2026 Close (FY 26-27)'. Uses the given date, or today when it is missing or unreadable.
  *

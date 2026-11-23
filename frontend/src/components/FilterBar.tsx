@@ -28,6 +28,8 @@ interface FilterBarProps {
   toDate?: string;
   onDateRangeChange?: (fromDate?: string, toDate?: string) => void;
   periodDate?: string | Date | null;
+  /** The period is signed off, so bulk approval is disabled. */
+  isLocked?: boolean;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -45,6 +47,7 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   toDate,
   onDateRangeChange,
   periodDate,
+  isLocked = false,
 }) => {
   const tabs = [
     { id: "ALL", label: "All Records", count: status?.total_records || 0, shortcut: "1" },
@@ -213,9 +216,9 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           {onBatchApprove && (activeTab === "SUGGESTED" || highConfidenceCandidates > 0) && (
             <button
               onClick={onBatchApprove}
-              disabled={batchApproveLoading || highConfidenceCandidates === 0 || (activeTab !== "ALL" && activeTab !== "SUGGESTED")}
+              disabled={isLocked || batchApproveLoading || highConfidenceCandidates === 0 || (activeTab !== "ALL" && activeTab !== "SUGGESTED")}
               className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-800/80 text-emerald-300 hover:text-emerald-100 rounded-md text-xs font-semibold transition disabled:opacity-50 whitespace-nowrap shadow-xs shrink-0 cursor-pointer"
-              title="Batch approve all suggestions with confidence ≥ 90%"
+              title={isLocked ? "Period is locked and signed off (read-only)" : "Batch approve all suggestions with confidence ≥ 90%"}
             >
               <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
               <span>

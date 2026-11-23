@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { formatFiscalPeriod } from "@/lib/formatters";
+import { formatFiscalPeriod, formatPeriodLabel, formatDate } from "@/lib/formatters";
 import { fetchGatewayHealth } from "@/lib/api";
 import { GATEWAY_POLL_MS, formatRelative, pulseView } from "@/lib/gatewayPulse";
 import { GatewayHealth } from "@/lib/types";
@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   X,
   Keyboard,
+  Lock,
+  ShieldCheck,
 } from "lucide-react";
 
 interface HeaderProps {
@@ -28,6 +30,13 @@ interface HeaderProps {
   onExportXlsx?: () => void;
   /** The active batch's date. The fiscal period follows it, or today when it is missing. */
   periodDate?: string | Date | null;
+  /** Month-end close: opens the sign-off modal. The button is hidden once the batch is locked. */
+  onOpenSignOff?: () => void;
+  /** The batch was signed off, so the ledger is read-only. */
+  isLocked?: boolean;
+  lockedBy?: string | null;
+  lockedAt?: string | null;
+  lockNote?: string | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,6 +49,11 @@ export const Header: React.FC<HeaderProps> = ({
   onExportTally,
   onExportXlsx,
   periodDate,
+  onOpenSignOff,
+  isLocked = false,
+  lockedBy,
+  lockedAt,
+  lockNote,
 }) => {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [health, setHealth] = useState<GatewayHealth | null>(null);
@@ -231,17 +245,50 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
+              {/* Month-end close (outline); replaced by the certificate strip once locked */}
+              {onOpenSignOff && !isLocked && (
+                <button
+                  onClick={onOpenSignOff}
+                  className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-transparent hover:bg-[#161922] border border-neutral-700 hover:border-neutral-500 text-neutral-200 hover:text-white rounded-md text-xs font-medium transition whitespace-nowrap cursor-pointer"
+                  title="Verify the audit pre-flight checks and freeze this period"
+                  aria-label="Close & Sign Off Period"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
+                  <span className="hidden sm:inline">Close &amp; Sign Off Period</span>
+                </button>
+              )}
+
               {/* Upload Bank Statement (primary) */}
               <button
                 onClick={onOpenUpload}
-                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-white text-neutral-900 rounded-md text-xs font-semibold shadow-xs transition transform active:scale-98 whitespace-nowrap cursor-pointer"
+                disabled={isLocked}
+                title={isLocked ? "This period is locked. Uploads are rejected." : undefined}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 bg-neutral-100 hover:bg-white text-neutral-900 rounded-md text-xs font-semibold shadow-xs transition transform active:scale-98 whitespace-nowrap cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <UploadCloud className="w-3.5 h-3.5" />
+                {isLocked ? <Lock className="w-3.5 h-3.5" /> : <UploadCloud className="w-3.5 h-3.5" />}
                 <span>Upload Statement</span>
               </button>
             </div>
           </div>
         </div>
+
+        {/* Institutional certificate badge for a signed-off period */}
+        {isLocked && (
+          <div
+            data-testid="lock-certificate"
+            className="w-full max-w-[1920px] mx-auto mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 rounded-md border border-emerald-800/60 bg-emerald-950/30 text-emerald-200"
+          >
+            <span className="flex items-center gap-1.5 text-xs font-semibold font-mono">
+              <Lock className="w-3.5 h-3.5 text-emerald-400" />
+              <span suppressHydrationWarning>{formatPeriodLabel(periodDate)}</span> • LOCKED &amp; SIGNED (Audit Immutable)
+            </span>
+            <span className="text-[11px] text-emerald-300/80 font-sans" suppressHydrationWarning>
+              Signed off by {lockedBy || "unknown"}
+              {lockedAt ? ` on ${formatDate(lockedAt)}` : ""}
+              {lockNote ? ` · ${lockNote}` : ""}
+            </span>
+          </div>
+        )}
       </header>
 
       <GatewayPulseDrawer open={pulseOpen} health={health} onClose={() => setPulseOpen(false)} />

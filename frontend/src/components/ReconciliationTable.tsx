@@ -18,6 +18,7 @@ import {
   Code2,
   Percent,
   Layers,
+  Lock,
 } from "lucide-react";
 import { ReconciliationRecordItem } from "@/lib/types";
 import { formatDate, formatINR } from "@/lib/formatters";
@@ -33,6 +34,8 @@ interface ReconciliationTableProps {
   onDeny: (recordId: string) => void;
   onOpenConflict: (record: ReconciliationRecordItem) => void;
   onOpenException: (record: ReconciliationRecordItem) => void;
+  /** The period is signed off: approve / deny / resolve are disabled and show a padlock. */
+  isLocked?: boolean;
   loading: boolean;
   totalCount?: number | null;
   hasMore?: boolean;
@@ -67,6 +70,8 @@ const measureRow = (
   return instance.measurementsCache[index]?.size ?? ROW_HEIGHT;
 };
 
+const LOCKED_TITLE = "Period is locked and signed off (read-only)";
+
 interface LedgerRowProps {
   r: ReconciliationRecordItem;
   index: number;
@@ -80,6 +85,7 @@ interface LedgerRowProps {
   onDeny: (recordId: string) => void;
   onOpenConflict: (record: ReconciliationRecordItem) => void;
   onOpenException: (record: ReconciliationRecordItem) => void;
+  isLocked: boolean;
 }
 
 // Memoized so a scroll tick (which re-renders the table) only touches rows
@@ -97,6 +103,7 @@ const LedgerRow = React.memo(function LedgerRow({
   onDeny,
   onOpenConflict,
   onOpenException,
+  isLocked,
 }: LedgerRowProps) {
   const isDebit = r.bank_direction === "DEBIT";
   const deltaNum = parseFloat(r.delta_amount || "0");
@@ -263,17 +270,21 @@ const LedgerRow = React.memo(function LedgerRow({
                 <div className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => onApprove(r.id)}
-                    className="p-1.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/80 text-emerald-300 rounded-md transition shadow-xs cursor-pointer"
-                    title="Approve Settlement Match"
+                    disabled={isLocked}
+                    className="p-1.5 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-800/80 text-emerald-300 rounded-md transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-emerald-950/80"
+                    title={isLocked ? LOCKED_TITLE : "Approve Settlement Match"}
+                    aria-label={isLocked ? LOCKED_TITLE : "Approve Settlement Match"}
                   >
-                    <Check className="w-3.5 h-3.5" />
+                    {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
                   </button>
                   <button
                     onClick={() => onDeny(r.id)}
-                    className="p-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 rounded-md transition shadow-xs cursor-pointer"
-                    title="Deny / Mark Exception"
+                    disabled={isLocked}
+                    className="p-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-300 rounded-md transition shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-rose-950/80"
+                    title={isLocked ? LOCKED_TITLE : "Deny / Mark Exception"}
+                    aria-label={isLocked ? LOCKED_TITLE : "Deny / Mark Exception"}
                   >
-                    <X className="w-3.5 h-3.5" />
+                    {isLocked ? <Lock className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               )}
@@ -284,9 +295,11 @@ const LedgerRow = React.memo(function LedgerRow({
                     e.stopPropagation();
                     onOpenConflict(r);
                   }}
-                  className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-800/80 text-amber-300 rounded-md text-[10px] font-mono transition flex items-center gap-1 ml-auto shadow-xs cursor-pointer"
+                  disabled={isLocked}
+                  title={isLocked ? LOCKED_TITLE : undefined}
+                  className="px-2.5 py-1 bg-amber-950/80 hover:bg-amber-900 border border-amber-800/80 text-amber-300 rounded-md text-[10px] font-mono transition flex items-center gap-1 ml-auto shadow-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-950/80"
                 >
-                  <Split className="w-3 h-3" />
+                  {isLocked ? <Lock className="w-3 h-3" /> : <Split className="w-3 h-3" />}
                   Resolve
                 </button>
               )}
@@ -377,7 +390,9 @@ const LedgerRow = React.memo(function LedgerRow({
                             e.stopPropagation();
                             onOpenConflict(r);
                           }}
-                          className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-sans font-semibold transition cursor-pointer"
+                          disabled={isLocked}
+                          title={isLocked ? LOCKED_TITLE : undefined}
+                          className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-sans font-semibold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           Open Conflict Resolver
                         </button>
@@ -411,6 +426,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   onDeny,
   onOpenConflict,
   onOpenException,
+  isLocked = false,
   loading,
   totalCount, hasMore = false, loadingMore = false, error,
   onLoadMore, onRetry, serverSort, onSortChange,
@@ -640,6 +656,7 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                   onDeny={onDeny}
                   onOpenConflict={onOpenConflict}
                   onOpenException={onOpenException}
+                  isLocked={isLocked}
                 />
               );
             })}

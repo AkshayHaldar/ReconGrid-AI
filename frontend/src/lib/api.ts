@@ -1,4 +1,13 @@
-import { ApiResponse, GatewayHealth, QaAskResponse, WebhookEventItem, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
+import {
+  ApiResponse,
+  BatchLockStatus,
+  GatewayHealth,
+  QaAskResponse,
+  ReconciliationRecordItem,
+  ReconciliationStatus,
+  TaxSchedule,
+  WebhookEventItem,
+} from "./types";
 
 /**
  * Resolves the API base URL depending on execution environment:
@@ -82,6 +91,48 @@ export async function fetchStatus(batchId: string = "default"): Promise<Reconcil
   const res = await fetch(`${base}/reconciliation/${batchId}/status`, { cache: "no-store" });
   if (!res.ok) throw new Error("Failed to fetch reconciliation status");
   const json: ApiResponse<ReconciliationStatus> = await res.json();
+  return json.data;
+}
+
+/** The batch was signed off: the API answers 423 Locked to any write. */
+export class BatchLockedError extends Error {
+  code = "BATCH_LOCKED";
+  constructor(message = "This period is locked and signed off. The ledger is read-only.") {
+    super(message);
+    this.name = "BatchLockedError";
+  }
+}
+
+/** Throws BatchLockedError for HTTP 423, otherwise the given generic message. */
+function failedWrite(res: Response, fallback: string): Error {
+  return res.status === 423 ? new BatchLockedError() : new Error(fallback);
+}
+
+export async function fetchLockStatus(batchId: string = "default"): Promise<BatchLockStatus> {
+  const res = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(batchId)}/lock`, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load period close checks");
+  const json: ApiResponse<BatchLockStatus> = await res.json();
+  return json.data;
+}
+
+/** Close and sign off the period. Rejects with the server's message when pre-flight fails. */
+export async function lockBatch(
+  batchId: string,
+  lockedBy: string,
+  lockNote?: string
+): Promise<BatchLockStatus> {
+  const res = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(batchId)}/lock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ locked_by: lockedBy, lock_note: lockNote || null }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const error = new Error(err.error?.message || "Failed to sign off the period");
+    (error as any).code = err.error?.code;
+    throw error;
+  }
+  const json: ApiResponse<BatchLockStatus> = await res.json();
   return json.data;
 }
 
@@ -187,7 +238,7 @@ export async function approveRecord(recordId: string, note?: string): Promise<Re
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
   });
-  if (!res.ok) throw new Error("Failed to approve record");
+  if (!res.ok) throw failedWrite(res, "Failed to approve record");
   const json = await res.json();
   return json.data;
 }
@@ -201,7 +252,7 @@ export async function batchApprove(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ min_confidence: minConfidence }),
   });
-  if (!res.ok) throw new Error("Failed to batch approve suggestions");
+  if (!res.ok) throw failedWrite(res, "Failed to batch approve suggestions");
   const json: ApiResponse<{ approved_count: number; batch_id: string }> = await res.json();
   return json.data;
 }
@@ -212,7 +263,7 @@ export async function denyRecord(recordId: string, note?: string): Promise<Recon
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
   });
-  if (!res.ok) throw new Error("Failed to deny record");
+  if (!res.ok) throw failedWrite(res, "Failed to deny record");
   const json = await res.json();
   return json.data;
 }
@@ -223,7 +274,7 @@ export async function revertRecord(recordId: string, note?: string): Promise<Rec
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
   });
-  if (!res.ok) throw new Error("Failed to revert action");
+  if (!res.ok) throw failedWrite(res, "Failed to revert action");
   const json = await res.json();
   return json.data;
 }
@@ -238,7 +289,7 @@ export async function resolveConflict(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chosen_settlement_id: chosenSettlementId, note }),
   });
-  if (!res.ok) throw new Error("Failed to resolve conflict");
+  if (!res.ok) throw failedWrite(res, "Failed to resolve conflict");
   const json = await res.json();
   return json.data;
 }
