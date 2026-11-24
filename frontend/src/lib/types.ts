@@ -166,3 +166,28 @@ export interface TaxSchedule {
   tds_deviations: TdsDeviation[];
   tds_unverifiable: number;
 }
+
+export type GatewayPulseStatus = "live" | "idle" | "warning";
+
+export interface GatewayHealth {
+  status: GatewayPulseStatus;
+  last_verified_at: string | null;
+  last_rejected_at: string | null;
+  last_rejection_reason: "INVALID_SIGNATURE" | "MALFORMED_PAYLOAD" | null;
+  message: string;
+}
+
+export type WebhookSignatureStatus = "VALID" | "INVALID" | "MALFORMED";
+export type WebhookIngestionStatus = "RECONCILIATION_TRIGGERED" | "IGNORED" | "FAILED" | "REJECTED";
+
+export interface WebhookEventItem {
+  event_id: string;
+  event_type: string;
+  received_at: string;
+  settlement_id: string | null;
+  utr: string | null;
+  signature_status: WebhookSignatureStatus;
+  ingestion_status: WebhookIngestionStatus;
+  processing_status: string;
+  payload: Record<string, unknown>;
+}

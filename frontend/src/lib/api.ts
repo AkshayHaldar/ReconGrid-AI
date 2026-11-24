@@ -1,4 +1,4 @@
-import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
+import { ApiResponse, GatewayHealth, QaAskResponse, WebhookEventItem, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
 
 /**
  * Resolves the API base URL depending on execution environment:
@@ -327,5 +327,19 @@ export async function askQaAgent(
   });
   if (!res.ok) throw new Error("Failed to consult Settlement Q&A Agent");
   const json: ApiResponse<QaAskResponse> = await res.json();
+  return json.data;
+}
+
+export async function fetchGatewayHealth(signal?: AbortSignal): Promise<GatewayHealth> {
+  const res = await fetch(`${getApiBase()}/webhooks/health`, { cache: "no-store", signal });
+  if (!res.ok) throw new Error("Failed to fetch gateway health");
+  const json: ApiResponse<GatewayHealth> = await res.json();
+  return json.data;
+}
+
+export async function fetchRecentWebhookEvents(signal?: AbortSignal): Promise<WebhookEventItem[]> {
+  const res = await fetch(`${getApiBase()}/webhooks/recent`, { cache: "no-store", signal });
+  if (!res.ok) throw new Error("Failed to fetch recent webhook events");
+  const json: ApiResponse<WebhookEventItem[]> = await res.json();
   return json.data;
 }
