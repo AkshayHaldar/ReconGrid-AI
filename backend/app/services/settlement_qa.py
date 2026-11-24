@@ -110,15 +110,15 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
     if any(k in q for k in ("verfie", "verif", "resolve", "how do i", "how to", "what should i do", "action", "how can i", "fix", "approve")):
         if log.match_status == "CONFLICT":
             return (
-                f"⚔️ **How to Verify & Resolve Conflict for {setl_id}**:\n\n"
+                f"**How to Verify & Resolve Conflict for {setl_id}**:\n\n"
                 f"1. Click **'Highlight in Ledger'** below to jump directly to this transaction.\n"
                 "2. Click the **'Resolve Conflict'** button on the row to open the **Conflict Resolution Drawer**.\n"
-                "3. Review the candidate bank credits claiming this settlement. Select the legitimate transaction and click **'Confirm Assignment'**.\n"
+                "3. Review the candidate bank credits claiming this settlement. Select the legitimate transaction and click **'Assign & Resolve'**.\n"
                 "4. The selected row will be locked as `OK MATCHED`, and duplicate claims will be transferred to `EXCEPTION`."
             )
         elif log.match_status == "SUGGESTED":
             return (
-                f"⚖️ **How to Verify & Approve Suggested Match for {setl_id}**:\n\n"
+                f"**How to Verify & Approve Suggested Match for {setl_id}**:\n\n"
                 f"• This transaction ({bank_amt}) was suggested with {int(log.confidence_score * 100)}% descriptor similarity.\n"
                 "• **1-Click Approval**: Click the green checkmark (**Approve**) on the table row to lock it as `OK MATCHED`.\n"
                 "• **Bulk Approval**: Click **'Batch Approve (≥90%)'** in the top filter bar to approve all high-confidence suggestions at once.\n"
@@ -126,21 +126,21 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
             )
         elif log.match_status == "EXCEPTION":
             return (
-                f"🚨 **How to Audit & Resolve Exception ({bank_amt})**:\n\n"
+                f"**How to Audit & Resolve Exception ({bank_amt})**:\n\n"
                 "1. Click **'Highlight in Ledger'** below to locate this row.\n"
                 "2. Click the **Audit Drawer** (inspect button) to review the raw bank statement row and error diagnostics.\n"
                 "3. If this was an internal P2P deposit, interest, or bank fee, add an audit remark and keep it as a verified exception.\n"
-                "4. If awaiting gateway settlement, click **'Sync / Seed'** in the top bar to pull subsequent settlement batches."
+                "4. If awaiting gateway settlement, click **'Sync Gateway & Test Data'** in the top bar to pull subsequent settlement batches."
             )
         elif log.match_status == "PENDING_SETTLEMENT_DATA":
             return (
-                f"⏳ **How to Handle In-Transit Settlement ({bank_amt})**:\n\n"
+                f"**How to Handle In-Transit Settlement ({bank_amt})**:\n\n"
                 f"• This bank transaction is within the active settlement window (≤5 days old).\n"
-                "• Click **'Sync / Seed'** in the top bar to pull the latest settlement batch from Razorpay. Once ingested, it will automatically transition to `OK MATCHED`."
+                "• Click **'Sync Gateway & Test Data'** in the top bar to pull the latest settlement batch from Razorpay. Once ingested, it will automatically transition to `OK MATCHED`."
             )
         else: # MATCHED
             return (
-                f"✅ **Transaction is Already Fully Reconciled**:\n\n"
+                f"**Transaction is Already Fully Reconciled**:\n\n"
                 f"• Settlement `{setl_id}` has already been mathematically verified against UTR `{utr}` with zero delta.\n"
                 "• No further action or verification is required. This record is sealed for statutory audit."
             )
@@ -153,7 +153,7 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
         delta = format_inr(to_decimal(log.delta_amount))
 
         return (
-            f"💰 **Fee & Tax Breakdown for {setl_id}**:\n\n"
+            f"**Fee & Tax Breakdown for {setl_id}**:\n\n"
             f"• **Gross Amount**: {format_inr(gross_amt)}\n"
             f"• **Gateway MDR Fee (2%)**: {format_inr(fees_amt)}\n"
             f"• **GST on Fee (18%)**: {format_inr(tax_amt)}\n"
@@ -173,11 +173,11 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # Specific Conflict Resolution Guide
     if any(k in q for k in ("resolve conflict", "resolve conflicts", "how do i resolve conflict", "how to resolve conflict", "conflict resolution")):
         return (
-            "⚔️ **How to Resolve Multi-Candidate Conflicts**:\n\n"
+            "**How to Resolve Multi-Candidate Conflicts**:\n\n"
             "1. **Locate the Conflict**: Select the **'Conflicts'** tab on the ledger table to view rows in conflict.\n"
-            "2. **Open Conflict Drawer**: Click **'Resolve Conflict'** on the row to inspect all competing bank entries claiming the same Razorpay settlement ID.\n"
+            "2. **Open Conflict Drawer**: Click **'Resolve'** on the row to inspect all competing bank entries claiming the same Razorpay settlement ID.\n"
             "3. **Select Valid Row**: Compare dates, reference remarks, and amounts, then choose the legitimate claimant bank credit.\n"
-            "4. **Confirm Assignment**: Click **'Confirm Resolution'**. The winning transaction is locked as `OK MATCHED`, while duplicate/competing rows are automatically transferred to `EXCEPTION` with an audit trail note."
+            "4. **Confirm Assignment**: Click **'Assign & Resolve'**. The winning transaction is locked as `OK MATCHED`, while duplicate/competing rows are automatically transferred to `EXCEPTION` with an audit trail note."
         )
 
     # 1. Total Ingested Ledger
@@ -188,7 +188,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         debit_amt = format_inr(to_decimal(summary.get("total_debit_amount", 0))) if summary else "₹ 0.00"
         net_amt = format_inr(to_decimal(summary.get("net_ingested_amount", 0))) if summary else "₹ 0.00"
         return (
-            "📊 **Total Ingested Ledger** represents the complete baseline sum of all bank statement transactions (both inflow credits and outflow debits) parsed and loaded into ReconGrid AI from your uploaded bank statement files (PDF/CSV).\n\n"
+            "**Total Ingested Ledger** represents the complete baseline sum of all bank statement transactions (both inflow credits and outflow debits) parsed and loaded into ReconGrid AI from your uploaded bank statement files (PDF/CSV).\n\n"
             f"• **Current Ingested Total**: {total_txs} transactions totaling {total_amt}.\n"
             f"• **Gross Credits (Inflows)**: {credit_amt}\n"
             f"• **Gross Debits (Outflows/Reversals)**: {debit_amt}\n"
@@ -203,7 +203,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         match_pct = summary.get("match_rate_percentage", "N/A") if summary else "the match"
         reconciled_amt = format_inr(to_decimal(summary.get("total_reconciled_amount", 0))) if summary else "the reconciled total"
         return (
-            "✅ **Auto-Reconciled Net** is the total value and percentage of bank transactions that were automatically matched against Razorpay settlements with zero delta variance (`OK MATCHED`).\n\n"
+            "**Auto-Reconciled Net** is the total value and percentage of bank transactions that were automatically matched against Razorpay settlements with zero delta variance (`OK MATCHED`).\n\n"
             f"• **Current Reconciled Net**: {matched_txs} transactions ({match_pct}%) totaling {reconciled_amt}.\n"
             "• **How It Works**: The engine evaluates each bank credit across 3 deterministic tiers:\n"
             "  1. **Tier 1 (Exact Match)**: Exact UTR and payout amount match.\n"
@@ -216,7 +216,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         sugg = summary.get("suggested_count", 0) if summary else 0
         conf = summary.get("conflict_count", 0) if summary else 0
         return (
-            "⚖️ **CA Review Required** flags transactions that require human Chartered Accountant review or approval before closing the books:\n\n"
+            "**CA Review Required** flags transactions that require human Chartered Accountant review or approval before closing the books:\n\n"
             f"• **Suggested Matches ({sugg} pending)**: High-confidence fuzzy matches (e.g. 90%–99% descriptor similarity). A CA can promote them to `OK MATCHED` with a single click.\n"
             f"• **Conflicts ({conf} pending)**: Multi-candidate payouts where multiple bank rows claim the same Razorpay settlement ID. CAs open the **Conflict Drawer** to assign the primary valid bank credit and displace duplicate claims.\n"
             "• **Audit Trail**: Every CA action is sealed with an immutable timestamp and audit note."
@@ -232,10 +232,10 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         total_var = format_inr(to_decimal(summary.get("total_unresolved_variance", 0))) if summary else exc_amt
         is_bal = summary.get("is_in_balance", False) if summary else False
 
-        status_tag = "✅ **Trial Balance is In-Balance (₹0.00 Variance)**" if is_bal else f"⚠️ **Active Variance: {total_var}**"
+        status_tag = "**Trial Balance is In-Balance (₹0.00 Variance)**" if is_bal else f"**Active Variance: {total_var}**"
 
         return (
-            f"🚨 **Unresolved Variance & Trial Balance Audit**:\n\n"
+            f"**Unresolved Variance & Trial Balance Audit**:\n\n"
             f"{status_tag}\n\n"
             f"**Complete Financial Conservation Breakdown**:\n"
             f"• **Hard Exceptions ({exc_count} txns)**: {exc_amt} (no gateway settlement match found)\n"
@@ -247,16 +247,16 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
             "**Resolution Actions**:\n"
             "1. Open the **Audit Drawer** on any exception row to view root cause & raw payload.\n"
             "2. Approve high-confidence suggestions or resolve conflicts in the **Conflict Drawer**.\n"
-            "3. Click **'Sync / Seed'** to ingest subsequent Razorpay settlement batches for in-transit entries."
+            "3. Click **'Sync Gateway & Test Data'** to ingest subsequent Razorpay settlement batches for in-transit entries."
         )
 
     # 5. About ReconGrid AI / Overview
     if any(k in q for k in ("what is recongrid", "about project", "about recongrid", "what does this app do", "what is this project", "project overview", "how does this work")):
         return (
-            "🛡️ **ReconGrid AI** is an autonomous, audit-grade settlement reconciliation and discrepancy diagnostics engine for Razorpay merchants and Chartered Accountants.\n\n"
+            "**ReconGrid AI** is an autonomous, audit-grade settlement reconciliation and discrepancy diagnostics engine for Razorpay merchants and Chartered Accountants.\n\n"
             "**Key Capabilities**:\n"
             "• **Multi-Page & Encrypted Statement Ingestion**: Parses password-protected PDFs & CSVs for major Indian banks (SBI, HDFC, ICICI, Axis, Kotak, PNB, etc.).\n"
-            "• **3-Tier Deterministic Engine**: Exact UTR matching, fuzzy descriptor matching ($90\\%+ score$), and fee/tax/refund diagnostics.\n"
+            "• **Multi-Tier Deterministic Engine**: Exact UTR matching, normalized reference matching, fuzzy descriptor matching ($90\\%+ score$), date fallback, and fee/tax/refund diagnostics.\n"
             "• **Discrepancy Diagnostics**: Automatically explains short settlements due to 2% MDR fee + 18% GST, Section 194-O (1% TDS), or customer refund clawbacks.\n"
             "• **CA Decision Workflows**: Single-click approval for suggested matches, conflict resolution drawer, and one-click batch approval.\n"
             "• **Conversational Q&A Agent**: Ask questions about any transaction, UTR, or project metric with multi-tab conversation memory."
@@ -265,24 +265,24 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 6. Matching Tiers
     if any(k in q for k in ("tier", "tiers", "matching engine", "how matching works")):
         return (
-            "⚙️ **ReconGrid AI 3-Tier Reconciliation Logic**:\n\n"
-            "1. **Tier 1: Deterministic Exact Match (100% Confidence)**\n"
-            "   • Matches when both the UTR and net amount align exactly with a Razorpay settlement.\n"
-            "   • Marked as `OK MATCHED` automatically.\n\n"
-            "2. **Tier 2: Fuzzy Descriptor Matching (90%–99% Confidence)**\n"
+            "**ReconGrid AI Deterministic Reconciliation Tiers**:\n\n"
+            "1. **Tier 1 / 1.5: Exact & Normalized UTR Match (98%–100% Confidence)**\n"
+            "   • Matches when both the UTR and net amount align with a Razorpay settlement.\n"
+            "   • Exact matches are marked `OK MATCHED`; normalized substring matches are `SUGGESTED`.\n\n"
+            "2. **Tier 2 / Tier 0: Fuzzy Descriptor & Date Fallback (85%–99% Confidence)**\n"
             "   • Used when UTR is missing or embedded in unstructured bank remarks (e.g. `RTGS RAZORPAY SOFTWARE BANGLORE`).\n"
             "   • Marked as `SUGGESTED` for quick CA approval.\n\n"
-            "3. **Tier 3: Discrepancy Diagnostics & Adjustments**\n"
+            "3. **Tier 3 / 3b: Discrepancy Diagnostics & Batched Payouts**\n"
             "   • **Fee Deduction**: 2% Gateway MDR + 18% GST.\n"
             "   • **Section 194-O TDS**: 1% TDS deduction on gross e-commerce sales.\n"
             "   • **Refund Clawbacks**: Deductions for customer refund batches.\n"
-            "   • **Reversals / Debits**: Chargeback reversals."
+            "   • **Batched Payouts & Reversals**: Subset-sum matching and chargeback reversals."
         )
 
     # 7. Section 194-O TDS vs 194H
     if any(k in q for k in ("194-o", "194o", "section 194", "tds")):
         return (
-            "📑 **Section 194-O E-Commerce TDS & Tax Compliance**:\n\n"
+            "**Section 194-O E-Commerce TDS & Tax Compliance**:\n\n"
             "• **Statutory Requirement**: Under Indian Income Tax Section 194-O, e-commerce marketplace operators must deduct **1.0% TDS** on the gross amount of sales before disbursing net settlements to merchants.\n"
             "• **194-O vs 194-H**: Section 194-O applies to gross marketplace sales (1%), whereas Section 194-H applies to commission payments (5%).\n"
             "• **How ReconGrid Reconciles It**: When a bank settlement arrives short by exactly 1% of gross sales (in addition to MDR fees + GST), the engine auto-classifies it as `TDS_194O_DEDUCTION` with ₹0 delta variance.\n"
@@ -292,7 +292,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 8. GST & Input Tax Credit (ITC) on Gateway Fees
     if any(k in q for k in ("itc", "input tax credit", "gstr", "claim gst")):
         return (
-            "🏛️ **GST & Input Tax Credit (ITC) on Gateway Fees**:\n\n"
+            "**GST & Input Tax Credit (ITC) on Gateway Fees**:\n\n"
             "• **GST Rate**: Razorpay levies **18.0% GST** on MDR processing fees (9% CGST + 9% SGST, or 18% IGST).\n"
             "• **Claiming ITC**: Merchants can claim full Input Tax Credit on this GST amount under **GSTR-3B** against the monthly B2B GST tax invoice issued by Razorpay Software Pvt Ltd.\n"
             "• **Audit Verification**: ReconGrid logs the exact fee and tax components (`fees` and `tax`) on every transaction, allowing instant export of monthly Gateway GST schedules for your monthly GSTR-2B reconciliation."
@@ -301,7 +301,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 9. Fee Formula / MDR / GST
     if any(k in q for k in ("fee formula", "mdr", "gst calculation", "gateway charge")):
         return (
-            "💳 **Razorpay Standard Fee Calculation**:\n\n"
+            "**Razorpay Standard Fee Calculation**:\n\n"
             "• **MDR (Merchant Discount Rate)**: `2.0%` on gross transaction volume.\n"
             "• **GST on Fees**: `18.0%` applicable on the MDR fee amount.\n"
             "• **Formula**: `Net Payout = Gross Amount - MDR - (MDR * 0.18)`\n"
@@ -315,15 +315,15 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 10. Split & Batched Settlements
     if any(k in q for k in ("batched settlement", "split settlement", "batch payout", "batched")):
         return (
-            "📦 **Batched & Split Settlement Reconciliation**:\n\n"
+            "**Batched & Split Settlement Reconciliation**:\n\n"
             "• **What It Is**: Razorpay frequently consolidates multiple payout cycles (e.g. morning cycle of ₹60,000 + evening cycle of ₹40,000) into a **single lump-sum bank credit** of ₹1,00,000.\n"
-            "• **ReconGrid Resolution**: The engine's combinatorial batching solver searches candidate settlements across a ±2 day window. When the sum of active settlements equals the bank credit, it binds them together under `BATCHED_SETTLEMENT` with zero variance."
+            "• **ReconGrid Resolution**: The engine's combinatorial batching solver searches candidate settlements across a ±4 day window. When the sum of active settlements equals the bank credit, it binds them together under `BATCHED_SETTLEMENT` with zero variance."
         )
 
     # 11. Customer Refunds & Clawbacks
     if any(k in q for k in ("refund", "clawback", "refund adjustment")):
         return (
-            "🔄 **Customer Refunds & Settlement Clawbacks**:\n\n"
+            "**Customer Refunds & Settlement Clawbacks**:\n\n"
             "• When you issue customer refunds, Razorpay does not debit your bank account directly; instead, it deducts the refund total from your next payout batch.\n"
             "• **Diagnostic Classification**: ReconGrid inspects settlement metadata for `refund_total` and matches payouts that are short by the exact refund amount under `REFUND_ADJUSTED`."
         )
@@ -331,7 +331,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 12. Token Guardrails & Anti-Hallucination
     if any(k in q for k in ("guardrail", "token guardrail", "hallucination", "accuracy")):
         return (
-            "🛡️ **Token Guardrail & Anti-Hallucination Defense**:\n\n"
+            "**Token Guardrail & Anti-Hallucination Defense**:\n\n"
             "ReconGrid AI incorporates a deterministic financial safety guardrail on all AI narration:\n"
             "1. **Number Extraction**: Every numeric token, Rupee amount, and ID in the AI output is parsed.\n"
             "2. **Database Cross-Validation**: If the AI attempts to invent or calculate numbers not present in the verified database record, the guardrail instantly **rejects the response**.\n"
@@ -341,7 +341,7 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 13. Bank Password Format Guide
     if any(k in q for k in ("password", "decrypt", "protected pdf", "password format")):
         return (
-            "🔐 **Indian Bank PDF Password Formulas**:\n\n"
+            "**Indian Bank PDF Password Formulas**:\n\n"
             "• **SBI**: Last 5 digits of Mobile No + DDMM of DOB (or 11-digit Account Number)\n"
             "• **HDFC Bank**: Customer ID (or DDMMYYYY / First 4 letters of name in lowercase + DDMM)\n"
             "• **ICICI Bank**: First 4 letters of name (lowercase) + DDMM of DOB\n"
@@ -353,16 +353,16 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     # 14. Batch Approval
     if any(k in q for k in ("batch approve", "batch approval", "approve all")):
         return (
-            "⚡ **Batch Approval Workflow (≥90% Confidence)**:\n\n"
-            "• Clicking the green **'Batch Approve (≥90%)'** button automatically promotes all unverified Tier 2 Suggested Matches into `OK MATCHED` in a single atomic database transaction.\n"
-            "• Every approved transaction is timestamped and recorded in the immutable CA audit trail."
+            "**Batch Approval Workflow (≥90% Confidence)**:\n\n"
+            "• Clicking **'Batch Approve (≥90%)'** promotes all unverified Suggested Matches with confidence ≥ 90% into `OK MATCHED` in a single atomic database transaction.\n"
+            "• Every approved transaction is timestamped and recorded in the CA audit trail."
         )
 
     # 15. Export Audit CSV
     if any(k in q for k in ("export", "download report", "audit csv", "audit report")):
         return (
-            "📥 **Export Audit CSV for Statutory Auditors**:\n\n"
-            "Click **'Export Audit CSV'** in the top right to download a comprehensive reconciliation schedule including:\n"
+            "**Export Audit Schedules for Statutory Auditors**:\n\n"
+            "Use **'Export Audit CSV'**, **'Export Excel (.xlsx)'**, or **'Export to Tally (XML)'** to download a complete reconciliation schedule including:\n"
             "• Bank Transaction Dates & UTRs\n"
             "• Razorpay Settlement IDs & Statuses\n"
             "• Gross Sales, 2% MDR Fees, 18% GST, 1% TDS breakdowns\n"
@@ -496,7 +496,7 @@ def get_batch_summary_tool(summary: dict | None) -> ToolResult | None:
     variance = format_inr(to_decimal(summary.get("total_unresolved_variance", 0)))
     lines = [f"• **{label}**: {value}" for label, value in rows]
     answer = (
-        "📊 **Batch Summary**\n\n"
+        "Batch Summary\n\n"
         + "\n".join(lines)
         + f"\n• **Match rate**: {summary.get('match_rate_percentage', 'N/A')}%\n"
         f"• **Total ingested**: {ingested}\n"
@@ -513,7 +513,7 @@ def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
     delta = to_decimal(log.delta_amount)
     if setl is None:
         answer = (
-            f"💰 **Fee, GST & TDS Breakdown** (UTR `{utr}`)\n\n"
+            f"**Fee, GST & TDS Breakdown** (UTR `{utr}`)\n\n"
             "This bank record is not linked to a gateway settlement, so gross, fee, GST and TDS figures are "
             "unavailable. They are not zero, the settlement data has not been matched yet.\n\n"
             f"• **Variance (delta)**: {format_inr(delta)}\n"
@@ -540,7 +540,7 @@ def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
     net = gross - fee - gst - tds - refund
 
     answer = (
-        f"💰 **Fee, GST & TDS Breakdown for {setl_id}** (UTR `{utr}`)\n\n"
+        f"**Fee, GST & TDS Breakdown for {setl_id}** (UTR `{utr}`)\n\n"
         f"• **Gross amount**: {format_inr(gross)}\n"
         f"• **Gateway fee**: {format_inr(fee)}\n"
         f"• **GST on fee**: {format_inr(gst)}\n"
@@ -584,10 +584,10 @@ def audit_trial_balance_tool(summary: dict | None) -> ToolResult | None:
     accounted = sum(parts.values(), Decimal("0.00"))
     variance = to_decimal(summary.get("total_unresolved_variance", 0))
     balanced = bool(summary.get("is_in_balance", False))
-    status = "✅ **In balance**" if balanced else f"⚠️ **Active variance: {format_inr(variance)}**"
+    status = "**In balance**" if balanced else f"**Active variance: {format_inr(variance)}**"
     lines = "\n".join(f"• **{name}**: {format_inr(value)}" for name, value in parts.items())
     answer = (
-        f"🚨 **Trial Balance Audit**\n\n{status}\n\n"
+        f"**Trial Balance Audit**\n\n{status}\n\n"
         f"• **Total ingested**: {format_inr(ingested)}\n{lines}\n"
         f"• **Sum of buckets**: {format_inr(accounted)}\n\n"
         "**Check: sum of Bank = sum of Ledger**"
@@ -608,7 +608,7 @@ def explain_diagnostic_tool(diagnostic_type: str | None) -> ToolResult | None:
     explanation = _DIAGNOSTIC_EXPLANATIONS.get(diagnostic_type or "")
     if not explanation:
         return None
-    answer = f"🔍 **{diagnostic_type}**\n\n{explanation}"
+    answer = f"**{diagnostic_type}**\n\n{explanation}"
     return ToolResult("explain_diagnostic_tool", answer, {"type": "tool", "tool": "explain_diagnostic_tool", "diagnostic_type": diagnostic_type})
 
 

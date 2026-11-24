@@ -217,6 +217,17 @@ export async function denyRecord(recordId: string, note?: string): Promise<Recon
   return json.data;
 }
 
+export async function revertRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
+  const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/revert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  if (!res.ok) throw new Error("Failed to revert action");
+  const json = await res.json();
+  return json.data;
+}
+
 export async function resolveConflict(
   recordId: string,
   chosenSettlementId: string,

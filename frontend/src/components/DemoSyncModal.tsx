@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from "react";
-import { X, RefreshCw, Zap, CheckCircle2, Database, Layers, ArrowRight, Trash2 } from "lucide-react";
+import { X, RefreshCw, Zap, CheckCircle2, AlertTriangle, Database, Trash2 } from "lucide-react";
 import { triggerRazorpaySync, seedDemoData, resetDemoData } from "@/lib/api";
 
 interface DemoSyncModalProps {
   isOpen: boolean;
+  batchId?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
   isOpen,
+  batchId = "default",
   onClose,
   onSuccess,
 }) => {
@@ -17,6 +19,7 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
   const [loadingSeed, setLoadingSeed] = useState(false);
   const [loadingReset, setLoadingReset] = useState(false);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -26,18 +29,27 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
+  useEffect(() => {
+    if (isOpen) {
+      setSuccessMsg(null);
+      setErrorMsg(null);
+    }
+  }, [isOpen, batchId]);
+
   if (!isOpen) return null;
 
   const handleSync = async () => {
     setLoadingSync(true);
     setSuccessMsg(null);
+    setErrorMsg(null);
     try {
-      await triggerRazorpaySync(100);
-      setSuccessMsg("Synced Razorpay settlements and executed 4-tier reconciliation engine.");
+      const result = await triggerRazorpaySync(100, batchId);
+      setSuccessMsg(
+        `Synced ${result?.fetched_count ?? 0} Razorpay settlement(s) for batch "${batchId}" and ran reconciliation.`
+      );
       onSuccess();
     } catch (err: any) {
-      setSuccessMsg("Sync completed (mock sandbox gateway mode active).");
-      onSuccess();
+      setErrorMsg(err?.message || "Failed to sync Razorpay settlements. Check backend logs and API credentials.");
     } finally {
       setLoadingSync(false);
     }
@@ -46,29 +58,31 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
   const handleSeed = async (count: number = 60) => {
     setLoadingSeed(true);
     setSuccessMsg(null);
+    setErrorMsg(null);
     try {
-      const data = await seedDemoData(count);
+      const data = await seedDemoData(count, batchId);
       setSuccessMsg(
-        `Successfully seeded ${data.total_bank_transactions} bank transactions & ${data.total_settlements} Razorpay settlements. Reconciled ${data.reconciled_logs} rows across 4 tiers.`
+        `Seeded ${data.total_bank_transactions} bank transactions & ${data.total_settlements} Razorpay settlements in "${batchId}". Reconciled ${data.reconciled_logs} rows.`
       );
       onSuccess();
     } catch (err: any) {
-      setSuccessMsg("Seeding failed: " + (err.message || "Unknown error"));
+      setErrorMsg("Seeding failed: " + (err?.message || "Unknown error"));
     } finally {
       setLoadingSeed(false);
     }
   };
 
   const handleReset = async () => {
-    if (!window.confirm("Are you sure you want to clear all transactions and reset the ledger to a clean state?")) return;
+    if (!window.confirm(`Are you sure you want to clear all transactions in "${batchId}" and reset the ledger?`)) return;
     setLoadingReset(true);
     setSuccessMsg(null);
+    setErrorMsg(null);
     try {
-      await resetDemoData("default");
-      setSuccessMsg("Ledger successfully cleared! The dashboard is now in a clean zero state.");
+      await resetDemoData(batchId);
+      setSuccessMsg(`Ledger "${batchId}" cleared! The dashboard is now in a clean zero state.`);
       onSuccess();
     } catch (err: any) {
-      setSuccessMsg("Reset failed: " + (err.message || "Unknown error"));
+      setErrorMsg("Reset failed: " + (err?.message || "Unknown error"));
     } finally {
       setLoadingReset(false);
     }
@@ -201,11 +215,17 @@ export const DemoSyncModal: React.FC<DemoSyncModalProps> = ({
             </button>
           </div>
 
-          {/* Success / Status Banner */}
+          {/* Success / Error Banner */}
           {successMsg && (
             <div className="p-3 bg-emerald-950/40 border border-emerald-800/70 rounded-lg text-emerald-300 flex items-start gap-2.5 text-xs animate-in fade-in">
               <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <span className="leading-relaxed font-medium">{successMsg}</span>
+            </div>
+          )}
+          {errorMsg && (
+            <div role="alert" className="p-3 bg-rose-950/40 border border-rose-800/70 rounded-lg text-rose-300 flex items-start gap-2.5 text-xs animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed font-medium">{errorMsg}</span>
             </div>
           )}
         </div>

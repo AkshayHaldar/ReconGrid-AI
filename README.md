@@ -208,6 +208,9 @@ pip install -r requirements.txt
 # On macOS/Linux: cp .env.example .env
 cp .env.example .env
 
+# Optional: enable synthetic demo endpoints (/api/v1/demo/seed & /reset) for local evaluation
+# Set ENABLE_DEMO=true in .env before starting uvicorn
+
 # Apply database migrations
 alembic upgrade head
 
@@ -237,7 +240,7 @@ Open your browser to: **[http://localhost:3000](http://localhost:3000)**.
 
 ### Step 4: Seed Demo Data (See It in Action Immediately)
 
-With both servers running, open a third terminal and run:
+Ensure `ENABLE_DEMO=true` is set in your `.env` (it defaults to `false` for safety). With both servers running, open a third terminal and run:
 
 ```bash
 # Seed 60 synthetic records with exact matches, fee deltas, refunds, and anomalies:

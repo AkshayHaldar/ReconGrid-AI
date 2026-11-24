@@ -36,15 +36,17 @@
 flowchart TB
     FE["Next.js Frontend"] -->|REST /api/v1| API["FastAPI Server"]
     API --> DB[(PostgreSQL)]
-    API --> Q["Job Queue (Redis)"]
-    Q --> Worker["Reconciliation Worker"]
-    Worker --> DB
+    API -.->|Planned| Q["Job Queue (Redis)"]
+    Q -.->|Planned| Worker["Reconciliation Worker"]
+    Worker -.-> DB
     RZP["Razorpay API"] -->|Webhook: settlement.processed| API
-    Worker -->|Polled fetch: settlements/refunds| RZP
+    API -->|Polled fetch: settlements| RZP
     API --> QA["Settlement Q&A Agent"]
     QA -->|1. retrieve record| DB
     QA -->|2. narrate only| LLM["LLM Provider (NVIDIA NIM)"]
 ```
+
+> **Implementation Status:** Webhook reconciliation currently executes via FastAPI `BackgroundTasks` inside the API process (`backend/app/api/v1/webhooks.py`). Offloading to a durable Redis queue and standalone worker with stale-job recovery is planned (see open architecture issue).
 
 ### Why a Queue for Reconciliation?
 Razorpay expects webhooks to be acknowledged in under 500ms. A full reconciliation run across a large batch can take several seconds. So:

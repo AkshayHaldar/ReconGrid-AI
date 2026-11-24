@@ -77,7 +77,7 @@ async def test_reconciliation_status_records_and_actions(db_session: AsyncSessio
         assert len(records) > 0
         rec_id = records[0]["id"]
 
-        # 3. Approve action
+        # 3. Approve action & revert back to SUGGESTED
         appr_resp = await client.post(
             f"/api/v1/reconciliation/records/{rec_id}/approve",
             json={"note": "Approved by auditor"},
@@ -85,13 +85,32 @@ async def test_reconciliation_status_records_and_actions(db_session: AsyncSessio
         assert appr_resp.status_code == 200
         assert appr_resp.json()["data"]["match_status"] == "MATCHED"
 
-        # 4. Deny action
+        rev_appr_resp = await client.post(
+            f"/api/v1/reconciliation/records/{rec_id}/revert",
+            json={"note": "Undo approval"},
+        )
+        assert rev_appr_resp.status_code == 200
+        assert rev_appr_resp.json()["data"]["match_status"] == "SUGGESTED"
+        assert rev_appr_resp.json()["data"]["human_action"] is None
+
+        # 4. Deny action & revert back to SUGGESTED
         deny_resp = await client.post(
             f"/api/v1/reconciliation/records/{rec_id}/deny",
             json={"note": "Rejected discrepancy"},
         )
         assert deny_resp.status_code == 200
         assert deny_resp.json()["data"]["match_status"] == "EXCEPTION"
+
+        rev_deny_resp = await client.post(
+            f"/api/v1/reconciliation/records/{rec_id}/revert",
+            json={"note": "Undo denial"},
+        )
+        assert rev_deny_resp.status_code == 200
+        assert rev_deny_resp.json()["data"]["match_status"] == "SUGGESTED"
+        assert rev_deny_resp.json()["data"]["human_action"] is None
+
+        # Reverting a record without APPROVED/DENIED human_action returns 409
+        assert (await client.post(f"/api/v1/reconciliation/records/{rec_id}/revert", json={})).status_code == 409
 
         # 5. Resolve conflict action
         resolve_resp = await client.post(
@@ -102,9 +121,20 @@ async def test_reconciliation_status_records_and_actions(db_session: AsyncSessio
         assert resolve_resp.json()["data"]["match_status"] == "MATCHED"
 
         # 6. Action on nonexistent record (404s)
-        assert (await client.post("/api/v1/reconciliation/records/nonexistent/approve", json={"note": "Test"})).status_code == 404
-        assert (await client.post("/api/v1/reconciliation/records/nonexistent/deny", json={"note": "Test"})).status_code == 404
-        assert (await client.post("/api/v1/reconciliation/records/nonexistent/resolve-conflict", json={"chosen_settlement_id": "s1"})).status_code == 404
+        assert (
+            await client.post("/api/v1/reconciliation/records/nonexistent/approve", json={"note": "Test"})
+        ).status_code == 404
+        assert (
+            await client.post("/api/v1/reconciliation/records/nonexistent/deny", json={"note": "Test"})
+        ).status_code == 404
+        assert (
+            await client.post("/api/v1/reconciliation/records/nonexistent/revert", json={"note": "Test"})
+        ).status_code == 404
+        assert (
+            await client.post(
+                "/api/v1/reconciliation/records/nonexistent/resolve-conflict", json={"chosen_settlement_id": "s1"}
+            )
+        ).status_code == 404
 
         # 7. Export CSV
         export_resp = await client.get("/api/v1/reconciliation/default/export")

@@ -303,7 +303,7 @@ class ReconciliationRepository:
         return log.delta_amount
 
     async def get_summary_metrics(self, batch_id: str = "default") -> dict:
-        """Computes live aggregated reconciliation metrics for Ramesh's dashboard cards."""
+        """Computes live aggregated reconciliation metrics for the dashboard summary cards."""
         stmt = (
             select(ReconciliationLog)
             .options(

@@ -26,8 +26,17 @@ import {
   approveRecord,
   batchApprove,
   denyRecord,
+  revertRecord,
   resolveConflict,
 } from "@/lib/api";
+
+const BANK_BATCH_MAP: Record<string, string> = {
+  ALL: "default",
+  HDFC: "hdfc",
+  ICICI: "icici",
+  SBI: "sbi",
+  AXIS: "axis",
+};
 
 import { useLedgerRecords } from "@/lib/useLedgerRecords";
 
@@ -44,7 +53,8 @@ export default function DashboardPage() {
   const [activeTab, setActiveTabState] = useState("ALL");
   const [selectedDiagnostic, setSelectedDiagnosticState] = useState("ALL");
   const [searchQuery, setSearchQueryState] = useState("");
-  const [selectedBank, setSelectedBank] = useState("ALL");
+  const [selectedBank, setSelectedBankState] = useState("ALL");
+  const activeBatchId = BANK_BATCH_MAP[selectedBank] ?? "default";
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
 
@@ -69,6 +79,12 @@ export default function DashboardPage() {
   const setActiveTab = (value: string) => { setAnchorId(undefined); setActiveTabState(value); };
   const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
+  const setSelectedBank = (value: string) => {
+    setAnchorId(undefined);
+    setHighlightedId(null);
+    setToast(null);
+    setSelectedBankState(value);
+  };
   const handleDateRangeChange = (from?: string, to?: string) => {
     setAnchorId(undefined);
     setFromDate(from);
@@ -80,16 +96,16 @@ export default function DashboardPage() {
   const conflictRequest = useRef(0);
   const exportTriggerRef = useRef<HTMLElement | null>(null);
   const query = useMemo<RecordQuery>(() => ({
-    batchId: "default", status: activeTab, search: searchQuery,
+    batchId: activeBatchId, status: activeTab, search: searchQuery,
     diagnostic: selectedDiagnostic, sort, direction,
     fromDate, toDate,
-  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction, fromDate, toDate]);
+  }), [activeBatchId, activeTab, searchQuery, selectedDiagnostic, sort, direction, fromDate, toDate]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchStatus("default"));
-  }, []);
+    setStatus(await fetchStatus(activeBatchId));
+  }, [activeBatchId]);
   const loadData = useCallback(async () => {
     setActionError(null);
     try {
@@ -254,6 +270,12 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
+      setToast({
+        id: `toast-err-${Date.now()}`,
+        message: "Failed to save denial. Reverted changes.",
+        type: "deny",
+        recordId,
+      });
     }
   };
 
@@ -263,7 +285,19 @@ export default function DashboardPage() {
     const { previousRecord } = toast;
     setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
     setToast(null);
-    await loadData();
+    try {
+      await revertRecord(previousRecord.id);
+      await loadData();
+    } catch (err) {
+      console.error("Undo revert failed:", err);
+      await loadData();
+      setToast({
+        id: `toast-undo-err-${Date.now()}`,
+        message: "Failed to undo previous action on server.",
+        type: "deny",
+        recordId: previousRecord.id,
+      });
+    }
   };
 
   // Handle Batch Approve High-Confidence (≥90%)
@@ -272,7 +306,7 @@ export default function DashboardPage() {
     setActionError(null);
     setBatchApproveLoading(true);
     try {
-      const result = await batchApprove("default", 0.9);
+      const result = await batchApprove(activeBatchId, 0.9);
       const refreshed = await loadData();
       setToast({
         id: `toast-batch-${Date.now()}`,
@@ -309,6 +343,7 @@ export default function DashboardPage() {
       await loadData();
     } catch (err) {
       console.error("Resolve conflict failed:", err);
+      throw err;
     }
   };
 
@@ -328,7 +363,7 @@ export default function DashboardPage() {
   };
 
   const handleExportCsv = () => {
-    window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export`, "_blank");
   };
 
   // The Excel button only opens the confirmation dialog; the download starts when it is confirmed.
@@ -339,14 +374,14 @@ export default function DashboardPage() {
   };
 
   const confirmExportXlsx = () => {
-    window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export-xlsx`, "_blank");
   };
 
   const handleExportTally = () => setIsTallyConfirmOpen(true);
 
   const confirmExportTally = () => {
     setIsTallyConfirmOpen(false);
-    window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export-tally-xml`, "_blank");
   };
   const cancelExportTally = useCallback(() => setIsTallyConfirmOpen(false), []);
 
@@ -369,7 +404,7 @@ export default function DashboardPage() {
       <TallyExportModal
         isOpen={isTallyConfirmOpen}
         status={status}
-        batchId="default"
+        batchId={activeBatchId}
         onConfirm={confirmExportTally}
         onCancel={cancelExportTally}
       />
@@ -385,6 +420,7 @@ export default function DashboardPage() {
         </div>}
         <SummaryCards
           status={status}
+          batchId={activeBatchId}
           records={records}
           activeDiagnostic={selectedDiagnostic}
           activeTab={activeTab}
@@ -451,6 +487,7 @@ export default function DashboardPage() {
       {/* Bank Statement Upload Modal */}
       <UploadModal
         isOpen={isUploadOpen}
+        batchId={activeBatchId}
         onClose={() => setIsUploadOpen(false)}
         onUploadSuccess={loadData}
       />
@@ -458,6 +495,7 @@ export default function DashboardPage() {
       {/* Demo Sync / Synthetic Seeder Modal */}
       <DemoSyncModal
         isOpen={isSyncOpen}
+        batchId={activeBatchId}
         onClose={() => setIsSyncOpen(false)}
         onSuccess={loadData}
       />
@@ -467,7 +505,7 @@ export default function DashboardPage() {
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}
         onConfirm={confirmExportXlsx}
-        batchId="default"
+        batchId={activeBatchId}
         status={status}
         returnFocusRef={exportTriggerRef}
       />

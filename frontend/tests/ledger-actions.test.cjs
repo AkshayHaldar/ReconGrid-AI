@@ -88,3 +88,141 @@ test('an active conflict opens with the refreshed candidate', async () => {
   assert.ok(page.updates.includes(fresh));
   assert.ok(!page.updates.includes(stale));
 });
+
+test('onResolve rethrows API failures so ConflictDrawer stays open with error feedback', async () => {
+  const page = dashboard({
+    resolveConflict: async () => { throw Error('network down'); },
+  });
+  await assert.rejects(
+    () => page.find('ConflictDrawer').onResolve('rec-1', 'setl_1', 'note'),
+    /network down/
+  );
+  assert.equal(page.refreshes(), 0);
+});
+
+test('Header bank selection scopes subsequent batch actions to that bank batch', async () => {
+  const calls = [];
+  const state = [];
+  let cursor = 0;
+  const hooks = {
+    ...React,
+    useState: initial => {
+      const i = cursor++;
+      if (!(i in state)) state[i] = initial;
+      return [state[i], next => { state[i] = typeof next === 'function' ? next(state[i]) : next; }];
+    },
+    useMemo: fn => fn(),
+    useCallback: fn => fn,
+    useEffect() {},
+    useRef: value => ({ current: value }),
+  };
+  const exports = {};
+  const source = readFileSync(path.join(__dirname, '../src/app/page.tsx'), 'utf8');
+  const code = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText;
+  const render = () => {
+    cursor = 0;
+    vm.runInNewContext(code, {
+      exports, console: { error() {} },
+      require(name) {
+        if (name === 'react') return hooks;
+        if (name === 'react/jsx-runtime') return require(name);
+        if (name === '@/lib/api') return {
+          fetchStatus: async () => ({}),
+          batchApprove: async (...args) => { calls.push(args); return { approved_count: 1 }; },
+        };
+        if (name === '@/lib/useLedgerRecords') return {
+          useLedgerRecords: () => ({ records: [], loading: false, pager: { setRecords() {}, reload: async () => {} } }),
+        };
+        return new Proxy({}, { get: (_, key) => key });
+      },
+    });
+    return exports.default();
+  };
+  const find = (node, type) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === type) return node.props;
+    for (const child of React.Children.toArray(node.props?.children)) {
+      const res = find(child, type);
+      if (res) return res;
+    }
+  };
+  find(render(), 'Header').onBankChange('HDFC');
+  await find(render(), 'FilterBar').onBatchApprove();
+  assert.deepEqual(calls, [['hdfc', 0.9]]);
+});
+
+test('Undo toast triggers revertRecord on backend before refreshing ledger', async () => {
+  const reverted = [];
+  const state = [];
+  let cursor = 0;
+  let refreshes = 0;
+  const suggestion = { id: 'rec-undo-1', bank_utr: 'CMS001', match_status: 'SUGGESTED' };
+  const hooks = {
+    ...React,
+    useState: initial => {
+      const i = cursor++;
+      if (!(i in state)) state[i] = initial;
+      return [state[i], next => { state[i] = typeof next === 'function' ? next(state[i]) : next; }];
+    },
+    useMemo: fn => fn(),
+    useCallback: fn => fn,
+    useEffect() {},
+    useRef: value => ({ current: value }),
+  };
+  const exports = {};
+  const source = readFileSync(path.join(__dirname, '../src/app/page.tsx'), 'utf8');
+  const code = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
+  }).outputText;
+  const render = () => {
+    cursor = 0;
+    vm.runInNewContext(code, {
+      exports, console: { error() {} },
+      require(name) {
+        if (name === 'react') return hooks;
+        if (name === 'react/jsx-runtime') return require(name);
+        if (name === '@/lib/api') return {
+          fetchStatus: async () => ({}),
+          approveRecord: async () => ({ ...suggestion, match_status: 'MATCHED', human_action: 'APPROVED' }),
+          revertRecord: async id => { reverted.push(id); return suggestion; },
+        };
+        if (name === '@/lib/useLedgerRecords') return {
+          useLedgerRecords: () => ({
+            records: [suggestion],
+            loading: false,
+            pager: { setRecords() {}, reload: async () => { refreshes++; } },
+          }),
+        };
+        return new Proxy({}, { get: (_, key) => key });
+      },
+    });
+    return exports.default();
+  };
+  const find = (node, type) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === type) return node.props;
+    for (const child of React.Children.toArray(node.props?.children)) {
+      const res = find(child, type);
+      if (res) return res;
+    }
+  };
+  const findUndoButton = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'button' && typeof node.props?.onClick === 'function') {
+      const text = JSON.stringify(node.props.children);
+      if (text.includes('Undo')) return node.props;
+    }
+    for (const child of React.Children.toArray(node.props?.children)) {
+      const res = findUndoButton(child);
+      if (res) return res;
+    }
+  };
+  await find(render(), 'ReconciliationTable').onApprove(suggestion.id);
+  const undoBtn = findUndoButton(render());
+  assert.ok(undoBtn, 'Undo button should render in toast');
+  await undoBtn.onClick();
+  assert.deepEqual(reverted, ['rec-undo-1']);
+  assert.equal(refreshes, 2);
+});
