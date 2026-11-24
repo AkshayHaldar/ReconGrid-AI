@@ -60,6 +60,12 @@ def to_decimal(val: str | float | Decimal | None) -> Decimal:
         if not clean_str:
             return Decimal("0.00")
 
+        # Handle placeholder dashes or empty notations
+        if clean_str in {"-", "--", "---", "NA", "N/A", "NIL", "NONE", "."} or (
+            all(c in "0-." for c in clean_str) and not any(c.isdigit() and c != "0" for c in clean_str)
+        ):
+            return Decimal("0.00")
+
         if is_parentheses_neg and not clean_str.startswith("-"):
             clean_str = f"-{clean_str}"
 
@@ -77,7 +83,7 @@ def parse_amount_and_direction(raw_val: Any) -> tuple[Decimal, str]:
         return Decimal("0.00"), "CREDIT"
 
     raw_str = str(raw_val).strip().upper()
-    if not raw_str:
+    if not raw_str or raw_str in {"-", "--", "---", "NA", "N/A", "NIL", "NONE", "."}:
         return Decimal("0.00"), "CREDIT"
 
     is_debit = (
