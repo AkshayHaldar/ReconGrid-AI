@@ -7,6 +7,7 @@ import { FilterBar } from "@/components/FilterBar";
 import { ReconciliationTable } from "@/components/ReconciliationTable";
 import { UploadModal } from "@/components/UploadModal";
 import { DemoSyncModal } from "@/components/DemoSyncModal";
+import { ExportConfirmModal } from "@/components/ExportConfirmModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
@@ -49,6 +50,7 @@ export default function DashboardPage() {
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [isQaOpen, setIsQaOpen] = useState(false);
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
@@ -74,6 +76,7 @@ export default function DashboardPage() {
   const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
   const conflictRequest = useRef(0);
+  const exportTriggerRef = useRef<HTMLElement | null>(null);
   const query = useMemo<RecordQuery>(() => ({
     batchId: "default", status: activeTab, search: searchQuery,
     diagnostic: selectedDiagnostic, sort, direction,
@@ -324,7 +327,14 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
   };
 
-  const handleExportXlsx = () => {
+  // The Excel button only opens the confirmation dialog; the download starts when it is confirmed.
+  // The click event is remembered so the dialog can give focus back to the button on close.
+  const handleExportXlsx = (event?: React.MouseEvent<HTMLElement>) => {
+    exportTriggerRef.current = event?.currentTarget ?? null;
+    setIsExportOpen(true);
+  };
+
+  const confirmExportXlsx = () => {
     window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
   };
 
@@ -434,6 +444,16 @@ export default function DashboardPage() {
         isOpen={isSyncOpen}
         onClose={() => setIsSyncOpen(false)}
         onSuccess={loadData}
+      />
+
+      {/* Export Excel confirmation: shows what the workbook holds before it downloads */}
+      <ExportConfirmModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        onConfirm={confirmExportXlsx}
+        batchId="default"
+        status={status}
+        returnFocusRef={exportTriggerRef}
       />
 
       {/* Conflict Resolution Drawer */}
