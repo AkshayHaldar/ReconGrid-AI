@@ -127,3 +127,39 @@ async def test_date_range_filtering_and_ist_midnight_boundaries(db_session, clie
     )
     assert res_legacy.status_code == 200
     assert len(res_legacy.json()["data"]["records"]) == 2
+
+
+@pytest.mark.parametrize("pagination", [{"page": 1}, {"limit": 10}])
+@pytest.mark.parametrize("field", ["from_date", "to_date"])
+@pytest.mark.parametrize("value", ["2026-02-31", "2026-02-29", "2026-04-31", "0000-01-01"])
+async def test_impossible_calendar_dates_rejected_before_ledger_query(client, monkeypatch, pagination, field, value):
+    from app.repositories.reconciliation_repo import ReconciliationRepository
+
+    async def must_not_query(*args, **kwargs):
+        pytest.fail("Invalid dates must not reach an unfiltered repository query")
+
+    monkeypatch.setattr(ReconciliationRepository, "get_active_logs", must_not_query)
+    monkeypatch.setattr(ReconciliationRepository, "get_log_window", must_not_query)
+    response = await client.get("/api/v1/reconciliation/test_dates/records", params={**pagination, field: value})
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "Invalid calendar date; use YYYY-MM-DD."
+
+
+@pytest.mark.parametrize("pagination", [{"page": 1}, {"limit": 10}])
+@pytest.mark.parametrize("value", ["2024-02-29", "2026-12-31"])
+async def test_real_calendar_dates_still_work(client, pagination, value):
+    response = await client.get(
+        "/api/v1/reconciliation/test_dates/records",
+        params={**pagination, "from_date": value, "to_date": value},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("pagination", [{"page": 1}, {"limit": 10}])
+async def test_reversed_calendar_range_is_rejected(client, pagination):
+    response = await client.get(
+        "/api/v1/reconciliation/test_dates/records",
+        params={**pagination, "from_date": "2026-11-24", "to_date": "2026-11-01"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["message"] == "Start date must not be after end date."

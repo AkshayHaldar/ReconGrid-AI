@@ -106,7 +106,9 @@ export default function DashboardPage() {
     setActionError(null);
     try {
       const candidates = record.rzp_settlement_db_id ? await collectRecordWindows({
-        ...query, status: "CONFLICT", search: "", diagnostic: "ALL",
+        // Resolving displaces claimants across the batch, including dates hidden in the ledger.
+        ...query, fromDate: undefined, toDate: undefined,
+        status: "CONFLICT", search: "", diagnostic: "ALL",
         settlementId: record.rzp_settlement_db_id,
       }) : [];
       if (request !== conflictRequest.current) return;
