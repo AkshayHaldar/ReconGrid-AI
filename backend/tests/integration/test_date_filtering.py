@@ -127,3 +127,26 @@ async def test_date_range_filtering_and_ist_midnight_boundaries(db_session, clie
     )
     assert res_legacy.status_code == 200
     assert len(res_legacy.json()["data"]["records"]) == 2
+
+    # Invalid calendar dates return 400 Bad Request
+    res_inv_from = await client.get(
+        "/api/v1/reconciliation/test_dates/records",
+        params={"limit": 10, "from_date": "2026-02-31"},
+    )
+    assert res_inv_from.status_code == 400
+    assert "Invalid from_date calendar date" in res_inv_from.json()["error"]["message"]
+
+    res_inv_to = await client.get(
+        "/api/v1/reconciliation/test_dates/records",
+        params={"limit": 10, "to_date": "2026-04-31"},
+    )
+    assert res_inv_to.status_code == 400
+    assert "Invalid to_date calendar date" in res_inv_to.json()["error"]["message"]
+
+    # Non-leap year February 29 returns 400
+    res_leap = await client.get(
+        "/api/v1/reconciliation/test_dates/records",
+        params={"limit": 10, "from_date": "2026-02-29"},
+    )
+    assert res_leap.status_code == 400
+    assert "Invalid from_date calendar date" in res_leap.json()["error"]["message"]

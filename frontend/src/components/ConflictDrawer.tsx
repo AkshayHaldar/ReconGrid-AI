@@ -19,6 +19,7 @@ interface ConflictDrawerProps {
   allRecords?: ReconciliationRecordItem[];
   onClose: () => void;
   onResolve: (recordId: string, chosenSettlementId: string, note?: string) => void;
+  activeDateFilter?: { fromDate?: string; toDate?: string };
 }
 
 export const ConflictDrawer: React.FC<ConflictDrawerProps> = ({
@@ -26,6 +27,7 @@ export const ConflictDrawer: React.FC<ConflictDrawerProps> = ({
   allRecords = [],
   onClose,
   onResolve,
+  activeDateFilter,
 }) => {
   const [note, setNote] = useState("");
   const [selectedRecordId, setSelectedRecordId] = useState<string>("");
@@ -58,6 +60,16 @@ export const ConflictDrawer: React.FC<ConflictDrawerProps> = ({
 
   const allCandidates = [record, ...competingRecords];
   const activeSelectedCandidate = allCandidates.find((c) => c.id === selectedRecordId) || record;
+
+  const isOutOfDateRange = (candDate?: string | null) => {
+    if (!candDate || (!activeDateFilter?.fromDate && !activeDateFilter?.toDate)) return false;
+    const datePrefix = candDate.slice(0, 10);
+    if (activeDateFilter.fromDate && datePrefix < activeDateFilter.fromDate) return true;
+    if (activeDateFilter.toDate && datePrefix > activeDateFilter.toDate) return true;
+    return false;
+  };
+
+  const outOfRangeCount = allCandidates.filter((c) => isOutOfDateRange(c.date)).length;
 
   return (
     <>
@@ -123,9 +135,19 @@ export const ConflictDrawer: React.FC<ConflictDrawerProps> = ({
               </span>
             </div>
 
+            {outOfRangeCount > 0 && (
+              <div className="p-2.5 bg-amber-950/30 border border-amber-800/50 rounded-lg text-[11px] text-amber-200 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <span>
+                  {outOfRangeCount} competing claimant{outOfRangeCount > 1 ? "s fall" : " falls"} outside your active ledger date filter ({activeDateFilter?.fromDate || "any"} to {activeDateFilter?.toDate || "any"}), but {outOfRangeCount > 1 ? "are" : "is"} included here because resolving this conflict affects claims across the whole batch.
+                </span>
+              </div>
+            )}
+
             <div className="space-y-2">
               {allCandidates.map((cand) => {
                 const isSelected = selectedRecordId === cand.id;
+                const outOfRange = isOutOfDateRange(cand.date);
                 return (
                   <div
                     key={cand.id}
@@ -153,6 +175,11 @@ export const ConflictDrawer: React.FC<ConflictDrawerProps> = ({
                         <span className="text-[10px] text-neutral-400">
                           ({formatDate(cand.date)})
                         </span>
+                        {outOfRange && (
+                          <span className="text-[10px] bg-amber-900/40 text-amber-300 border border-amber-700/50 px-1.5 py-0.5 rounded font-sans">
+                            Outside Date Filter
+                          </span>
+                        )}
                       </div>
                       <span className="font-semibold text-xs font-tabular text-neutral-100">
                         {formatINR(cand.bank_amount)}

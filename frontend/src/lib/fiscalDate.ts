@@ -172,9 +172,9 @@ export function getLast30Days(refDate?: Date | string | null): {
   const { year, month, day } = getDatePartsIST(refDate);
   const toDate = formatISODateString(year, month, day);
 
-  // Use calendar date in UTC to subtract exactly 30 days without timezone artifacts
+  // Use calendar date in UTC to subtract exactly 29 days so that [from, to] inclusive equals 30 days
   const anchor = new Date(Date.UTC(year, month - 1, day));
-  anchor.setUTCDate(anchor.getUTCDate() - 30);
+  anchor.setUTCDate(anchor.getUTCDate() - 29);
 
   const fromDate = formatISODateString(
     anchor.getUTCFullYear(),

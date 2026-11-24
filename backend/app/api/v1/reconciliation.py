@@ -3,6 +3,7 @@
 import csv
 import io
 from dataclasses import asdict
+from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -130,6 +131,17 @@ async def get_reconciliation_records(
     db: AsyncSession = Depends(get_db),
 ):
     """Returns filtered, paginated reconciliation records for the ledger table."""
+    if from_date:
+        try:
+            datetime.strptime(from_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid from_date calendar date: {from_date}")
+    if to_date:
+        try:
+            datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid to_date calendar date: {to_date}")
+
     repo = ReconciliationRepository(db)
     next_cursor, has_more = None, False
     if limit is not None or cursor is not None or anchor_id is not None:

@@ -135,44 +135,53 @@ export const FiscalDateRangePicker: React.FC<FiscalDateRangePickerProps> = ({
 
   return (
     <div className="relative inline-block text-left" ref={containerRef}>
-      {/* Trigger Button */}
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-expanded={isOpen}
-        aria-haspopup="true"
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition cursor-pointer shadow-xs select-none ${
-          isFiltered
-            ? "bg-sky-950/40 border border-sky-700/70 text-sky-200 hover:bg-sky-950/60"
-            : "bg-[#111318] border border-[#1e222d] hover:border-neutral-700 text-neutral-300"
-        }`}
-        title={
-          isFiltered
-            ? `Active Filter: ${fromDate || "any"} to ${toDate || "any"} (IST)`
-            : "Filter by Indian FY Quarter or Date Range"
-        }
-      >
-        <Calendar className={`w-3.5 h-3.5 shrink-0 ${isFiltered ? "text-sky-400" : "text-neutral-400"}`} />
-        <span className="whitespace-nowrap font-medium text-[11px] sm:text-xs">{triggerLabel}</span>
-
-        {isFiltered && (
-          <span
+      {/* Trigger Button or Split Button Group */}
+      {!isFiltered ? (
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-expanded={isOpen}
+          aria-haspopup="true"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition cursor-pointer shadow-xs select-none bg-[#111318] border border-[#1e222d] hover:border-neutral-700 text-neutral-300"
+          title="Filter by Indian FY Quarter or Date Range"
+        >
+          <Calendar className="w-3.5 h-3.5 shrink-0 text-neutral-400" />
+          <span className="whitespace-nowrap font-medium text-[11px] sm:text-xs">{triggerLabel}</span>
+          <ChevronDown
+            className={`w-3 h-3 shrink-0 transition-transform duration-150 text-neutral-400 ${
+              isOpen ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+      ) : (
+        <div className="inline-flex items-stretch rounded-md shadow-xs bg-sky-950/40 border border-sky-700/70 text-sky-200">
+          <button
+            type="button"
+            onClick={() => setIsOpen(!isOpen)}
+            aria-expanded={isOpen}
+            aria-haspopup="true"
+            className="flex items-center gap-1.5 pl-2.5 pr-2 py-1.5 text-xs font-medium transition cursor-pointer select-none rounded-l-md hover:bg-sky-950/60"
+            title={`Active Filter: ${fromDate || "any"} to ${toDate || "any"} (IST)`}
+          >
+            <Calendar className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+            <span className="whitespace-nowrap font-medium text-[11px] sm:text-xs">{triggerLabel}</span>
+            <ChevronDown
+              className={`w-3 h-3 shrink-0 transition-transform duration-150 text-sky-400 ${
+                isOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+          <button
+            type="button"
             onClick={handleReset}
-            className="p-0.5 hover:bg-sky-900/60 rounded-full text-sky-300 hover:text-white transition ml-0.5 cursor-pointer"
+            className="px-2 py-1.5 text-sky-300 hover:text-white hover:bg-sky-900/60 transition cursor-pointer rounded-r-md border-l border-sky-700/70 flex items-center justify-center"
             title="Reset Dates"
-            role="button"
             aria-label="Reset Dates"
           >
             <X className="w-3 h-3" />
-          </span>
-        )}
-
-        <ChevronDown
-          className={`w-3 h-3 shrink-0 transition-transform duration-150 ${
-            isOpen ? "rotate-180" : ""
-          } ${isFiltered ? "text-sky-400" : "text-neutral-400"}`}
-        />
-      </button>
+          </button>
+        </div>
+      )}
 
       {/* Popover Dropdown */}
       {isOpen && (

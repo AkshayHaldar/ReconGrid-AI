@@ -88,3 +88,22 @@ test('an active conflict opens with the refreshed candidate', async () => {
   assert.ok(page.updates.includes(fresh));
   assert.ok(!page.updates.includes(stale));
 });
+
+test('openConflict decouples from active date filters and searches full batch', async () => {
+  let capturedQuery = null;
+  const target = { id: 'cand-1', rzp_settlement_db_id: 'settlement-123' };
+  const page = dashboard({
+    collectRecordWindows: async (query) => {
+      capturedQuery = query;
+      return [target];
+    },
+  });
+  await page.find('ReconciliationTable').onOpenConflict(target);
+  assert.ok(capturedQuery);
+  assert.equal(capturedQuery.status, 'CONFLICT');
+  assert.equal(capturedQuery.settlementId, 'settlement-123');
+  assert.equal(capturedQuery.fromDate, undefined);
+  assert.equal(capturedQuery.toDate, undefined);
+  assert.equal(capturedQuery.from_date, undefined);
+  assert.equal(capturedQuery.to_date, undefined);
+});

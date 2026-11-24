@@ -119,8 +119,14 @@ test("IST timezone is used around midnight across UTC boundaries", () => {
 test("last 30 days accurately produces a 30-day ISO date span ending on ref date", () => {
   const range = getLast30Days("2026-11-22T06:00:00Z");
   assert.equal(range.toDate, "2026-11-22");
-  assert.equal(range.fromDate, "2026-10-23");
+  assert.equal(range.fromDate, "2026-10-24");
   assert.equal(range.label, "Last 30 Days");
+
+  // Verify fencepost math: [fromDate, toDate] inclusive is exactly 30 days
+  const fromMs = Date.parse(range.fromDate + "T00:00:00Z");
+  const toMs = Date.parse(range.toDate + "T00:00:00Z");
+  const inclusiveDays = Math.round((toMs - fromMs) / (24 * 60 * 60 * 1000)) + 1;
+  assert.equal(inclusiveDays, 30);
 });
 
 test("formatting compact dates formats nicely for pill display", () => {

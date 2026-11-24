@@ -1,8 +1,9 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
 from collections.abc import Sequence
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,8 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class ReconciliationRepository:
@@ -201,23 +204,15 @@ class ReconciliationRepository:
             base_query = base_query.where(ReconciliationLog.rzp_settlement_id == settlement_id)
         if from_date and from_date.strip():
             try:
-                from datetime import UTC, datetime
-                from zoneinfo import ZoneInfo
-
-                ist = ZoneInfo("Asia/Kolkata")
-                start_dt = datetime.strptime(from_date.strip(), "%Y-%m-%d").replace(tzinfo=ist).astimezone(UTC)
+                start_dt = datetime.strptime(from_date.strip(), "%Y-%m-%d").replace(tzinfo=IST).astimezone(UTC)
                 base_query = base_query.where(BankTransaction.date >= start_dt)
             except (ValueError, TypeError):
                 pass
         if to_date and to_date.strip():
             try:
-                from datetime import UTC, datetime
-                from zoneinfo import ZoneInfo
-
-                ist = ZoneInfo("Asia/Kolkata")
                 end_dt = (
                     datetime.strptime(to_date.strip(), "%Y-%m-%d")
-                    .replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=ist)
+                    .replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=IST)
                     .astimezone(UTC)
                 )
                 base_query = base_query.where(BankTransaction.date <= end_dt)

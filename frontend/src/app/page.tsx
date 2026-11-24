@@ -103,7 +103,14 @@ export default function DashboardPage() {
     setActionError(null);
     try {
       const candidates = record.rzp_settlement_db_id ? await collectRecordWindows({
-        ...query, status: "CONFLICT", search: "", diagnostic: "ALL",
+        ...query,
+        status: "CONFLICT",
+        search: "",
+        diagnostic: "ALL",
+        fromDate: undefined,
+        toDate: undefined,
+        from_date: undefined,
+        to_date: undefined,
         settlementId: record.rzp_settlement_db_id,
       }) : [];
       if (request !== conflictRequest.current) return;
@@ -442,6 +449,7 @@ export default function DashboardPage() {
         allRecords={conflictRecords}
         onClose={() => setConflictTarget(null)}
         onResolve={handleResolveConflict}
+        activeDateFilter={{ fromDate, toDate }}
       />
 
       {/* Exception Audit Inspector Drawer */}
