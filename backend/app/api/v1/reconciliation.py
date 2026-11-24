@@ -121,6 +121,12 @@ async def get_reconciliation_records(
     direction: Literal["asc", "desc"] = "desc",
     anchor_id: str | None = Query(default=None, max_length=36),
     settlement_id: str = Query(default="", max_length=36),
+    from_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Filter from date (YYYY-MM-DD) in IST"
+    ),
+    to_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Filter to date (YYYY-MM-DD) in IST"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Returns filtered, paginated reconciliation records for the ledger table."""
@@ -129,7 +135,18 @@ async def get_reconciliation_records(
     if limit is not None or cursor is not None or anchor_id is not None:
         try:
             logs, total_count, next_cursor, has_more = await repo.get_log_window(
-                batch_id, status, q, diagnostic, sort, direction, limit or page_size, cursor, anchor_id, settlement_id
+                batch_id,
+                status,
+                q,
+                diagnostic,
+                sort,
+                direction,
+                limit or page_size,
+                cursor,
+                anchor_id,
+                settlement_id,
+                from_date,
+                to_date,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -137,7 +154,13 @@ async def get_reconciliation_records(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     else:
         logs, total_count = await repo.get_active_logs(
-            batch_id=batch_id, status_filter=status, search=q, page=page, page_size=page_size
+            batch_id=batch_id,
+            status_filter=status,
+            search=q,
+            page=page,
+            page_size=page_size,
+            from_date=from_date,
+            to_date=to_date,
         )
     records = [_map_log_to_item(l) for l in logs]
 

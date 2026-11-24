@@ -137,9 +137,13 @@ class ReconciliationRepository:
         search: str | None = None,
         page: int = 1,
         page_size: int = 100,
+        from_date: str | None = None,
+        to_date: str | None = None,
     ) -> tuple[Sequence[ReconciliationLog], int]:
         """Queries active (non-superseded) logs with filters, search, and pagination."""
-        base_query = self._filtered_logs(batch_id, status_filter, search)
+        base_query = self._filtered_logs(
+            batch_id, status_filter, search, from_date=from_date, to_date=to_date
+        )
 
         # Count query
         count_stmt = select(func.count()).select_from(base_query.subquery())
@@ -154,7 +158,16 @@ class ReconciliationRepository:
         result = await self.session.execute(query)
         return result.scalars().all(), total_count
 
-    def _filtered_logs(self, batch_id, status_filter, search, diagnostic="ALL", settlement_id=""):
+    def _filtered_logs(
+        self,
+        batch_id,
+        status_filter,
+        search,
+        diagnostic="ALL",
+        settlement_id="",
+        from_date=None,
+        to_date=None,
+    ):
         base_query = (
             select(ReconciliationLog)
             .join(ReconciliationLog.bank_transaction)
@@ -186,6 +199,30 @@ class ReconciliationRepository:
             base_query = base_query.where(ReconciliationLog.diagnostic_type == diagnostic)
         if settlement_id:
             base_query = base_query.where(ReconciliationLog.rzp_settlement_id == settlement_id)
+        if from_date and from_date.strip():
+            try:
+                from datetime import UTC, datetime
+                from zoneinfo import ZoneInfo
+
+                ist = ZoneInfo("Asia/Kolkata")
+                start_dt = datetime.strptime(from_date.strip(), "%Y-%m-%d").replace(tzinfo=ist).astimezone(UTC)
+                base_query = base_query.where(BankTransaction.date >= start_dt)
+            except (ValueError, TypeError):
+                pass
+        if to_date and to_date.strip():
+            try:
+                from datetime import UTC, datetime
+                from zoneinfo import ZoneInfo
+
+                ist = ZoneInfo("Asia/Kolkata")
+                end_dt = (
+                    datetime.strptime(to_date.strip(), "%Y-%m-%d")
+                    .replace(hour=23, minute=59, second=59, microsecond=999999, tzinfo=ist)
+                    .astimezone(UTC)
+                )
+                base_query = base_query.where(BankTransaction.date <= end_dt)
+            except (ValueError, TypeError):
+                pass
         return base_query
 
     async def get_log_window(
@@ -200,6 +237,8 @@ class ReconciliationRepository:
         cursor=None,
         anchor_id=None,
         settlement_id="",
+        from_date=None,
+        to_date=None,
     ):
         columns = {
             "date": BankTransaction.date,
@@ -212,8 +251,20 @@ class ReconciliationRepository:
             raise ValueError("Invalid pagination sort, direction or limit")
         if cursor and anchor_id:
             raise ValueError("Use either cursor or anchor_id, not both")
-        base = self._filtered_logs(batch_id, status_filter, search, diagnostic, settlement_id)
-        scope = query_scope(batch_id, status_filter.upper(), search.strip(), diagnostic, sort, direction, settlement_id)
+        base = self._filtered_logs(
+            batch_id, status_filter, search, diagnostic, settlement_id, from_date, to_date
+        )
+        scope = query_scope(
+            batch_id,
+            status_filter.upper(),
+            search.strip(),
+            diagnostic,
+            sort,
+            direction,
+            settlement_id,
+            from_date or "",
+            to_date or "",
+        )
         column = columns[sort]
         position = decode_cursor(cursor, scope, sort) if cursor else None
         if anchor_id:
