@@ -119,7 +119,7 @@ test("IST timezone is used around midnight across UTC boundaries", () => {
 test("last 30 days accurately produces a 30-day ISO date span ending on ref date", () => {
   const range = getLast30Days("2026-11-22T06:00:00Z");
   assert.equal(range.toDate, "2026-11-22");
-  assert.equal(range.fromDate, "2026-10-23");
+  assert.equal(range.fromDate, "2026-10-24");
   assert.equal(range.label, "Last 30 Days");
 });
 
@@ -129,3 +129,13 @@ test("formatting compact dates formats nicely for pill display", () => {
   assert.equal(formatCompactDateShort("2026-07-01"), "1 Jul");
   assert.equal(formatCompactDateShort("2026-09-30"), "30 Sep");
 });
+
+
+for (const reference of ["2024-03-01T06:00:00Z", "2026-03-01T06:00:00Z", "2026-01-01T06:00:00Z", "2026-03-31T19:00:00Z", "2026-03-31T18:00:00Z"]) {
+  test(`last 30 days includes exactly 30 calendar dates at ${reference}`, () => {
+    const range = getLast30Days(reference);
+    assert.equal((Date.parse(range.toDate) - Date.parse(range.fromDate)) / 86400000 + 1, 30);
+    const { year, month, day } = getDatePartsIST(reference);
+    assert.equal(range.toDate, `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+  });
+}

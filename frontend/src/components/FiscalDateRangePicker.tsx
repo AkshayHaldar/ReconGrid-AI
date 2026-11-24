@@ -135,7 +135,8 @@ export const FiscalDateRangePicker: React.FC<FiscalDateRangePickerProps> = ({
 
   return (
     <div className="relative inline-block text-left" ref={containerRef}>
-      {/* Trigger Button */}
+      <div role="group" aria-label="Date range filter" className="inline-flex items-stretch gap-1">
+      {/* Toggle and reset are separate native keyboard controls. */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -155,24 +156,24 @@ export const FiscalDateRangePicker: React.FC<FiscalDateRangePickerProps> = ({
         <Calendar className={`w-3.5 h-3.5 shrink-0 ${isFiltered ? "text-sky-400" : "text-neutral-400"}`} />
         <span className="whitespace-nowrap font-medium text-[11px] sm:text-xs">{triggerLabel}</span>
 
-        {isFiltered && (
-          <span
-            onClick={handleReset}
-            className="p-0.5 hover:bg-sky-900/60 rounded-full text-sky-300 hover:text-white transition ml-0.5 cursor-pointer"
-            title="Reset Dates"
-            role="button"
-            aria-label="Reset Dates"
-          >
-            <X className="w-3 h-3" />
-          </span>
-        )}
-
         <ChevronDown
           className={`w-3 h-3 shrink-0 transition-transform duration-150 ${
             isOpen ? "rotate-180" : ""
           } ${isFiltered ? "text-sky-400" : "text-neutral-400"}`}
         />
       </button>
+      {isFiltered && (
+        <button
+          type="button"
+          onClick={handleReset}
+          className="px-1.5 py-1 rounded-md border border-sky-700/70 bg-sky-950/40 hover:bg-sky-900/60 text-sky-300 hover:text-white cursor-pointer"
+          title="Reset Dates"
+          aria-label="Reset Dates"
+        >
+          <X className="w-3 h-3" aria-hidden="true" />
+        </button>
+      )}
+      </div>
 
       {/* Popover Dropdown */}
       {isOpen && (

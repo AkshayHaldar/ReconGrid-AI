@@ -1,8 +1,9 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
 from collections.abc import Sequence
-from datetime import UTC
+from datetime import UTC, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,9 +142,7 @@ class ReconciliationRepository:
         to_date: str | None = None,
     ) -> tuple[Sequence[ReconciliationLog], int]:
         """Queries active (non-superseded) logs with filters, search, and pagination."""
-        base_query = self._filtered_logs(
-            batch_id, status_filter, search, from_date=from_date, to_date=to_date
-        )
+        base_query = self._filtered_logs(batch_id, status_filter, search, from_date=from_date, to_date=to_date)
 
         # Count query
         count_stmt = select(func.count()).select_from(base_query.subquery())
@@ -201,9 +200,6 @@ class ReconciliationRepository:
             base_query = base_query.where(ReconciliationLog.rzp_settlement_id == settlement_id)
         if from_date and from_date.strip():
             try:
-                from datetime import UTC, datetime
-                from zoneinfo import ZoneInfo
-
                 ist = ZoneInfo("Asia/Kolkata")
                 start_dt = datetime.strptime(from_date.strip(), "%Y-%m-%d").replace(tzinfo=ist).astimezone(UTC)
                 base_query = base_query.where(BankTransaction.date >= start_dt)
@@ -211,9 +207,6 @@ class ReconciliationRepository:
                 pass
         if to_date and to_date.strip():
             try:
-                from datetime import UTC, datetime
-                from zoneinfo import ZoneInfo
-
                 ist = ZoneInfo("Asia/Kolkata")
                 end_dt = (
                     datetime.strptime(to_date.strip(), "%Y-%m-%d")
@@ -251,9 +244,7 @@ class ReconciliationRepository:
             raise ValueError("Invalid pagination sort, direction or limit")
         if cursor and anchor_id:
             raise ValueError("Use either cursor or anchor_id, not both")
-        base = self._filtered_logs(
-            batch_id, status_filter, search, diagnostic, settlement_id, from_date, to_date
-        )
+        base = self._filtered_logs(batch_id, status_filter, search, diagnostic, settlement_id, from_date, to_date)
         scope = query_scope(
             batch_id,
             status_filter.upper(),
