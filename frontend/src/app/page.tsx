@@ -11,6 +11,7 @@ import { ExportConfirmModal } from "@/components/ExportConfirmModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
+import { TallyExportModal } from "@/components/TallyExportModal";
 import { CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react";
 import {
   ReconciliationRecordItem,
@@ -52,6 +53,7 @@ export default function DashboardPage() {
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isQaOpen, setIsQaOpen] = useState(false);
+  const [isTallyConfirmOpen, setIsTallyConfirmOpen] = useState(false);
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
 
@@ -340,9 +342,13 @@ export default function DashboardPage() {
     window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
   };
 
-  const handleExportTally = () => {
+  const handleExportTally = () => setIsTallyConfirmOpen(true);
+
+  const confirmExportTally = () => {
+    setIsTallyConfirmOpen(false);
     window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
   };
+  const cancelExportTally = useCallback(() => setIsTallyConfirmOpen(false), []);
 
   const isEmpty = Boolean(status && status.total_records === 0);
   return (
@@ -358,6 +364,14 @@ export default function DashboardPage() {
         onExportTally={handleExportTally}
         onExportXlsx={handleExportXlsx}
         periodDate={status?.last_reconciled_at}
+      />
+
+      <TallyExportModal
+        isOpen={isTallyConfirmOpen}
+        status={status}
+        batchId="default"
+        onConfirm={confirmExportTally}
+        onCancel={cancelExportTally}
       />
 
       {/* Main Financial Workspace */}
