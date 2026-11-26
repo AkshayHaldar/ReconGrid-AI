@@ -2,11 +2,13 @@
 
 import csv
 import io
+from collections.abc import AsyncIterator, Iterable, Sequence
 from dataclasses import asdict
 from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -360,69 +362,109 @@ async def resolve_conflict(
     return ApiResponse.ok(_map_log_to_item(refreshed_log or log))
 
 
+EXPORT_PAGE_SIZE = 1000
+
+CSV_LEDGER_HEADERS = (
+    "Date",
+    "Direction",
+    "Bank Description",
+    "Bank UTR",
+    "Bank Amount (INR)",
+    "Razorpay Settlement ID",
+    "Razorpay Net (INR)",
+    "Razorpay Gross (INR)",
+    "Fees (INR)",
+    "GST (INR)",
+    "Match Status",
+    "Match Tier",
+    "Confidence %",
+    "Diagnostic Type",
+    "Diagnostic Note",
+    "Human Action",
+)
+
+
+def _log_to_csv_row(log: ReconciliationLog) -> list[str]:
+    bank = log.bank_transaction
+    rzp = log.rzp_settlement
+    return [
+        bank.date.strftime("%Y-%m-%d") if bank else "",
+        _csv_text(bank.direction) if bank else "CREDIT",
+        _csv_text(bank.description) if bank else "",
+        _csv_text(bank.utr) if bank else "",
+        f"{to_decimal(bank.amount):.2f}" if bank else "0.00",
+        _csv_text(rzp.settlement_id) if rzp else "",
+        f"{to_decimal(rzp.amount):.2f}" if rzp else "",
+        f"{to_decimal(rzp.gross_amount):.2f}" if rzp else "",
+        f"{to_decimal(rzp.fees):.2f}" if rzp else "",
+        f"{to_decimal(rzp.tax):.2f}" if rzp else "",
+        _csv_text(log.match_status),
+        _csv_text(log.match_tier),
+        (
+            f"{log.confidence_score * 100:.1f}%"
+            if log.confidence_score is not None
+            else ("100.0%" if log.match_status == "MATCHED" else "N/A")
+        ),
+        _csv_text(log.diagnostic_type),
+        _csv_text(log.diagnostic_note),
+        _csv_text(log.human_action) or "AUTO",
+    ]
+
+
+def _csv_rows_to_bytes(rows: Iterable[Sequence[str]]) -> bytes:
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
+async def _iter_active_log_pages(
+    repo: ReconciliationRepository,
+    batch_id: str,
+    page_size: int | None = None,
+) -> AsyncIterator[Sequence[ReconciliationLog]]:
+    """Yields active log pages sequentially so large batches export without truncation."""
+    effective_page_size = page_size if page_size is not None else EXPORT_PAGE_SIZE
+    fetched = 0
+    page = 1
+    while True:
+        chunk, total = await repo.get_active_logs(batch_id=batch_id, page=page, page_size=effective_page_size)
+        if not chunk:
+            break
+        yield chunk
+        fetched += len(chunk)
+        if fetched >= total:
+            break
+        page += 1
+
+
+async def _all_active_logs(
+    repo: ReconciliationRepository,
+    batch_id: str,
+    page_size: int | None = None,
+) -> list[ReconciliationLog]:
+    """Every active log in the batch, fetched page by page so large batches are not truncated."""
+    logs: list[ReconciliationLog] = []
+    async for chunk in _iter_active_log_pages(repo, batch_id, page_size=page_size):
+        logs.extend(chunk)
+    return logs
+
+
 @router.get("/{batch_id}/export")
 async def export_reconciliation_csv(
     batch_id: str = "default",
     db: AsyncSession = Depends(get_db),
 ):
-    """Generates and downloads a complete reconciliation audit ledger CSV."""
+    """Streams a complete reconciliation audit ledger CSV across all pages."""
     repo = ReconciliationRepository(db)
-    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
-        [
-            "Date",
-            "Direction",
-            "Bank Description",
-            "Bank UTR",
-            "Bank Amount (INR)",
-            "Razorpay Settlement ID",
-            "Razorpay Net (INR)",
-            "Razorpay Gross (INR)",
-            "Fees (INR)",
-            "GST (INR)",
-            "Match Status",
-            "Match Tier",
-            "Confidence %",
-            "Diagnostic Type",
-            "Diagnostic Note",
-            "Human Action",
-        ]
-    )
+    async def _stream_csv() -> AsyncIterator[bytes]:
+        yield _csv_rows_to_bytes((CSV_LEDGER_HEADERS,))
+        async for chunk in _iter_active_log_pages(repo, batch_id):
+            yield _csv_rows_to_bytes(_log_to_csv_row(log) for log in chunk)
 
-    for log in logs:
-        bank = log.bank_transaction
-        rzp = log.rzp_settlement
-        writer.writerow(
-            [
-                bank.date.strftime("%Y-%m-%d") if bank else "",
-                _csv_text(bank.direction) if bank else "CREDIT",
-                _csv_text(bank.description) if bank else "",
-                _csv_text(bank.utr) if bank else "",
-                f"{to_decimal(bank.amount):.2f}" if bank else "0.00",
-                _csv_text(rzp.settlement_id) if rzp else "",
-                f"{to_decimal(rzp.amount):.2f}" if rzp else "",
-                f"{to_decimal(rzp.gross_amount):.2f}" if rzp else "",
-                f"{to_decimal(rzp.fees):.2f}" if rzp else "",
-                f"{to_decimal(rzp.tax):.2f}" if rzp else "",
-                _csv_text(log.match_status),
-                _csv_text(log.match_tier),
-                (
-                    f"{log.confidence_score * 100:.1f}%"
-                    if log.confidence_score is not None
-                    else ("100.0%" if log.match_status == "MATCHED" else "N/A")
-                ),
-                _csv_text(log.diagnostic_type),
-                _csv_text(log.diagnostic_note),
-                _csv_text(log.human_action) or "AUTO",
-            ]
-        )
-
-    csv_data = output.getvalue()
-    return Response(
-        content=csv_data,
+    return StreamingResponse(
+        _stream_csv(),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=recongrid_audit_{batch_id}.csv"},
     )
@@ -435,7 +477,7 @@ async def export_reconciliation_xlsx(
 ):
     """Downloads a styled Excel workbook: summary, reconciled ledger and exceptions."""
     repo = ReconciliationRepository(db)
-    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
+    logs = await _all_active_logs(repo, batch_id)
     content = build_reconciliation_workbook(batch_id, logs)
     return Response(
         content=content,
@@ -455,7 +497,7 @@ async def export_tally_xml(
 ):
     """Downloads matched settlements as balanced Tally Prime Journal vouchers."""
     repo = ReconciliationRepository(db)
-    logs, _ = await repo.get_active_logs(batch_id=batch_id, page=1, page_size=10000)
+    logs = await _all_active_logs(repo, batch_id)
     try:
         export = build_tally_xml(
             logs,
@@ -474,18 +516,6 @@ async def export_tally_xml(
             "X-Skipped-Vouchers": str(len(export.skipped)),
         },
     )
-
-
-async def _all_active_logs(repo: ReconciliationRepository, batch_id: str, page_size: int = 1000):
-    """Every active log in the batch, fetched page by page so large batches are not truncated."""
-    logs: list = []
-    page = 1
-    while True:
-        chunk, total = await repo.get_active_logs(batch_id=batch_id, page=page, page_size=page_size)
-        logs.extend(chunk)
-        if not chunk or len(logs) >= total:
-            return logs
-        page += 1
 
 
 @router.get("/{batch_id}/tax-schedule")
