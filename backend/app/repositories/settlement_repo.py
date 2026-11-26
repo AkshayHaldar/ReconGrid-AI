@@ -1,6 +1,7 @@
 """RazorpaySettlement repository layer."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, or_, select, update
@@ -50,6 +51,13 @@ class SettlementRepository:
         stmt = select(RazorpayRefund).where(RazorpayRefund.settlement_id == settlement_id)
         result = await self.session.execute(stmt)
         return result.scalars().all()
+
+    async def oldest_unlinked_processed_refund(self) -> datetime | None:
+        return await self.session.scalar(
+            select(func.min(RazorpayRefund.processed_at)).where(
+                RazorpayRefund.settlement_id.is_(None), RazorpayRefund.status == "processed",
+            )
+        )
 
     async def get_processed_refund_totals(self, settlement_ids: set[str]) -> dict[str, Decimal]:
         totals = {}

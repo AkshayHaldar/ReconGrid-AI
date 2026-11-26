@@ -71,7 +71,7 @@ All Razorpay API calls go through `app/services/razorpay_client.py` using HTTP B
 
 > ⚠️ **Common Bug Alert:** Razorpay amounts are always in **paise** (1 INR = 100 paise). The codebase handles this conversion in `app/utils/money.py` — never multiply or divide by 100 manually in route handlers.
 
-Manual settlement sync and signed `refund.processed` events store INR refunds by their Razorpay refund ID. A refund may arrive before Razorpay identifies its settlement. It stays unlinked until the settlement report confirms the link. Diagnostics and the tax schedule use the sum of linked, processed refunds when the settlement does not include a refund total. [Razorpay settlement reconciliation API](https://razorpay.com/docs/api/settlements/fetch-recon)
+Manual settlement sync and signed `refund.processed` events store INR refunds by their Razorpay refund ID. A refund may arrive before Razorpay identifies its settlement. It stays unlinked until the settlement report confirms the link. The sync checks months for stored payouts from the earliest unlinked processed refund onward, including payouts outside the latest fetch page. Diagnostics and the tax schedule use the sum of linked, processed refunds when the settlement does not include a refund total. [Razorpay settlement reconciliation API](https://razorpay.com/docs/api/settlements/fetch-recon)
 
 ---
 
