@@ -5,7 +5,12 @@ from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -21,9 +26,50 @@ from app.utils.money import paise_to_rupees
 class RazorpayFetchError(Exception):
     """Base exception for Razorpay fetch errors."""
 
+    def __init__(
+        self,
+        message: str = "Razorpay API request failed.",
+        *,
+        status_code: int | None = None,
+        code: str = "RAZORPAY_FETCH_ERROR",
+    ) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.code = code
 
-class RazorpayFetchExhausted(Exception):
-    """Raised when maximum retries are exceeded."""
+
+class RazorpayFetchExhausted(RazorpayFetchError):
+    """Raised when retryable Razorpay errors exhaust maximum retry attempts."""
+
+    def __init__(
+        self,
+        message: str = "Razorpay API retries exhausted.",
+        *,
+        status_code: int | None = None,
+        code: str = "RAZORPAY_FETCH_EXHAUSTED",
+    ) -> None:
+        super().__init__(message, status_code=status_code, code=code)
+
+
+def _is_retryable_razorpay_error(exc: BaseException) -> bool:
+    """Retry only transient network failures, 429 rate limits, and 5xx server responses."""
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+        return status_code == 429 or status_code >= 500
+    return False
+
+
+def _client_error_code(status_code: int) -> str:
+    if status_code == 400:
+        return "RAZORPAY_BAD_REQUEST"
+    if status_code == 401:
+        return "RAZORPAY_UNAUTHORIZED"
+    if status_code == 403:
+        return "RAZORPAY_FORBIDDEN"
+    return "RAZORPAY_CLIENT_ERROR"
 
 
 class RazorpayClient:
@@ -35,30 +81,78 @@ class RazorpayClient:
         self.engine = ReconciliationEngine(self.recon_repo)
         self.base_url = "https://api.razorpay.com/v1"
 
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.RequestError, httpx.HTTPStatusError)),
-    )
     async def _fetch_settlements_page(
         self,
         client: httpx.AsyncClient,
         count: int = 100,
         skip: int = 0,
     ) -> dict[str, Any]:
-        """Fetches a single page of settlements with retry backoff."""
-        resp = await client.get(
-            f"{self.base_url}/settlements",
-            params={"count": count, "skip": skip},
-            auth=(settings.RAZORPAY_KEY_ID, resolve_secret(settings.RAZORPAY_KEY_SECRET)),
-            timeout=10.0,
-        )
-        if resp.status_code == 429:
-            logger.warning("razorpay_rate_limited_retrying", skip=skip)
-            resp.raise_for_status()
-        resp.raise_for_status()
-        return resp.json()
+        """Fetches a single page of settlements with retry backoff on transient errors only."""
+        max_attempts = max(1, settings.RAZORPAY_FETCH_MAX_RETRIES)
+        try:
+            async for attempt in AsyncRetrying(
+                reraise=True,
+                stop=stop_after_attempt(max_attempts),
+                wait=wait_exponential_jitter(initial=1, max=10, jitter=1),
+                retry=retry_if_exception(_is_retryable_razorpay_error),
+            ):
+                with attempt:
+                    resp = await client.get(
+                        f"{self.base_url}/settlements",
+                        params={"count": count, "skip": skip},
+                        auth=(settings.RAZORPAY_KEY_ID, resolve_secret(settings.RAZORPAY_KEY_SECRET)),
+                        timeout=10.0,
+                    )
+                    if resp.status_code == 429:
+                        logger.warning(
+                            "razorpay_rate_limited_retrying",
+                            skip=skip,
+                            attempt=attempt.retry_state.attempt_number,
+                        )
+                    resp.raise_for_status()
+                    return resp.json()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if _is_retryable_razorpay_error(exc):
+                logger.error(
+                    "razorpay_fetch_retries_exhausted",
+                    status_code=status_code,
+                    attempts=max_attempts,
+                    skip=skip,
+                    error=str(exc),
+                )
+                error_code = "RAZORPAY_API_RATE_LIMIT" if status_code == 429 else "RAZORPAY_FETCH_EXHAUSTED"
+                raise RazorpayFetchExhausted(
+                    f"Razorpay API failed after {max_attempts} attempts (HTTP {status_code}).",
+                    status_code=status_code,
+                    code=error_code,
+                ) from exc
+
+            logger.error(
+                "razorpay_fetch_client_error",
+                status_code=status_code,
+                skip=skip,
+                error=str(exc),
+            )
+            raise RazorpayFetchError(
+                f"Razorpay API rejected request with HTTP {status_code}. Check Razorpay API credentials and parameters.",
+                status_code=status_code,
+                code=_client_error_code(status_code),
+            ) from exc
+        except httpx.RequestError as exc:
+            logger.error(
+                "razorpay_fetch_network_exhausted",
+                attempts=max_attempts,
+                skip=skip,
+                error=str(exc),
+            )
+            raise RazorpayFetchExhausted(
+                f"Razorpay API unreachable after {max_attempts} attempts: {exc}",
+                status_code=502,
+                code="RAZORPAY_NETWORK_ERROR",
+            ) from exc
+
+        raise RazorpayFetchError("Unexpected empty retry outcome from Razorpay client.")
 
     async def sync_settlements(
         self,
@@ -71,33 +165,29 @@ class RazorpayClient:
         total_fetched = 0
         settlement_records: list[dict] = []
 
-        # If dummy keys or test mode without live credentials, handle gracefully or fetch from API
+        # If dummy keys or test mode without live credentials, skip external API call and reconcile DB records
         if settings.RAZORPAY_KEY_ID and not settings.RAZORPAY_KEY_ID.startswith("rzp_test_sample"):
-            try:
-                async with httpx.AsyncClient() as client:
-                    skip = 0
-                    page_size = min(count_limit, 100)
-                    while True:
-                        data = await self._fetch_settlements_page(client, count=page_size, skip=skip)
-                        items = data.get("items", [])
-                        if not items:
-                            break
+            async with httpx.AsyncClient() as client:
+                skip = 0
+                page_size = min(count_limit, 100)
+                while True:
+                    data = await self._fetch_settlements_page(client, count=page_size, skip=skip)
+                    items = data.get("items", [])
+                    if not items:
+                        break
 
-                        for item in items:
-                            total_fetched += 1
-                            amount_inr = paise_to_rupees(item.get("amount", 0))
-                            fees_inr = paise_to_rupees(item.get("fees", 0))
-                            tax_inr = paise_to_rupees(item.get("tax", 0))
-                            gross_inr = amount_inr + fees_inr + tax_inr
+                    for item in items:
+                        total_fetched += 1
+                        amount_inr = paise_to_rupees(item.get("amount", 0))
+                        fees_inr = paise_to_rupees(item.get("fees", 0))
+                        tax_inr = paise_to_rupees(item.get("tax", 0))
+                        gross_inr = amount_inr + fees_inr + tax_inr
 
-                            created_ts = item.get("created_at")
-                            dt = (
-                                datetime.fromtimestamp(created_ts, UTC)
-                                if created_ts
-                                else datetime.now(UTC)
-                            )
+                        created_ts = item.get("created_at")
+                        dt = datetime.fromtimestamp(created_ts, UTC) if created_ts else datetime.now(UTC)
 
-                            settlement_records.append({
+                        settlement_records.append(
+                            {
                                 "settlement_id": item.get("id"),
                                 "amount": amount_inr,
                                 "gross_amount": gross_inr,
@@ -108,13 +198,12 @@ class RazorpayClient:
                                 "settlement_created_at": dt,
                                 "raw_payload": item,
                                 "is_test_mode": settings.IS_TEST_MODE,
-                            })
+                            }
+                        )
 
-                        if len(items) < page_size or total_fetched >= count_limit:
-                            break
-                        skip += len(items)
-            except Exception as ex:
-                logger.error("razorpay_fetch_failed_using_cached_or_test", error=str(ex))
+                    if len(items) < page_size or total_fetched >= count_limit:
+                        break
+                    skip += len(items)
 
         # Save to database
         for s_data in settlement_records:
