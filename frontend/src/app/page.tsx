@@ -210,17 +210,16 @@ export default function DashboardPage() {
       )
     );
 
-    setToast({
-      id: `toast-${Date.now()}`,
-      message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
-      type: "approve",
-      recordId,
-      previousRecord: targetRecord,
-    });
-
     try {
       const updated = await approveRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+      setToast({
+        id: `toast-${Date.now()}`,
+        message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
+        type: "approve",
+        recordId: updated.id,
+        previousRecord: targetRecord,
+      });
       await loadData();
     } catch (err) {
       console.error("Approve failed:", err);
@@ -231,7 +230,6 @@ export default function DashboardPage() {
         message: "Failed to save approval. Reverted changes.",
         type: "deny",
         recordId,
-        previousRecord: targetRecord,
       });
     }
   };
@@ -255,17 +253,16 @@ export default function DashboardPage() {
       )
     );
 
-    setToast({
-      id: `toast-${Date.now()}`,
-      message: `Moved ${targetRecord.bank_utr || "Record #" + targetRecord.id} to Exceptions`,
-      type: "deny",
-      recordId,
-      previousRecord: targetRecord,
-    });
-
     try {
       const updated = await denyRecord(recordId);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+      setToast({
+        id: `toast-${Date.now()}`,
+        message: `Moved ${targetRecord.bank_utr || "Record #" + targetRecord.id} to Exceptions`,
+        type: "deny",
+        recordId: updated.id,
+        previousRecord: targetRecord,
+      });
       await loadData();
     } catch (err) {
       console.error("Deny failed:", err);
@@ -282,11 +279,13 @@ export default function DashboardPage() {
   // Handle Undo from Toast
   const handleUndo = async () => {
     if (!toast?.previousRecord) return;
-    const { previousRecord } = toast;
-    setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
+    const { previousRecord, recordId } = toast;
+    if (!recordId) return;
+    setRecords((prev) => prev.map((r) => (r.id === recordId ? { ...previousRecord, id: recordId } : r)));
     setToast(null);
     try {
-      await revertRecord(previousRecord.id);
+      const updated = await revertRecord(recordId);
+      setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
       await loadData();
     } catch (err) {
       console.error("Undo revert failed:", err);
@@ -295,7 +294,7 @@ export default function DashboardPage() {
         id: `toast-undo-err-${Date.now()}`,
         message: "Failed to undo previous action on server.",
         type: "deny",
-        recordId: previousRecord.id,
+        recordId,
       });
     }
   };

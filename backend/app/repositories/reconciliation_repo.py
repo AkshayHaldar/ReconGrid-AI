@@ -3,9 +3,10 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -14,6 +15,10 @@ from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
+
+
+class StaleDecisionError(Exception):
+    """A parent decision changed before its replacement could be recorded."""
 
 
 class ReconciliationRepository:
@@ -72,30 +77,97 @@ class ReconciliationRepository:
                 selectinload(ReconciliationLog.rzp_settlement),
             )
             .where(ReconciliationLog.id == log_id)
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def lock_human_decisions(self, batch_id: str) -> None:
+        if self.session.get_bind().dialect.name == "postgresql":
+            await self.session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:batch))"),
+                                       {"batch": f"recon-human-decisions:{batch_id}"})
+
+    async def append_decisions(
+        self, transitions: Sequence[tuple[ReconciliationLog, dict[str, object]]],
+    ) -> list[ReconciliationLog]:
+        """Supersede parents, then append their successors in the same transaction."""
+        replacements = {}
+        for current, changes in sorted(transitions, key=lambda pair: pair[0].id):
+            successor_id = str(uuid4())
+            claimed = await self.session.scalar(
+                update(ReconciliationLog)
+                .where(
+                    ReconciliationLog.id == current.id,
+                    ReconciliationLog.superseded.is_(False),
+                    ReconciliationLog.match_status == current.match_status,
+                    ReconciliationLog.human_action == current.human_action,
+                )
+                .values(superseded=True, superseded_by_id=successor_id)
+                .returning(ReconciliationLog.id)
+            )
+            if claimed is None:
+                raise StaleDecisionError(current.id)
+            replacements[current.id] = {
+                "id": successor_id,
+                "batch_id": current.batch_id,
+                "bank_tx_id": current.bank_tx_id,
+                "rzp_settlement_id": current.rzp_settlement_id,
+                "match_status": current.match_status,
+                "match_tier": current.match_tier,
+                "confidence_score": current.confidence_score,
+                "delta_amount": current.delta_amount,
+                "diagnostic_type": current.diagnostic_type,
+                "diagnostic_note": current.diagnostic_note,
+                "human_action": current.human_action,
+                **changes,
+            }
+        return await self.add_logs_bulk([replacements[current.id] for current, _ in transitions])
+
+    async def has_other_settlement_claim(self, current: ReconciliationLog, settlement_id: str, *, include_suggestions: bool) -> bool:
+        statuses = ("MATCHED", "SUGGESTED") if include_suggestions else ("MATCHED",)
+        return await self.session.scalar(
+            select(ReconciliationLog.id)
+            .where(
+                ReconciliationLog.batch_id == current.batch_id,
+                ReconciliationLog.rzp_settlement_id == settlement_id,
+                ReconciliationLog.superseded.is_(False),
+                ReconciliationLog.match_status.in_(statuses),
+                ReconciliationLog.id != current.id,
+            )
+            .limit(1)
+        ) is not None
+
     async def batch_approve_suggestions(self, batch_id: str, min_confidence: float) -> int:
-        """Approve eligible active suggestions with one atomic conditional UPDATE."""
+        """Append approvals for suggestions with no competing settlement claim."""
+        await self.lock_human_decisions(batch_id)
         suffix = f" [Batch Approved >= {min_confidence * 100:g}% by CA]"
+        competing = (
+            select(ReconciliationLog.rzp_settlement_id)
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.superseded.is_(False),
+                ReconciliationLog.match_status.in_(("MATCHED", "SUGGESTED")),
+                ReconciliationLog.rzp_settlement_id.is_not(None),
+            )
+            .group_by(ReconciliationLog.rzp_settlement_id)
+            .having(func.count() > 1)
+        )
         stmt = (
-            update(ReconciliationLog)
+            select(ReconciliationLog)
             .where(
                 ReconciliationLog.batch_id == batch_id,
                 ReconciliationLog.match_status == "SUGGESTED",
                 ReconciliationLog.confidence_score >= min_confidence,
-                ReconciliationLog.superseded == False,
+                ReconciliationLog.superseded.is_(False),
+                or_(ReconciliationLog.rzp_settlement_id.is_(None), ReconciliationLog.rzp_settlement_id.not_in(competing)),
             )
-            .values(
-                match_status="MATCHED",
-                human_action="APPROVED",
-                diagnostic_note=func.coalesce(ReconciliationLog.diagnostic_note, "") + suffix,
-            )
-            .returning(ReconciliationLog.id)
         )
-        result = await self.session.execute(stmt)
-        return len(result.scalars().all())
+        candidates = (await self.session.scalars(stmt)).all()
+        decisions = await self.append_decisions([
+            (row, {"match_status": "MATCHED", "human_action": "APPROVED", "diagnostic_note": row.diagnostic_note + suffix})
+            for row in candidates
+        ])
+        return len(decisions)
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""

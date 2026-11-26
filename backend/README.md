@@ -21,7 +21,7 @@ It is built as an asynchronous **FastAPI** application with **SQLAlchemy 2.0** a
 1. **Zero Floating-Point Math:** All financial values use Python standard library `Decimal(18, 2)` with explicit rounding (`ROUND_HALF_UP`). Floats are rejected at the Pydantic schema boundary.
 2. **Deterministic Matching Core:** Reconciliation decisions are made entirely by deterministic rules (UTRs, normalized entropy, fuzzy strings, date windows, fee formulas). No LLM is in the critical decision path.
 3. **Guardrailed Natural Language:** The Settlement Q&A Agent uses LLMs (NVIDIA NIM / LLaMA 3.3 70B) strictly for read-only explanation. Every numeric token is cross-checked against database records by a regex guardrail.
-4. **Append-Only Auditing:** Records are marked `superseded=True`, never physically deleted.
+4. **Append-Only Auditing:** Human decisions append a successor and link the previous record through `superseded_by_id` in the same transaction. Decision endpoints return the successor ID for subsequent actions such as Undo. A stale decision returns HTTP 409 so the caller can reload the active ledger.
 
 ---
 
