@@ -6,11 +6,78 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from pydantic import ValidationError
+from tenacity import wait_none
 
 from app.core.config import settings
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.services.razorpay_client import RazorpayClient
+
+
+def refund_payload(number: int) -> dict:
+    return {
+        "id": f"rfnd_{number}",
+        "payment_id": f"pay_{number}",
+        "amount": 12055,
+        "currency": "INR",
+        "status": "processed",
+        "created_at": 1724496000,
+    }
+
+
+async def test_fetch_refunds_limits_each_page_and_converts_paise(monkeypatch):
+    client = RazorpayClient(AsyncMock())
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/refunds"
+        count = int(request.url.params["count"])
+        offset = int(request.url.params["skip"])
+        requests.append((count, offset))
+        return httpx.Response(200, json={"items": [refund_payload(i) for i in range(offset, offset + count)]})
+
+    transport = httpx.MockTransport(respond)
+    http_client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refunds")
+    with patch("app.services.razorpay_client.httpx.AsyncClient", return_value=http_client):
+        refunds = await client.fetch_refunds(count_limit=102)
+
+    assert requests == [(100, 0), (2, 100)]
+    assert len(refunds) == 102
+    assert refunds[-1]["refund_id"] == "rfnd_101"
+    assert refunds[-1]["amount"] == Decimal("120.55")
+    assert "settlement_id" not in refunds[-1]
+
+
+async def test_fetch_refunds_page_retries_a_throttle_but_not_an_auth_error():
+    client = RazorpayClient(AsyncMock())
+    statuses = iter((429, 401))
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(next(statuses))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        fetch = client._fetch_refunds_page.retry_with(wait=wait_none())
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            await fetch(client, http_client, count=20, skip=0)
+
+    assert error.value.response.status_code == 401
+    assert len(requests) == 2
+
+
+async def test_fetch_refunds_rejects_fractional_paise_without_retry(monkeypatch):
+    client = RazorpayClient(AsyncMock())
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refunds")
+    page = AsyncMock(return_value=[{**refund_payload(1), "amount": 120.55}])
+    monkeypatch.setattr(client, "_fetch_refunds_page", page)
+
+    with pytest.raises(ValidationError, match="amount"):
+        await client.fetch_refunds()
+
+    page.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -50,6 +117,7 @@ async def test_fetch_settlements_page_error_status():
 async def test_sync_settlements_pagination_and_upsert():
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
 
     # Setup 2 pages of mocked responses
     page1_items = [
@@ -100,6 +168,7 @@ async def test_sync_settlements_pagination_and_upsert():
 async def test_sync_settlements_fetch_exception_handled():
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[])
 
     # Mock the DB get_all() because our new logic calls it even when API fails
@@ -118,6 +187,7 @@ async def test_sync_settlements_reconciles_existing_db_data_when_api_is_empty():
     """
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
 
     # Mock the DB to return historical settlements
     mock_setl = RazorpaySettlement(

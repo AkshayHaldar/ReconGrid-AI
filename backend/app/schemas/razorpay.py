@@ -1,10 +1,45 @@
 """Razorpay settlement schemas."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.utils.money import paise_to_rupees
+
+
+class RazorpayRefundPayload(BaseModel):
+    """Refund entity shared by the paginated provider API and signed webhooks."""
+
+    id: str = Field(min_length=1, max_length=64)
+    payment_id: str = Field(min_length=1, max_length=64)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    amount: int = Field(strict=True, gt=0, lt=10**18)
+    status: Literal["pending", "processed", "failed"]
+    created_at: int = Field(strict=True, gt=0)
+
+    @field_validator("created_at")
+    @classmethod
+    def validate_timestamp(cls, value: int) -> int:
+        try:
+            datetime.fromtimestamp(value, UTC)
+        except (OverflowError, OSError, ValueError) as error:
+            raise ValueError("Refund timestamp is out of range") from error
+        return value
+
+    def to_record(self, raw_payload: dict[str, Any]) -> dict[str, Any]:
+        if self.currency != "INR":
+            raise ValueError("ReconGrid stores only INR refund amounts")
+        return {
+            "refund_id": self.id,
+            "payment_id": self.payment_id,
+            "amount": paise_to_rupees(self.amount),
+            "status": self.status,
+            # The refund entity exposes its creation time, including in processed deliveries.
+            "processed_at": datetime.fromtimestamp(self.created_at, UTC),
+            "raw_payload": raw_payload,
+        }
 
 
 class RazorpaySettlementBase(BaseModel):

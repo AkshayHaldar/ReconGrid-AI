@@ -10,19 +10,84 @@ Verifies through HTTP API endpoints and direct service calls that:
 7. Precision is preserved and true exceptions are never artificially converted to false matches.
 """
 
+import hashlib
+import hmac
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, MockTransport, Request, Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.main import app
 from app.models.bank_transaction import BankTransaction
-from app.models.razorpay_settlement import RazorpaySettlement
+from app.models.razorpay_settlement import RazorpayRefund, RazorpaySettlement
+from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import calculate_standard_fees
+
+
+async def test_sync_links_refund_from_provider_report_and_uses_it_in_diagnostics(db_session, monkeypatch):
+    settled_at = datetime(2026, 10, 25, 10, tzinfo=UTC)
+    fees, tax, net = calculate_standard_fees(Decimal("50000.00"))
+    refund = Decimal("3820.00")
+    db_session.add(BankTransaction(
+        date=settled_at, amount=net - refund, direction="CREDIT", utr="REF123456789012",
+        description="Razorpay settlement credit", row_hash="refund-report", batch_id="refund_report",
+    ))
+    await db_session.commit()
+
+    def razorpay(request: Request) -> Response:
+        if request.url.path == "/v1/settlements":
+            return Response(200, json={"items": [{
+                "id": "setl_refund_report", "created_at": int(settled_at.timestamp()),
+                "amount": int(net * 100), "fees": int(fees * 100), "tax": int(tax * 100),
+                "utr": "REF123456789012",
+            }]})
+        if request.url.path == "/v1/refunds":
+            return Response(200, json={"items": [{
+                "id": "rfnd_report", "payment_id": "pay_report", "amount": int(refund * 100),
+                "currency": "INR", "created_at": int(settled_at.timestamp()), "status": "processed",
+            }]})
+        assert request.url.path == "/v1/settlements/recon/combined"
+        assert (request.url.params["year"], request.url.params["month"], request.url.params["day"]) == ("2026", "10", "25")
+        return Response(200, json={"items": [{
+            "entity_id": "rfnd_report", "type": "refund", "settled": True,
+            "currency": "INR", "settlement_id": "setl_refund_report",
+        }]})
+
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refund_report")
+    transport = MockTransport(razorpay)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
+        with patch("app.services.razorpay_client.httpx.AsyncClient", side_effect=lambda: AsyncClient(transport=transport)):
+            response = await api.post("/api/v1/razorpay/sync?batch_id=refund_report")
+        assert response.status_code == 200
+        assert response.json()["data"]["reconciliation_triggered"] is True
+
+        schedule = await api.get("/api/v1/reconciliation/refund_report/tax-schedule")
+        assert schedule.status_code == 200
+        assert Decimal(str(schedule.json()["data"]["actual_tds"])) == Decimal("0.00")
+
+        body = json.dumps({"event": "refund.processed", "payload": {"refund": {"entity": {
+            "id": "rfnd_report", "payment_id": "pay_report", "amount": int(refund * 100),
+            "currency": "INR", "created_at": int(settled_at.timestamp()), "status": "processed",
+        }}}}).encode()
+        signature = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+        webhook = await api.post("/api/v1/webhooks/razorpay", content=body, headers={"X-Razorpay-Signature": signature})
+        assert webhook.json()["data"]["status"] == "queued"
+
+    stored = (await db_session.execute(select(RazorpayRefund))).scalar_one()
+    assert stored.settlement_id == "setl_refund_report"
+    assert stored.amount == refund
+    matches = (await db_session.scalars(select(ReconciliationLog))).all()
+    assert len(matches) == 2
+    assert sum(not match.superseded for match in matches) == 1
+    assert all(match.diagnostic_type == "REFUND_ADJUSTED" and match.batch_id == "refund_report" for match in matches)
 
 
 @pytest.mark.asyncio

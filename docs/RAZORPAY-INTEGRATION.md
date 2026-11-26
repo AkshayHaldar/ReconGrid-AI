@@ -64,11 +64,14 @@ All Razorpay API calls go through `app/services/razorpay_client.py` using HTTP B
 | Fetch settlements | `GET /v1/settlements` | Primary data source for reconciliation (cursor-paginated) |
 | Fetch settlement by ID | `GET /v1/settlements/{id}` | Used when a webhook references a new settlement |
 | Fetch refunds | `GET /v1/refunds` | Used by Tier 3 diagnostics to explain refund deltas |
+| Fetch settlement reconciliation details | `GET /v1/settlements/recon/combined` | Links refund IDs to the settlement that absorbed them |
 | Fetch payment details | `GET /v1/payments/{id}` | Enriches settlement rows with customer/method info |
 | Create order | `POST /v1/orders` | Used by the seed script (amount is in **paise**: ₹100 = `10000`) |
 | Capture payment | `POST /v1/payments/{id}/capture` | Used by the seed script |
 
 > ⚠️ **Common Bug Alert:** Razorpay amounts are always in **paise** (1 INR = 100 paise). The codebase handles this conversion in `app/utils/money.py` — never multiply or divide by 100 manually in route handlers.
+
+Manual settlement sync and signed `refund.processed` events store INR refunds by their Razorpay refund ID. A refund may arrive before Razorpay identifies its settlement. It stays unlinked until the settlement report confirms the link. Diagnostics and the tax schedule use the sum of linked, processed refunds when the settlement does not include a refund total. [Razorpay settlement reconciliation API](https://razorpay.com/docs/api/settlements/fetch-recon)
 
 ---
 
