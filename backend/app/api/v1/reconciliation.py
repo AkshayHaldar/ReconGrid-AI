@@ -1,17 +1,19 @@
 """Reconciliation Ledger and Approval API Routes."""
 
 import csv
+import inspect
 import io
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Iterable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import date
-from typing import Literal
+from datetime import date, datetime
+from typing import Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import async_session_factory, get_db
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
@@ -418,24 +420,43 @@ def _csv_rows_to_bytes(rows: Iterable[Sequence[str]]) -> bytes:
     return output.getvalue().encode("utf-8")
 
 
+async def _next_repo_page(
+    repo: ReconciliationRepository,
+    batch_id: str,
+    page_size: int,
+    cursor: tuple[datetime, str] | None,
+) -> tuple[Sequence[ReconciliationLog], tuple[datetime, str] | None]:
+    """Fetches one page using keyset cursor pagination when available, with legacy stub fallback."""
+    if hasattr(repo, "get_active_logs_cursor"):
+        return await repo.get_active_logs_cursor(
+            batch_id=batch_id,
+            page_size=page_size,
+            cursor=cursor,
+        )
+
+    # Compatibility fallback for minimal unit-test repo stubs that only define get_active_logs.
+    page_num = 1 if cursor is None else int(cursor[1])
+    chunk, total = await repo.get_active_logs(batch_id=batch_id, page=page_num, page_size=page_size)
+    has_more = bool(chunk) and (page_num * page_size < total)
+    next_cursor = (datetime.min, str(page_num + 1)) if has_more else None
+    return chunk, next_cursor
+
+
 async def _iter_active_log_pages(
     repo: ReconciliationRepository,
     batch_id: str,
     page_size: int | None = None,
 ) -> AsyncIterator[Sequence[ReconciliationLog]]:
-    """Yields active log pages sequentially so large batches export without truncation."""
+    """Yields active log pages sequentially so large batches export without OFFSET drift."""
     effective_page_size = page_size if page_size is not None else EXPORT_PAGE_SIZE
-    fetched = 0
-    page = 1
+    cursor: tuple[datetime, str] | None = None
     while True:
-        chunk, total = await repo.get_active_logs(batch_id=batch_id, page=page, page_size=effective_page_size)
+        chunk, cursor = await _next_repo_page(repo, batch_id, effective_page_size, cursor)
         if not chunk:
             break
         yield chunk
-        fetched += len(chunk)
-        if fetched >= total:
+        if cursor is None:
             break
-        page += 1
 
 
 async def _all_active_logs(
@@ -450,18 +471,76 @@ async def _all_active_logs(
     return logs
 
 
+@asynccontextmanager
+async def _export_session_scope(request: Request) -> AsyncIterator[AsyncSession]:
+    """Opens a short-lived DB session per export page so streaming never outlives Depends(get_db)."""
+    db_override = request.app.dependency_overrides.get(get_db)
+    if db_override is None:
+        async with async_session_factory() as session:
+            yield session
+        return
+
+    provided = db_override()
+    if inspect.isasyncgen(provided):
+        async_gen = cast(AsyncGenerator[AsyncSession, None], provided)
+        session = await anext(async_gen)
+        try:
+            yield session
+        except GeneratorExit:
+            raise
+        except BaseException as exc:
+            await async_gen.athrow(exc)
+        else:
+            try:
+                await anext(async_gen)
+            except StopAsyncIteration:
+                pass
+        finally:
+            await async_gen.aclose()
+        return
+
+    if hasattr(provided, "__aenter__"):
+        async with provided as session:
+            yield session
+        return
+
+    if inspect.isawaitable(provided):
+        yield await provided
+        return
+
+    yield provided
+
+
+async def _fetch_csv_export_page(
+    request: Request,
+    batch_id: str,
+    cursor: tuple[datetime, str] | None,
+) -> tuple[bytes, tuple[datetime, str] | None]:
+    """Fetches and serializes one CSV export page inside its own DB session scope."""
+    async with _export_session_scope(request) as page_db:
+        repo = ReconciliationRepository(page_db)
+        chunk, next_cursor = await _next_repo_page(repo, batch_id, EXPORT_PAGE_SIZE, cursor)
+        payload = _csv_rows_to_bytes(_log_to_csv_row(log) for log in chunk) if chunk else b""
+        return payload, next_cursor
+
+
 @router.get("/{batch_id}/export")
 async def export_reconciliation_csv(
+    request: Request,
     batch_id: str = "default",
-    db: AsyncSession = Depends(get_db),
 ):
-    """Streams a complete reconciliation audit ledger CSV across all pages."""
-    repo = ReconciliationRepository(db)
+    """Streams a complete reconciliation audit ledger CSV across keyset-paginated pages."""
+    first_payload, cursor = await _fetch_csv_export_page(request, batch_id, None)
 
     async def _stream_csv() -> AsyncIterator[bytes]:
         yield _csv_rows_to_bytes((CSV_LEDGER_HEADERS,))
-        async for chunk in _iter_active_log_pages(repo, batch_id):
-            yield _csv_rows_to_bytes(_log_to_csv_row(log) for log in chunk)
+        if first_payload:
+            yield first_payload
+        next_cursor = cursor
+        while next_cursor is not None:
+            page_payload, next_cursor = await _fetch_csv_export_page(request, batch_id, next_cursor)
+            if page_payload:
+                yield page_payload
 
     return StreamingResponse(
         _stream_csv(),

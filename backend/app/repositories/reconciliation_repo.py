@@ -157,6 +157,33 @@ class ReconciliationRepository:
         result = await self.session.execute(query)
         return result.scalars().all(), total_count
 
+    async def get_active_logs_cursor(
+        self,
+        batch_id: str = "default",
+        page_size: int = 1000,
+        cursor: tuple[datetime, str] | None = None,
+    ) -> tuple[Sequence[ReconciliationLog], tuple[datetime, str] | None]:
+        """Keyset-paginates active logs without OFFSET or repeated COUNT(*) queries."""
+        if page_size < 1:
+            raise ValueError("page_size must be positive")
+        base_query = self._filtered_logs(batch_id, status_filter=None, search=None)
+        if cursor is not None:
+            last_date, last_id = cursor
+            base_query = base_query.where(
+                or_(
+                    BankTransaction.date < last_date,
+                    and_(BankTransaction.date == last_date, ReconciliationLog.id < last_id),
+                )
+            )
+        query = base_query.order_by(BankTransaction.date.desc(), ReconciliationLog.id.desc()).limit(page_size + 1)
+        result = await self.session.execute(query)
+        rows = list(result.scalars().all())
+        if len(rows) > page_size:
+            page_rows = rows[:page_size]
+            tail = page_rows[-1]
+            return page_rows, (tail.bank_transaction.date, tail.id)
+        return rows, None
+
     def _filtered_logs(
         self,
         batch_id,
