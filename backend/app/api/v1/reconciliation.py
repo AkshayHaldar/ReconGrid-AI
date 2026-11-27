@@ -317,6 +317,13 @@ async def revert_human_action(
             detail="Only approved or denied suggestions can be reverted.",
         )
 
+    if (
+        log.human_action == "DENIED"
+        and log.rzp_settlement_id is not None
+        and await repo.has_other_settlement_claim(log, log.rzp_settlement_id, include_suggestions=True)
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Another record claims the same settlement.")
+
     diagnostic_type = log.diagnostic_type
     if diagnostic_type == "UNRESOLVED" and log.rzp_settlement_id is not None:
         diagnostic_type = {"TIER_0": "DATE_AMOUNT_FALLBACK", "TIER_2": "FUZZY_MATCH"}.get(log.match_tier, "EXACT_MATCH")

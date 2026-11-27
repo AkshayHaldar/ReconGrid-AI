@@ -7,6 +7,7 @@ import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, call
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -80,6 +81,22 @@ async def _seed_and_reconcile(session: AsyncSession, batch_id: str = BATCH, coun
 
 async def _verify(session: AsyncSession, batch_id: str = BATCH):
     return await verify_batch_audit_chain(ReconciliationRepository(session), batch_id)
+
+
+@pytest.mark.asyncio
+async def test_engine_locks_batch_before_reading_or_updating_ledger():
+    repo = AsyncMock(spec=ReconciliationRepository)
+    repo.get_active_status_map.return_value = {}
+    repo.add_logs_bulk.return_value = []
+
+    await ReconciliationEngine(repo).reconcile_batch([], [], batch_id=BATCH)
+
+    assert repo.mock_calls == [
+        call.lock_human_decisions(BATCH),
+        call.get_active_status_map(batch_id=BATCH),
+        call.supersede_batch_logs([]),
+        call.add_logs_bulk([]),
+    ]
 
 
 @pytest.mark.asyncio

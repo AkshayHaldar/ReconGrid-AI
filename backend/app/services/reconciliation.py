@@ -114,6 +114,7 @@ class ReconciliationEngine:
         batch_id: str = "default",
     ) -> list[ReconciliationLog]:
         """Runs the deterministic multi-tier matching pipeline across the dataset."""
+        await self.recon_repo.lock_human_decisions(batch_id)
         with recon_batch_duration_seconds.time():
             recon_total_rows_processed.inc(len(bank_transactions))
             t_start = time.perf_counter()

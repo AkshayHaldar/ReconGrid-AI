@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
 from app.models.bank_transaction import BankTransaction
+from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 
 
@@ -62,6 +63,41 @@ async def test_single_human_decisions_append_history_and_undo_the_active_success
     approval = await db_session.get(ReconciliationLog, approved["id"])
     assert approval is not None and approval.superseded and approval.superseded_by_id == suggested["id"]
     assert approval.match_status == "MATCHED" and approval.human_action == "APPROVED"
+
+
+@pytest.mark.parametrize("active_claim", ["MATCHED", "SUGGESTED"])
+async def test_reverting_denial_preserves_another_active_settlement_claim(db_session: AsyncSession, active_claim: str):
+    now = datetime.now(UTC)
+    settlement = RazorpaySettlement(
+        id="claimed-settlement", settlement_id="setl_active_claim", amount=Decimal("100.00"), settlement_created_at=now,
+    )
+    denied_tx = BankTransaction(
+        id="denied-tx", batch_id="revert-claim", row_hash="denied-tx", date=now,
+        amount=Decimal("100.00"), direction="CREDIT", description="Denied transaction",
+    )
+    claimant_tx = BankTransaction(
+        id="claimant-tx", batch_id="revert-claim", row_hash="claimant-tx", date=now,
+        amount=Decimal("100.00"), direction="CREDIT", description="Claimant transaction",
+    )
+    denied = ReconciliationLog(
+        id="denied-log", batch_id="revert-claim", bank_tx_id=denied_tx.id, rzp_settlement_id=settlement.id,
+        match_status="EXCEPTION", human_action="DENIED", match_tier="TIER_2",
+        diagnostic_type="UNRESOLVED", diagnostic_note="Suggestion denied",
+    )
+    claimant = ReconciliationLog(
+        id="claimant-log", batch_id="revert-claim", bank_tx_id=claimant_tx.id, rzp_settlement_id=settlement.id,
+        match_status=active_claim, match_tier="TIER_2", diagnostic_type="FUZZY_MATCH", diagnostic_note="Active claim",
+    )
+    db_session.add_all((settlement, denied_tx, claimant_tx, denied, claimant))
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.post(f"/api/v1/reconciliation/records/{denied.id}/revert", json={})
+    assert result.status_code == 409
+    await db_session.refresh(denied)
+    await db_session.refresh(claimant)
+    assert not denied.superseded and denied.human_action == "DENIED"
+    assert not claimant.superseded and claimant.match_status == active_claim
 
 
 @pytest.mark.asyncio
