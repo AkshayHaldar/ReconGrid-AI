@@ -38,7 +38,7 @@ from app.services.tally_export import (
     INPUT_GST_LEDGER,
     build_tally_xml,
 )
-from app.services.tax_schedule import tax_schedule_csv_rows
+from app.services.tax_schedule import TaxSchedule, tax_schedule_csv_rows
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -515,6 +515,15 @@ async def _all_active_logs(repo: ReconciliationRepository, batch_id: str, page_s
         page += 1
 
 
+async def _batch_tax_schedule(db: AsyncSession, batch_id: str, intra_state: bool) -> TaxSchedule:
+    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
+    settlement_ids = {log.rzp_settlement.settlement_id for log in logs if log.rzp_settlement is not None}
+    refund_totals = await SettlementRepository(db).get_processed_refund_totals(settlement_ids)
+    return DiagnosticsService.calculate_batch_tax_schedule(
+        batch_id, logs, intra_state=intra_state, refund_totals=refund_totals,
+    )
+
+
 @router.get("/{batch_id}/tax-schedule")
 async def get_tax_schedule(
     batch_id: str = "default",
@@ -522,8 +531,7 @@ async def get_tax_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """Section 194-O TDS and GST input tax credit totals for the batch, with TDS deviations."""
-    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
-    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    schedule = await _batch_tax_schedule(db, batch_id, intra_state)
     return ApiResponse.ok(asdict(schedule))
 
 
@@ -534,8 +542,7 @@ async def export_tax_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """CSV of the tax schedule with a CA signature and UDIN attestation block."""
-    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
-    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    schedule = await _batch_tax_schedule(db, batch_id, intra_state)
     output = io.StringIO()
     csv.writer(output).writerows(tax_schedule_csv_rows(schedule, _csv_text))
     return Response(

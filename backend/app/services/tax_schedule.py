@@ -4,7 +4,7 @@ Aggregates per-settlement figures for a batch so a CA can tie them to Form 26AS
 (TDS) and GSTR-2B / GSTR-3B (input tax credit). All math is Decimal.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -48,7 +48,13 @@ def _quantize(value: Decimal) -> Decimal:
     return value.quantize(PAISE, rounding=ROUND_HALF_UP)
 
 
-def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intra_state: bool = True) -> TaxSchedule:
+def build_tax_schedule(
+    batch_id: str,
+    logs: Iterable[ReconciliationLog],
+    *,
+    intra_state: bool = True,
+    refund_totals: Mapping[str, Decimal] | None = None,
+) -> TaxSchedule:
     """Sum TDS and GST across the distinct settlements referenced by `logs`.
 
     Actual TDS is read from the settlement payload (`tds` or `tds_deducted`) when the
@@ -72,7 +78,10 @@ def build_tax_schedule(batch_id: str, logs: Iterable[ReconciliationLog], *, intr
         tax = to_decimal(setl.tax)
         gross = to_decimal(setl.gross_amount)
         payload = setl.raw_payload or {}
-        refunds = to_decimal(payload.get("refund_total", ZERO))
+        reported_refunds = payload.get("refund_total")
+        if reported_refunds is None and refund_totals is not None:
+            reported_refunds = refund_totals.get(setl.settlement_id)
+        refunds = to_decimal(reported_refunds)
         gross_reported = gross > ZERO
         if not gross_reported:
             gross = net + fees + tax

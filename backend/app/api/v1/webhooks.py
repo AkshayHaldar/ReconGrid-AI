@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
+from app.schemas.razorpay import RazorpayRefundPayload
 from app.schemas.webhook import WebhookAckResponse, WebhookEventItem, WebhookHealth
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import paise_to_rupees
@@ -122,22 +124,28 @@ async def reconcile_webhook_event(event_id: str) -> None:
             )
             if event is None or event.processing_status != "QUEUED":
                 return
-            setl_data = event.payload["payload"]["settlement"]["entity"]
-            amount_inr = paise_to_rupees(setl_data.get("amount", 0))
-            fees_inr = paise_to_rupees(setl_data.get("fees", 0))
-            tax_inr = paise_to_rupees(setl_data.get("tax", 0))
-            gross_inr = amount_inr + fees_inr + tax_inr
-
-            created_ts = setl_data.get("created_at")
-            dt = datetime.fromtimestamp(created_ts, UTC) if created_ts else datetime.now(UTC)
-
             settlement_repo = SettlementRepository(db)
-            setl_obj, _ = await settlement_repo.upsert_settlement(
-                {
+            batch_ids: Sequence[str] = ["default"]
+            if event.event_type == "refund.processed":
+                entity = event.payload["payload"]["refund"]["entity"]
+                refund = await settlement_repo.upsert_refund(RazorpayRefundPayload.model_validate(entity).to_record(entity))
+                if not refund.settlement_id:
+                    event.processing_status = "PROCESSED"
+                    await db.commit()
+                    return
+                batch_ids = await settlement_repo.get_active_batches_for_settlement(refund.settlement_id) or batch_ids
+            else:
+                setl_data = event.payload["payload"]["settlement"]["entity"]
+                amount_inr = paise_to_rupees(setl_data.get("amount", 0))
+                fees_inr = paise_to_rupees(setl_data.get("fees", 0))
+                tax_inr = paise_to_rupees(setl_data.get("tax", 0))
+                created_ts = setl_data.get("created_at")
+                dt = datetime.fromtimestamp(created_ts, UTC) if created_ts else datetime.now(UTC)
+                await settlement_repo.upsert_settlement({
                     "settlement_id": setl_data.get("id")
                     or f"setl_{hashlib.sha256(event_id.encode()).hexdigest()[:59]}",
                     "amount": amount_inr,
-                    "gross_amount": gross_inr,
+                    "gross_amount": amount_inr + fees_inr + tax_inr,
                     "fees": fees_inr,
                     "tax": tax_inr,
                     "utr": setl_data.get("utr"),
@@ -145,18 +153,18 @@ async def reconcile_webhook_event(event_id: str) -> None:
                     "settlement_created_at": dt,
                     "raw_payload": setl_data,
                     "is_test_mode": True,
-                }
-            )
+                })
 
             # Trigger immediate reconciliation
             bank_repo = BankRepository(db)
             recon_repo = ReconciliationRepository(db)
             engine = ReconciliationEngine(recon_repo)
 
-            bank_txs = await bank_repo.get_all_by_batch("default")
             all_setls = await settlement_repo.get_all()
-            if bank_txs:
-                await engine.reconcile_batch(bank_txs, all_setls, batch_id="default")
+            for batch_id in batch_ids:
+                bank_txs = await bank_repo.get_all_by_batch(batch_id)
+                if bank_txs:
+                    await engine.reconcile_batch(bank_txs, all_setls, batch_id=batch_id)
             event.processing_status = "PROCESSED"
             await db.commit()
         except Exception:
@@ -179,6 +187,7 @@ async def handle_razorpay_webhook(
     db: AsyncSession = Depends(get_db),
 ):
     """Verify and commit the event before acknowledging; reconcile after response."""
+    inr_refund = False
     try:
         payload = json.loads(raw_body.decode("utf-8"))
         if not isinstance(payload, dict):
@@ -188,6 +197,12 @@ async def handle_razorpay_webhook(
             raise ValueError("Settlement entity must be an object")
         if payload.get("event") == "settlement.processed" and not settlement:
             raise ValueError("Settlement events require an entity")
+        if payload.get("event") == "refund.processed":
+            refund_entity = payload.get("payload", {}).get("refund", {}).get("entity")
+            refund = RazorpayRefundPayload.model_validate(refund_entity)
+            if refund.status != "processed":
+                raise ValueError("Processed refund events require a processed refund")
+            inr_refund = refund.currency == "INR"
         settlement_id = settlement.get("id")
         if settlement_id is not None and (not isinstance(settlement_id, str) or len(settlement_id) > 64):
             raise ValueError("Invalid settlement ID")
@@ -221,7 +236,7 @@ async def handle_razorpay_webhook(
         logger.info("duplicate_webhook_ignored", event_id=event_id, event_type=event_type)
         return ApiResponse.ok(WebhookAckResponse(status="ok", event_id=event_id, action_taken="DUPLICATE_IGNORED"))
 
-    should_queue = event_type == "settlement.processed" and bool(settlement)
+    should_queue = event_type == "settlement.processed" or inr_refund
     db.add(
         ProcessedWebhookEvent(
             razorpay_event_id=event_id,
