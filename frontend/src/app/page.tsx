@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQueryState] = useState("");
   const [selectedBank, setSelectedBankState] = useState("ALL");
   const activeBatchId = BANK_BATCH_MAP[selectedBank] ?? "default";
+  const ledgerView = useRef(0);
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
 
@@ -80,6 +81,7 @@ export default function DashboardPage() {
   const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
   const setSelectedBank = (value: string) => {
+    ledgerView.current += 1;
     setAnchorId(undefined);
     setHighlightedId(null);
     setToast(null);
@@ -104,7 +106,9 @@ export default function DashboardPage() {
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchStatus(activeBatchId));
+    const view = ledgerView.current;
+    const updatedStatus = await fetchStatus(activeBatchId);
+    if (view === ledgerView.current) setStatus(updatedStatus);
   }, [activeBatchId]);
   const loadData = useCallback(async () => {
     setActionError(null);
@@ -194,6 +198,7 @@ export default function DashboardPage() {
 
   // Handle single-click Approve with Optimistic UI & Undo Toast
   const handleApprove = async (recordId: string) => {
+    const view = ledgerView.current;
     const targetRecord = records.find((r) => r.id === recordId);
     if (!targetRecord) return;
 
@@ -210,19 +215,20 @@ export default function DashboardPage() {
       )
     );
 
-    setToast({
-      id: `toast-${Date.now()}`,
-      message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
-      type: "approve",
-      recordId,
-      previousRecord: targetRecord,
-    });
-
     try {
       const updated = await approveRecord(recordId);
+      if (view !== ledgerView.current) return;
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+      setToast({
+        id: `toast-${Date.now()}`,
+        message: `Approved settlement match for ${targetRecord.bank_utr || "Record #" + targetRecord.id}`,
+        type: "approve",
+        recordId: updated.id,
+        previousRecord: targetRecord,
+      });
       await loadData();
     } catch (err) {
+      if (view !== ledgerView.current) return;
       console.error("Approve failed:", err);
       // Revert on error
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
@@ -231,13 +237,13 @@ export default function DashboardPage() {
         message: "Failed to save approval. Reverted changes.",
         type: "deny",
         recordId,
-        previousRecord: targetRecord,
       });
     }
   };
 
   // Handle single-click Deny with Optimistic UI & Undo Toast
   const handleDeny = async (recordId: string) => {
+    const view = ledgerView.current;
     const targetRecord = records.find((r) => r.id === recordId);
     if (!targetRecord) return;
 
@@ -255,19 +261,20 @@ export default function DashboardPage() {
       )
     );
 
-    setToast({
-      id: `toast-${Date.now()}`,
-      message: `Moved ${targetRecord.bank_utr || "Record #" + targetRecord.id} to Exceptions`,
-      type: "deny",
-      recordId,
-      previousRecord: targetRecord,
-    });
-
     try {
       const updated = await denyRecord(recordId);
+      if (view !== ledgerView.current) return;
       setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
+      setToast({
+        id: `toast-${Date.now()}`,
+        message: `Moved ${targetRecord.bank_utr || "Record #" + targetRecord.id} to Exceptions`,
+        type: "deny",
+        recordId: updated.id,
+        previousRecord: targetRecord,
+      });
       await loadData();
     } catch (err) {
+      if (view !== ledgerView.current) return;
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
       setToast({
@@ -282,20 +289,26 @@ export default function DashboardPage() {
   // Handle Undo from Toast
   const handleUndo = async () => {
     if (!toast?.previousRecord) return;
-    const { previousRecord } = toast;
-    setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
+    const view = ledgerView.current;
+    const { previousRecord, recordId } = toast;
+    if (!recordId) return;
+    setRecords((prev) => prev.map((r) => (r.id === recordId ? { ...previousRecord, id: recordId } : r)));
     setToast(null);
     try {
-      await revertRecord(previousRecord.id);
+      const updated = await revertRecord(recordId);
+      if (view !== ledgerView.current) return;
+      setRecords((prev) => prev.map((r) => (r.id === recordId ? updated : r)));
       await loadData();
     } catch (err) {
+      if (view !== ledgerView.current) return;
       console.error("Undo revert failed:", err);
       await loadData();
+      if (view !== ledgerView.current) return;
       setToast({
         id: `toast-undo-err-${Date.now()}`,
         message: "Failed to undo previous action on server.",
         type: "deny",
-        recordId: previousRecord.id,
+        recordId,
       });
     }
   };

@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import Row, and_, func, or_, select, text, update
@@ -12,11 +13,15 @@ from sqlalchemy.orm import selectinload
 
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog, audit_columns, row_matches_seal
+from app.models.reconciliation_log import ReconciliationLog, audit_columns
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
 
 CHAIN_STREAM_CHUNK = 1000  # rows fetched per round trip when walking a whole batch
+
+
+class StaleDecisionError(Exception):
+    """A parent decision changed before its replacement could be recorded."""
 
 
 class ReconciliationRepository:
@@ -76,55 +81,97 @@ class ReconciliationRepository:
                 selectinload(ReconciliationLog.rzp_settlement),
             )
             .where(ReconciliationLog.id == log_id)
+            .execution_options(populate_existing=True)
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def batch_approve_suggestions(self, batch_id: str, min_confidence: float) -> int:
-        """Approve eligible active suggestions with one atomic conditional UPDATE."""
-        suffix = f" [Batch Approved >= {min_confidence * 100:g}% by CA]"
-        conditions = (
-            ReconciliationLog.batch_id == batch_id,
-            ReconciliationLog.match_status == "SUGGESTED",
-            ReconciliationLog.confidence_score >= min_confidence,
-            ReconciliationLog.superseded == False,
-        )
-        # The bulk UPDATE bypasses the ORM, so note which rows still match their seal before it runs.
-        # Only those are re-sealed afterwards; a row edited with plain SQL keeps its old hash and stays flagged.
-        intact_ids: set[str] = set()
-        before = await self.session.stream(
-            select(*audit_columns()).where(*conditions).execution_options(yield_per=CHAIN_STREAM_CHUNK)
-        )
-        try:
-            async for row in before:
-                if row_matches_seal(row):
-                    intact_ids.add(row.id)
-        finally:
-            await before.close()
+    async def lock_human_decisions(self, batch_id: str) -> None:
+        if self.session.get_bind().dialect.name == "postgresql":
+            await self.session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:batch))"),
+                                       {"batch": f"recon-audit:{batch_id}"})
 
-        stmt = (
-            update(ReconciliationLog)
-            .where(*conditions)
-            .values(
-                match_status="MATCHED",
-                human_action="APPROVED",
-                diagnostic_note=func.coalesce(ReconciliationLog.diagnostic_note, "") + suffix,
+    async def append_decisions(
+        self, transitions: Sequence[tuple[ReconciliationLog, dict[str, object]]],
+    ) -> list[ReconciliationLog]:
+        """Supersede parents, then append their successors in the same transaction."""
+        replacements = {}
+        for current, changes in sorted(transitions, key=lambda pair: pair[0].id):
+            successor_id = str(uuid4())
+            claimed = await self.session.scalar(
+                update(ReconciliationLog)
+                .where(
+                    ReconciliationLog.id == current.id,
+                    ReconciliationLog.superseded.is_(False),
+                    ReconciliationLog.match_status == current.match_status,
+                    ReconciliationLog.human_action == current.human_action,
+                )
+                .values(superseded=True, superseded_by_id=successor_id)
+                .returning(ReconciliationLog.id)
             )
-            .returning(ReconciliationLog.id)
+            if claimed is None:
+                raise StaleDecisionError(current.id)
+            replacements[current.id] = {
+                "id": successor_id,
+                "batch_id": current.batch_id,
+                "bank_tx_id": current.bank_tx_id,
+                "rzp_settlement_id": current.rzp_settlement_id,
+                "match_status": current.match_status,
+                "match_tier": current.match_tier,
+                "confidence_score": current.confidence_score,
+                "delta_amount": current.delta_amount,
+                "diagnostic_type": current.diagnostic_type,
+                "diagnostic_note": current.diagnostic_note,
+                "human_action": current.human_action,
+                **changes,
+            }
+        return await self.add_logs_bulk([replacements[current.id] for current, _ in transitions])
+
+    async def has_other_settlement_claim(self, current: ReconciliationLog, settlement_id: str, *, include_suggestions: bool) -> bool:
+        statuses = ("MATCHED", "SUGGESTED") if include_suggestions else ("MATCHED",)
+        return await self.session.scalar(
+            select(ReconciliationLog.id)
+            .where(
+                ReconciliationLog.batch_id == current.batch_id,
+                ReconciliationLog.rzp_settlement_id == settlement_id,
+                ReconciliationLog.superseded.is_(False),
+                ReconciliationLog.match_status.in_(statuses),
+                ReconciliationLog.id != current.id,
+            )
+            .limit(1)
+        ) is not None
+
+    async def batch_approve_suggestions(self, batch_id: str, min_confidence: float) -> int:
+        """Append approvals for suggestions with no competing settlement claim."""
+        await self.lock_human_decisions(batch_id)
+        suffix = f" [Batch Approved >= {min_confidence * 100:g}% by CA]"
+        competing = (
+            select(ReconciliationLog.rzp_settlement_id)
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.superseded.is_(False),
+                ReconciliationLog.match_status.in_(("MATCHED", "SUGGESTED")),
+                ReconciliationLog.rzp_settlement_id.is_not(None),
+            )
+            .group_by(ReconciliationLog.rzp_settlement_id)
+            .having(func.count() > 1)
         )
-        result = await self.session.execute(stmt)
-        approved_ids = list(result.scalars().all())
-        to_seal = [log_id for log_id in approved_ids if log_id in intact_ids]
-        for start in range(0, len(to_seal), 500):
-            touched = await self.session.execute(
-                select(ReconciliationLog)
-                .where(ReconciliationLog.id.in_(to_seal[start : start + 500]))
-                .execution_options(populate_existing=True)
+        stmt = (
+            select(ReconciliationLog)
+            .where(
+                ReconciliationLog.batch_id == batch_id,
+                ReconciliationLog.match_status == "SUGGESTED",
+                ReconciliationLog.confidence_score >= min_confidence,
+                ReconciliationLog.superseded.is_(False),
+                or_(ReconciliationLog.rzp_settlement_id.is_(None), ReconciliationLog.rzp_settlement_id.not_in(competing)),
             )
-            for log in touched.scalars():
-                log.seal()
-            await self.session.flush()
-        return len(approved_ids)
+        )
+        candidates = (await self.session.scalars(stmt)).all()
+        decisions = await self.append_decisions([
+            (row, {"match_status": "MATCHED", "human_action": "APPROVED", "diagnostic_note": row.diagnostic_note + suffix})
+            for row in candidates
+        ])
+        return len(decisions)
 
     async def stream_chain_rows(self, batch_id: str) -> AsyncIterator[Row[Any]]:
         """Audit columns of every log of the batch (superseded ones included) in chain order, read in chunks.

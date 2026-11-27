@@ -118,6 +118,7 @@ class ReconciliationEngine:
         incremental: bool = False,
     ) -> list[ReconciliationLog]:
         """Runs the deterministic multi-tier matching pipeline across the dataset."""
+        await self.recon_repo.lock_human_decisions(batch_id)
         with recon_batch_duration_seconds.time():
             t_start = time.perf_counter()
             tolerance = settings.RECONCILIATION_TOLERANCE_INR

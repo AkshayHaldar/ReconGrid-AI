@@ -1,12 +1,103 @@
 """Integration tests for all REST API endpoints: bank, razorpay, reconciliation, qa, and demo."""
 
+import asyncio
 import io
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.main import app
+from app.models.bank_transaction import BankTransaction
+from app.models.razorpay_settlement import RazorpaySettlement
+from app.models.reconciliation_log import ReconciliationLog
+
+
+async def test_single_human_decisions_append_history_and_undo_the_active_successor(db_session: AsyncSession):
+    bank = BankTransaction(
+        id="audit-bank", batch_id="audit", row_hash="audit-human-actions",
+        date=datetime(2026, 11, 26, tzinfo=UTC), amount=Decimal("100.00"), direction="CREDIT", description="Audit fixture",
+    )
+    original = ReconciliationLog(
+        id="audit-original", bank_tx_id=bank.id, batch_id="audit", match_status="SUGGESTED",
+        match_tier="TIER_2", confidence_score=0.95, diagnostic_type="FUZZY_MATCH", diagnostic_note="Initial suggestion",
+    )
+    db_session.add_all((bank, original))
+    await db_session.commit()
+    route = "/api/v1/reconciliation/records"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        approvals = await asyncio.gather(*(
+            client.post(f"{route}/{original.id}/approve", json={"note": "Reviewed"}) for _ in range(2)
+        ))
+        assert sorted(response.status_code for response in approvals) == [200, 409]
+        response = next(response for response in approvals if response.status_code == 200)
+        approved = response.json()["data"]
+        assert approved["id"] != original.id
+        assert approved["match_status"] == "MATCHED"
+        assert (await client.post(f"{route}/{original.id}/deny", json={})).status_code == 409
+
+        response = await client.post(f"{route}/{approved['id']}/revert", json={})
+        assert response.status_code == 200
+        suggested = response.json()["data"]
+        assert suggested["match_status"] == "SUGGESTED"
+        assert suggested["id"] != approved["id"]
+
+        response = await client.post(f"{route}/{suggested['id']}/deny", json={})
+        assert response.status_code == 200
+        denied = response.json()["data"]
+        assert denied["match_status"] == "EXCEPTION"
+        assert denied["id"] != suggested["id"]
+        response = await client.post(f"{route}/{denied['id']}/revert", json={})
+        assert response.status_code == 200
+        reverted_denial = response.json()["data"]
+        assert reverted_denial["match_status"] == "SUGGESTED" and reverted_denial["human_action"] is None
+        assert (await client.post(f"{route}/{reverted_denial['id']}/revert", json={})).status_code == 409
+        assert (await client.post(f"{route}/{reverted_denial['id']}/resolve-conflict", json={"chosen_settlement_id": "DISMISS"})).status_code == 409
+
+    await db_session.refresh(original)
+    assert original.superseded and original.superseded_by_id == approved["id"]
+    assert original.match_status == "SUGGESTED" and original.diagnostic_note == "Initial suggestion"
+    approval = await db_session.get(ReconciliationLog, approved["id"])
+    assert approval is not None and approval.superseded and approval.superseded_by_id == suggested["id"]
+    assert approval.match_status == "MATCHED" and approval.human_action == "APPROVED"
+
+
+@pytest.mark.parametrize("active_claim", ["MATCHED", "SUGGESTED"])
+async def test_reverting_denial_preserves_another_active_settlement_claim(db_session: AsyncSession, active_claim: str):
+    now = datetime.now(UTC)
+    settlement = RazorpaySettlement(
+        id="claimed-settlement", settlement_id="setl_active_claim", amount=Decimal("100.00"), settlement_created_at=now,
+    )
+    denied_tx = BankTransaction(
+        id="denied-tx", batch_id="revert-claim", row_hash="denied-tx", date=now,
+        amount=Decimal("100.00"), direction="CREDIT", description="Denied transaction",
+    )
+    claimant_tx = BankTransaction(
+        id="claimant-tx", batch_id="revert-claim", row_hash="claimant-tx", date=now,
+        amount=Decimal("100.00"), direction="CREDIT", description="Claimant transaction",
+    )
+    denied = ReconciliationLog(
+        id="denied-log", batch_id="revert-claim", bank_tx_id=denied_tx.id, rzp_settlement_id=settlement.id,
+        match_status="EXCEPTION", human_action="DENIED", match_tier="TIER_2",
+        diagnostic_type="UNRESOLVED", diagnostic_note="Suggestion denied",
+    )
+    claimant = ReconciliationLog(
+        id="claimant-log", batch_id="revert-claim", bank_tx_id=claimant_tx.id, rzp_settlement_id=settlement.id,
+        match_status=active_claim, match_tier="TIER_2", diagnostic_type="FUZZY_MATCH", diagnostic_note="Active claim",
+    )
+    db_session.add_all((settlement, denied_tx, claimant_tx, denied, claimant))
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        result = await client.post(f"/api/v1/reconciliation/records/{denied.id}/revert", json={})
+    assert result.status_code == 409
+    await db_session.refresh(denied)
+    await db_session.refresh(claimant)
+    assert not denied.superseded and denied.human_action == "DENIED"
+    assert not claimant.superseded and claimant.match_status == active_claim
 
 
 @pytest.mark.asyncio
@@ -55,7 +146,7 @@ async def test_razorpay_sync_and_list_endpoints(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_status_records_and_actions(db_session: AsyncSession):
+async def test_reconciliation_status_records_and_export(db_session: AsyncSession):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Seed test batch
@@ -75,52 +166,8 @@ async def test_reconciliation_status_records_and_actions(db_session: AsyncSessio
         assert records_data["success"] is True
         records = records_data["data"]["records"]
         assert len(records) > 0
-        rec_id = records[0]["id"]
 
-        # 3. Approve action & revert back to SUGGESTED
-        appr_resp = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/approve",
-            json={"note": "Approved by auditor"},
-        )
-        assert appr_resp.status_code == 200
-        assert appr_resp.json()["data"]["match_status"] == "MATCHED"
-
-        rev_appr_resp = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/revert",
-            json={"note": "Undo approval"},
-        )
-        assert rev_appr_resp.status_code == 200
-        assert rev_appr_resp.json()["data"]["match_status"] == "SUGGESTED"
-        assert rev_appr_resp.json()["data"]["human_action"] is None
-
-        # 4. Deny action & revert back to SUGGESTED
-        deny_resp = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/deny",
-            json={"note": "Rejected discrepancy"},
-        )
-        assert deny_resp.status_code == 200
-        assert deny_resp.json()["data"]["match_status"] == "EXCEPTION"
-
-        rev_deny_resp = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/revert",
-            json={"note": "Undo denial"},
-        )
-        assert rev_deny_resp.status_code == 200
-        assert rev_deny_resp.json()["data"]["match_status"] == "SUGGESTED"
-        assert rev_deny_resp.json()["data"]["human_action"] is None
-
-        # Reverting a record without APPROVED/DENIED human_action returns 409
-        assert (await client.post(f"/api/v1/reconciliation/records/{rec_id}/revert", json={})).status_code == 409
-
-        # 5. Resolve conflict action
-        resolve_resp = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/resolve-conflict",
-            json={"chosen_settlement_id": "setl_chosen_123", "note": "Resolved manual match"},
-        )
-        assert resolve_resp.status_code == 200
-        assert resolve_resp.json()["data"]["match_status"] == "MATCHED"
-
-        # 6. Action on nonexistent record (404s)
+        # 3. Actions on nonexistent records return 404.
         assert (
             await client.post("/api/v1/reconciliation/records/nonexistent/approve", json={"note": "Test"})
         ).status_code == 404
@@ -136,7 +183,7 @@ async def test_reconciliation_status_records_and_actions(db_session: AsyncSessio
             )
         ).status_code == 404
 
-        # 7. Export CSV
+        # 4. Export CSV.
         export_resp = await client.get("/api/v1/reconciliation/default/export")
         assert export_resp.status_code == 200
         assert "text/csv" in export_resp.headers.get("content-type", "")
@@ -167,7 +214,8 @@ async def test_conflict_locking_and_competing_resolution_flow(db_session: AsyncS
         rec_a, rec_b = conflicts[0], conflicts[1]
         assert rec_a["match_status"] == "CONFLICT"
         assert rec_b["match_status"] == "CONFLICT"
-        target_setl_id = rec_a["rzp_settlement_id"] or "setl_Kjs9283jkd911"
+        target_setl_id = rec_a["rzp_settlement_id"]
+        assert target_setl_id
 
         # 4. Resolve conflict on rec_a allocating the settlement
         res_resp = await client.post(
@@ -182,7 +230,8 @@ async def test_conflict_locking_and_competing_resolution_flow(db_session: AsyncS
         # 5. Check rec_b: it must be automatically transitioned to EXCEPTION (unlinked)
         resp_all = await client.get("/api/v1/reconciliation/conflict_test_batch/records?status=ALL")
         all_recs = resp_all.json()["data"]["records"]
-        updated_b = next(r for r in all_recs if r["id"] == rec_b["id"])
+        updated_b = next(r for r in all_recs if r["bank_tx_id"] == rec_b["bank_tx_id"])
+        assert updated_b["id"] != rec_b["id"]
         assert updated_b["match_status"] == "EXCEPTION"
         assert updated_b["human_action"] == "AUTO_DISPLACED"
         assert updated_b["rzp_settlement_db_id"] is None
@@ -190,11 +239,12 @@ async def test_conflict_locking_and_competing_resolution_flow(db_session: AsyncS
         # 6. Test dismissing a conflict as EXCEPTION
         dismiss_csv = (
             "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
-            "24/08/2026,CMS002938491899,CMS/002938491899/DISMISS TEST,10000.00,0.00\n"
+            "24/08/2026,CMS002938491811,CMS/002938491811/DISMISS A,50000.00,0.00\n"
+            "24/08/2026,CMS002938491811,CMS/002938491811/DISMISS B,50000.00,0.00\n"
         )
         files2 = {"file": ("statement.csv", io.BytesIO(dismiss_csv.encode("utf-8")), "text/csv")}
         await client.post("/api/v1/bank/upload", data={"batch_id": "dismiss_batch"}, files=files2)
-        recs_resp = await client.get("/api/v1/reconciliation/dismiss_batch/records?status=ALL")
+        recs_resp = await client.get("/api/v1/reconciliation/dismiss_batch/records?status=CONFLICT")
         dismiss_target = recs_resp.json()["data"]["records"][0]
 
         dis_resp = await client.post(
@@ -205,6 +255,12 @@ async def test_conflict_locking_and_competing_resolution_flow(db_session: AsyncS
         assert dis_resp.json()["data"]["match_status"] == "EXCEPTION"
         assert dis_resp.json()["data"]["human_action"] == "DISMISSED"
         assert dis_resp.json()["data"]["rzp_settlement_db_id"] is None
+        original_a = await db_session.get(ReconciliationLog, rec_a["id"])
+        original_b = await db_session.get(ReconciliationLog, rec_b["id"])
+        assert original_a is not None and original_a.match_status == "CONFLICT"
+        assert original_a.superseded_by_id == resolved_a["id"]
+        assert original_b is not None and original_b.match_status == "CONFLICT"
+        assert original_b.superseded_by_id == updated_b["id"]
 
 
 @pytest.mark.asyncio

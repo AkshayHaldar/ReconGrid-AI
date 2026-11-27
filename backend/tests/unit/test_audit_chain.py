@@ -7,6 +7,7 @@ import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -80,6 +81,25 @@ async def _seed_and_reconcile(session: AsyncSession, batch_id: str = BATCH, coun
 
 async def _verify(session: AsyncSession, batch_id: str = BATCH):
     return await verify_batch_audit_chain(ReconciliationRepository(session), batch_id)
+
+
+@pytest.mark.asyncio
+async def test_engine_locks_batch_before_reading_or_updating_ledger(db_session: AsyncSession, monkeypatch):
+    repo = ReconciliationRepository(db_session)
+    calls = Mock()
+    for name in ("lock_human_decisions", "get_active_status_map", "supersede_batch_logs", "add_logs_bulk"):
+        spy = AsyncMock(wraps=getattr(repo, name))
+        calls.attach_mock(spy, name)
+        monkeypatch.setattr(repo, name, spy)
+
+    await ReconciliationEngine(repo).reconcile_batch([], [], batch_id=BATCH)
+
+    assert calls.mock_calls == [
+        call.lock_human_decisions(BATCH),
+        call.get_active_status_map(batch_id=BATCH),
+        call.supersede_batch_logs([], batch_id=BATCH),
+        call.add_logs_bulk([]),
+    ]
 
 
 @pytest.mark.asyncio
@@ -281,28 +301,37 @@ async def _verify_api(client: AsyncClient, batch_id: str = "default") -> dict:
 async def test_manual_actions_keep_chain_verified(db_session: AsyncSession):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         records = await _api_batch(client)
+        initial = await _verify_api(client)
+        assert initial["status"] == "VERIFIED"
+
+        route = "/api/v1/reconciliation/records"
+        suggested = next(record for record in records if record["match_status"] == "SUGGESTED")
+        approved = await client.post(f"{route}/{suggested['id']}/approve", json={"note": "ok"})
+        assert approved.status_code == 200
         assert (await _verify_api(client))["status"] == "VERIFIED"
 
-        rec_id = records[0]["id"]
-        assert (
-            await client.post(f"/api/v1/reconciliation/records/{rec_id}/approve", json={"note": "ok"})
-        ).status_code == 200
+        approved_id = approved.json()["data"]["id"]
+        assert approved_id != suggested["id"]
+        reverted = await client.post(f"{route}/{approved_id}/revert", json={})
+        assert reverted.status_code == 200
         assert (await _verify_api(client))["status"] == "VERIFIED"
 
-        assert (
-            await client.post(f"/api/v1/reconciliation/records/{rec_id}/deny", json={"note": "no"})
-        ).status_code == 200
+        reverted_id = reverted.json()["data"]["id"]
+        assert reverted_id != approved_id
+        denied = await client.post(f"{route}/{reverted_id}/deny", json={"note": "no"})
+        assert denied.status_code == 200
         assert (await _verify_api(client))["status"] == "VERIFIED"
 
+        conflict = next(record for record in records if record["match_status"] == "CONFLICT")
         resolve = await client.post(
-            f"/api/v1/reconciliation/records/{rec_id}/resolve-conflict",
+            f"{route}/{conflict['id']}/resolve-conflict",
             json={"chosen_settlement_id": "DISMISS", "note": "unlink"},
         )
         assert resolve.status_code == 200
         data = await _verify_api(client)
         assert data["status"] == "VERIFIED"
         assert data["tampered"] is False
-        assert data["total_records"] >= 15
+        assert data["total_records"] == initial["total_records"] + 4
 
 
 @pytest.mark.asyncio
@@ -329,7 +358,7 @@ async def test_manual_action_then_sql_edit_is_still_caught(db_session: AsyncSess
 async def test_sql_edit_before_a_manual_action_stays_compromised(db_session: AsyncSession, action: str):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         records = await _api_batch(client)
-        rec_id = records[0]["id"]
+        rec_id = next(record["id"] for record in records if record["match_status"] == "SUGGESTED")
         assert (await _verify_api(client))["status"] == "VERIFIED"
 
         await db_session.execute(
