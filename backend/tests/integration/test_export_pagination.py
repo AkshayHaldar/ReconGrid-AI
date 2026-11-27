@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from urllib.parse import quote
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -489,3 +490,23 @@ async def test_csv_export_uses_async_session_factory_without_get_db_dependency(m
     assert len(entered_sessions) == 2
     utrs = [row["Bank UTR"] for row in csv.DictReader(io.StringIO(resp.text, newline=""))]
     assert utrs == ["UTRP1", "UTRP2"]
+
+
+async def test_csv_export_sanitizes_content_disposition_filename_and_preserves_batch_data(db_session):
+    """Unsafe batch IDs must be sanitized in Content-Disposition while preserving the queried batch rows."""
+    raw_batch_id = '..batch";evil\r\nX-Inject:1'
+    db_session.add(_make_db_log(raw_batch_id, 0, status="MATCHED"))
+    await db_session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/api/v1/reconciliation/{quote(raw_batch_id, safe='')}/export")
+
+    assert resp.status_code == 200
+    disposition = resp.headers.get("content-disposition", "")
+    assert disposition == "attachment; filename=recongrid_audit__batch__evil__X-Inject_1.csv"
+    assert "\r" not in disposition and "\n" not in disposition and '"' not in disposition
+    assert "x-inject" not in {k.lower() for k in resp.headers}
+
+    rows = list(csv.DictReader(io.StringIO(resp.text, newline="")))
+    assert len(rows) == 1
+    assert rows[0]["Bank UTR"] == "UTR00000"

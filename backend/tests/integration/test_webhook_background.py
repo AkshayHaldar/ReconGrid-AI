@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
@@ -13,16 +14,18 @@ from sqlalchemy import func, select
 from app.api.v1 import webhooks
 from app.core.config import settings
 from app.main import app
-from app.models.razorpay_settlement import RazorpaySettlement
+from app.models.razorpay_settlement import RazorpayRefund, RazorpaySettlement
 from app.models.webhook_event import ProcessedWebhookEvent
 
 
-def signed_event(event_id="evt_background", event_type="settlement.processed"):
+def signed_event(event_id="evt_background", event_type="settlement.processed", refund=None):
     payload = {
         "id": event_id,
         "event": event_type,
         "payload": {"settlement": {"entity": {"id": "setl_background", "amount": 10000, "fees": 100, "tax": 18}}},
     }
+    if refund is not None:
+        payload["payload"] = {"refund": {"entity": refund}}
     if event_id is None:
         del payload["id"]
     body = json.dumps(payload).encode()
@@ -40,6 +43,40 @@ async def stored_status(event_id):
 async def settlement_count():
     async with webhooks.async_session_factory() as db:
         return await db.scalar(select(func.count()).select_from(RazorpaySettlement))
+
+
+async def test_processed_refund_is_persisted_once_across_deliveries(monkeypatch):
+    reconcile = AsyncMock()
+    monkeypatch.setattr(webhooks.ReconciliationEngine, "reconcile_batch", reconcile)
+    refund = {
+        "id": "rfnd_test",
+        "payment_id": "pay_test",
+        "amount": 12055,
+        "currency": "INR",
+        "status": "processed",
+        "created_at": 1724496000,
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for event_id in ("evt_refund_first", "evt_refund_repeat"):
+            response = await client.post(
+                "/api/v1/webhooks/razorpay",
+                **signed_event(event_id, "refund.processed", refund),
+            )
+            assert response.json()["data"]["status"] == "queued"
+            assert await stored_status(event_id) == "PROCESSED"
+        foreign = await client.post(
+            "/api/v1/webhooks/razorpay",
+            **signed_event("evt_foreign_refund", "refund.processed", {**refund, "id": "rfnd_foreign", "currency": "USD"}),
+        )
+        assert foreign.json()["data"]["action_taken"] == "EVENT_RECORDED"
+
+    async with webhooks.async_session_factory() as db:
+        stored_refund = (await db.execute(select(RazorpayRefund))).scalar_one()
+        assert stored_refund.refund_id == "rfnd_test"
+        assert stored_refund.amount == Decimal("120.55")
+        assert stored_refund.settlement_id is None
+    assert await settlement_count() == 0
+    reconcile.assert_not_awaited()
 
 
 @pytest.mark.asyncio
