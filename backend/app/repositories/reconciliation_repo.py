@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Row, and_, func, or_, select, update
+from sqlalchemy import Row, and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,13 +52,14 @@ class ReconciliationRepository:
         await self.session.execute(stmt)
         await self.session.flush()
 
-    async def supersede_batch_logs(self, bank_tx_ids: Sequence[str]) -> None:
+    async def supersede_batch_logs(self, bank_tx_ids: Sequence[str], *, batch_id: str) -> None:
         """Marks any existing un-superseded logs for multiple bank_tx_ids as superseded in a single query."""
         if not bank_tx_ids:
             return
         stmt = (
             update(ReconciliationLog)
             .where(
+                ReconciliationLog.batch_id == batch_id,
                 ReconciliationLog.bank_tx_id.in_(bank_tx_ids),
                 ReconciliationLog.superseded == False,
             )
@@ -143,6 +144,22 @@ class ReconciliationRepository:
                 yield row
         finally:
             await result.close()
+
+    async def lock_batch_before_upload(self, batch_id: str) -> None:
+        if self.session.get_bind().dialect.name == "postgresql":
+            # Use the audit chain's transaction lock before taking the claim snapshot.
+            await self.session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:b))"), {"b": f"recon-audit:{batch_id}"}
+            )
+
+    async def get_active_claims(self, batch_id: str) -> Sequence[ReconciliationLog]:
+        stmt = select(ReconciliationLog).where(
+            ReconciliationLog.batch_id == batch_id,
+            ReconciliationLog.superseded == False,
+            ReconciliationLog.rzp_settlement_id.is_not(None),
+            ReconciliationLog.match_status.in_(("MATCHED", "SUGGESTED", "CONFLICT")),
+        )
+        return (await self.session.execute(stmt)).scalars().all()
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""

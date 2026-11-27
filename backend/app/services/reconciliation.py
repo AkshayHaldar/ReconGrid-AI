@@ -114,10 +114,11 @@ class ReconciliationEngine:
         bank_transactions: Sequence[BankTransaction],
         settlements: Sequence[RazorpaySettlement],
         batch_id: str = "default",
+        *,
+        incremental: bool = False,
     ) -> list[ReconciliationLog]:
         """Runs the deterministic multi-tier matching pipeline across the dataset."""
         with recon_batch_duration_seconds.time():
-            recon_total_rows_processed.inc(len(bank_transactions))
             t_start = time.perf_counter()
             tolerance = settings.RECONCILIATION_TOLERANCE_INR
             fuzzy_threshold = settings.FUZZY_MATCH_CONFIDENCE_THRESHOLD
@@ -156,17 +157,31 @@ class ReconciliationEngine:
             # Retrieve prior active statuses for bank transactions in batch via fast status map
             prev_status_map = await self.recon_repo.get_active_status_map(batch_id=batch_id)
 
-            # Prioritize previously pending transactions so they match newly arrived settlements first
+            prior_claims: dict[str, list[ReconciliationLog]] = {}
+            matched_settlement_ids: set[str] = set()
+            if incremental:
+                # Reuploads retain resolved decisions and retry only pending or unlogged rows.
+                bank_transactions = [
+                    tx for tx in bank_transactions if prev_status_map.get(tx.id) in (None, "PENDING_SETTLEMENT_DATA")
+                ]
+                for claim in await self.recon_repo.get_active_claims(batch_id):
+                    settlement = settlements_by_db_id.get(claim.rzp_settlement_id or "")
+                    if settlement is None:
+                        continue
+                    prior_claims.setdefault(settlement.settlement_id, []).append(claim)
+                    if claim.match_status in ("MATCHED", "CONFLICT"):
+                        matched_settlement_ids.add(settlement.settlement_id)
+
+            recon_total_rows_processed.inc(len(bank_transactions))
+            # Prioritize previously pending transactions so they match newly arrived settlements first.
             sorted_bank_txs = sorted(
                 bank_transactions,
                 key=lambda tx: 0 if prev_status_map.get(tx.id) == "PENDING_SETTLEMENT_DATA" else 1,
             )
 
-            # Track settlement candidate matches to detect multi-bank row conflicts
-            settlement_match_counts: dict[str, list[str]] = {}  # settlement_id -> [bank_tx_id, ...]
+            settlement_match_counts: dict[str, list[str]] = {}
             results: list[dict] = []
             item_tier_metrics: list[str | None] = []
-            matched_settlement_ids: set[str] = set()
 
             now = datetime.now(UTC)
             now_ts = now.timestamp()
@@ -475,6 +490,9 @@ class ReconciliationEngine:
                                 f"({format_inr(bank_amount)}, ref: {bank_utr or 'N/A'})."
                             )
 
+                if incremental and was_pending and status == "PENDING_SETTLEMENT_DATA":
+                    continue
+
                 if candidate:
                     settlement_match_counts.setdefault(candidate.settlement_id, []).append(bank_tx.id)
                     if status == "MATCHED":
@@ -497,26 +515,49 @@ class ReconciliationEngine:
                     }
                 )
 
-            # --- CONFLICT RESOLUTION PASS ---
-            # If any settlement ID was matched to > 1 bank transaction, flag both as CONFLICT
+            # Only newly contested settlements need a new decision.
+            conflict_notes = {
+                settlement_id: (
+                    f"Conflict: Settlement {settlement_id} matches multiple bank rows. "
+                    "Locked until human merges or resolves."
+                )
+                for settlement_id, bank_ids in settlement_match_counts.items()
+                if len(bank_ids) + len(prior_claims.get(settlement_id, ())) > 1
+            }
             for item in results:
-                settlement_db_id = item["rzp_settlement_id"]
-                if settlement_db_id:
-                    # Find matching settlement via O(1) dictionary lookup
-                    target_setl = settlements_by_db_id.get(settlement_db_id)
-                    if target_setl and len(settlement_match_counts.get(target_setl.settlement_id, [])) > 1:
-                        item["match_status"] = "CONFLICT"
-                        item["confidence_score"] = 0.50
-                        item["diagnostic_note"] = (
-                            f"Conflict: Settlement {target_setl.settlement_id} matches multiple bank rows. "
-                            f"Locked until human merges or resolves."
-                        )
+                settlement = settlements_by_db_id.get(item["rzp_settlement_id"])
+                if settlement and settlement.settlement_id in conflict_notes:
+                    item.update(
+                        match_status="CONFLICT",
+                        confidence_score=0.50,
+                        diagnostic_note=conflict_notes[settlement.settlement_id],
+                    )
+
+            for settlement_id, note in conflict_notes.items():
+                for claim in prior_claims.get(settlement_id, ()):
+                    if claim.match_status == "CONFLICT" or claim.human_action is not None:
+                        continue
+                    results.append(
+                        {
+                            "batch_id": batch_id,
+                            "bank_tx_id": claim.bank_tx_id,
+                            "rzp_settlement_id": claim.rzp_settlement_id,
+                            "match_status": "CONFLICT",
+                            "match_tier": claim.match_tier,
+                            "confidence_score": 0.50,
+                            "delta_amount": claim.delta_amount,
+                            "diagnostic_type": claim.diagnostic_type,
+                            "diagnostic_note": note,
+                            "matched_at": now,
+                            "superseded": False,
+                        }
+                    )
 
             # Bulk supersede and persist immutable logs to database.
             # Each new log is sealed onto the batch's SHA-256 audit chain in the ReconciliationLog before_flush hook.
             with tracer.start_as_current_span("recon.db_bulk_upsert"):
                 bank_tx_ids = [r["bank_tx_id"] for r in results]
-                await self.recon_repo.supersede_batch_logs(bank_tx_ids)
+                await self.recon_repo.supersede_batch_logs(bank_tx_ids, batch_id=batch_id)
                 saved_logs = await self.recon_repo.add_logs_bulk(results)
 
             # Increment Prometheus metrics for tier matches and exceptions

@@ -136,9 +136,10 @@ class IngestionService:
                 detail="No valid bank transaction rows could be parsed from the uploaded file.",
             )
 
+        await self.recon_repo.lock_batch_before_upload(batch_id)
         inserted_count = 0
         duplicate_count = 0
-        all_batch_txs = []
+        uploaded_txs = {}
         validation_errors: list[str] = []
         valid_rows_count = 0
 
@@ -149,7 +150,9 @@ class IngestionService:
             valid_rows_count += 1
             row["batch_id"] = batch_id
             tx, created = await self.bank_repo.upsert_transaction(row)
-            all_batch_txs.append(tx)
+            # A globally duplicated row belongs only to the batch that first imported it.
+            if tx.batch_id == batch_id:
+                uploaded_txs[tx.id] = tx
             if created:
                 inserted_count += 1
             else:
@@ -165,14 +168,18 @@ class IngestionService:
                 },
             )
 
+        for tx in await self.bank_repo.get_pending_by_batch(batch_id):
+            uploaded_txs.setdefault(tx.id, tx)
+
         # Fetch available settlements to run deterministic reconciliation
         settlements = await self.settlement_repo.get_all()
 
         # Run reconciliation pipeline
         reconciled_logs = await self.engine.reconcile_batch(
-            bank_transactions=all_batch_txs,
+            bank_transactions=list(uploaded_txs.values()),
             settlements=settlements,
             batch_id=batch_id,
+            incremental=True,
         )
 
         logger.info(
