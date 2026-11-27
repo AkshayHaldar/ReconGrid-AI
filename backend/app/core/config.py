@@ -5,7 +5,7 @@ import binascii
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.core.secret_format import sealed_blob
@@ -32,6 +32,14 @@ class Settings(BaseSettings):
 
     # Job Queue / Cache
     REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Webhook outbox worker (python -m app.worker). Accepted settlement webhooks are stored as QUEUED rows.
+    # With inline reconcile on, the API reconciles them right after acknowledging and the worker only takes
+    # rows still QUEUED after WEBHOOK_STALE_AFTER_SECONDS (crash or restart). With it off, the worker owns
+    # every queued event and picks it up on its next poll.
+    WEBHOOK_INLINE_RECONCILE: bool = True
+    WEBHOOK_STALE_AFTER_SECONDS: int = Field(default=60, ge=0)
+    WEBHOOK_WORKER_POLL_SECONDS: float = Field(default=5.0, gt=0)
 
     # App Config
     ENV: Literal["development", "production", "testing"] = "development"
