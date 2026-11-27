@@ -7,9 +7,11 @@ import { FilterBar } from "@/components/FilterBar";
 import { ReconciliationTable } from "@/components/ReconciliationTable";
 import { UploadModal } from "@/components/UploadModal";
 import { DemoSyncModal } from "@/components/DemoSyncModal";
+import { ExportConfirmModal } from "@/components/ExportConfirmModal";
 import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
+import { TallyExportModal } from "@/components/TallyExportModal";
 import { CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react";
 import {
   ReconciliationRecordItem,
@@ -24,8 +26,17 @@ import {
   approveRecord,
   batchApprove,
   denyRecord,
+  revertRecord,
   resolveConflict,
 } from "@/lib/api";
+
+const BANK_BATCH_MAP: Record<string, string> = {
+  ALL: "default",
+  HDFC: "hdfc",
+  ICICI: "icici",
+  SBI: "sbi",
+  AXIS: "axis",
+};
 
 import { useLedgerRecords } from "@/lib/useLedgerRecords";
 
@@ -42,14 +53,17 @@ export default function DashboardPage() {
   const [activeTab, setActiveTabState] = useState("ALL");
   const [selectedDiagnostic, setSelectedDiagnosticState] = useState("ALL");
   const [searchQuery, setSearchQueryState] = useState("");
-  const [selectedBank, setSelectedBank] = useState("ALL");
+  const [selectedBank, setSelectedBankState] = useState("ALL");
+  const activeBatchId = BANK_BATCH_MAP[selectedBank] ?? "default";
   const [batchApproveLoading, setBatchApproveLoading] = useState(false);
   const [toast, setToast] = useState<ToastAction | null>(null);
 
   // Modals & Drawers
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [isSyncOpen, setIsSyncOpen] = useState(false);
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [isQaOpen, setIsQaOpen] = useState(false);
+  const [isTallyConfirmOpen, setIsTallyConfirmOpen] = useState(false);
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
 
@@ -60,23 +74,38 @@ export default function DashboardPage() {
   const [sort, setSort] = useState<LedgerSort>("date");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
   const [anchorId, setAnchorId] = useState<string>();
+  const [fromDate, setFromDate] = useState<string | undefined>();
+  const [toDate, setToDate] = useState<string | undefined>();
   const setActiveTab = (value: string) => { setAnchorId(undefined); setActiveTabState(value); };
   const setSelectedDiagnostic = (value: string) => { setAnchorId(undefined); setSelectedDiagnosticState(value); };
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
+  const setSelectedBank = (value: string) => {
+    setAnchorId(undefined);
+    setHighlightedId(null);
+    setToast(null);
+    setSelectedBankState(value);
+  };
+  const handleDateRangeChange = (from?: string, to?: string) => {
+    setAnchorId(undefined);
+    setFromDate(from);
+    setToDate(to);
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictRecords, setConflictRecords] = useState<ReconciliationRecordItem[]>([]);
   const [conflictLoading, setConflictLoading] = useState(false);
   const conflictRequest = useRef(0);
+  const exportTriggerRef = useRef<HTMLElement | null>(null);
   const query = useMemo<RecordQuery>(() => ({
-    batchId: "default", status: activeTab, search: searchQuery,
+    batchId: activeBatchId, status: activeTab, search: searchQuery,
     diagnostic: selectedDiagnostic, sort, direction,
-  }), [activeTab, searchQuery, selectedDiagnostic, sort, direction]);
+    fromDate, toDate,
+  }), [activeBatchId, activeTab, searchQuery, selectedDiagnostic, sort, direction, fromDate, toDate]);
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchStatus("default"));
-  }, []);
+    setStatus(await fetchStatus(activeBatchId));
+  }, [activeBatchId]);
   const loadData = useCallback(async () => {
     setActionError(null);
     try {
@@ -95,7 +124,9 @@ export default function DashboardPage() {
     setActionError(null);
     try {
       const candidates = record.rzp_settlement_db_id ? await collectRecordWindows({
-        ...query, status: "CONFLICT", search: "", diagnostic: "ALL",
+        // Resolving displaces claimants across the batch, including dates hidden in the ledger.
+        ...query, fromDate: undefined, toDate: undefined,
+        status: "CONFLICT", search: "", diagnostic: "ALL",
         settlementId: record.rzp_settlement_db_id,
       }) : [];
       if (request !== conflictRequest.current) return;
@@ -239,6 +270,12 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
+      setToast({
+        id: `toast-err-${Date.now()}`,
+        message: "Failed to save denial. Reverted changes.",
+        type: "deny",
+        recordId,
+      });
     }
   };
 
@@ -248,7 +285,19 @@ export default function DashboardPage() {
     const { previousRecord } = toast;
     setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
     setToast(null);
-    await loadData();
+    try {
+      await revertRecord(previousRecord.id);
+      await loadData();
+    } catch (err) {
+      console.error("Undo revert failed:", err);
+      await loadData();
+      setToast({
+        id: `toast-undo-err-${Date.now()}`,
+        message: "Failed to undo previous action on server.",
+        type: "deny",
+        recordId: previousRecord.id,
+      });
+    }
   };
 
   // Handle Batch Approve High-Confidence (≥90%)
@@ -257,7 +306,7 @@ export default function DashboardPage() {
     setActionError(null);
     setBatchApproveLoading(true);
     try {
-      const result = await batchApprove("default", 0.9);
+      const result = await batchApprove(activeBatchId, 0.9);
       const refreshed = await loadData();
       setToast({
         id: `toast-batch-${Date.now()}`,
@@ -294,6 +343,7 @@ export default function DashboardPage() {
       await loadData();
     } catch (err) {
       console.error("Resolve conflict failed:", err);
+      throw err;
     }
   };
 
@@ -303,6 +353,8 @@ export default function DashboardPage() {
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
     setSearchQuery("");
+    setFromDate(undefined);
+    setToDate(undefined);
     setSort("date");
     setDirection("desc");
     setAnchorId(recordId);
@@ -311,16 +363,27 @@ export default function DashboardPage() {
   };
 
   const handleExportCsv = () => {
-    window.open(`${API_BASE}/reconciliation/default/export`, "_blank");
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export`, "_blank");
   };
 
-  const handleExportXlsx = () => {
-    window.open(`${API_BASE}/reconciliation/default/export-xlsx`, "_blank");
+  // The Excel button only opens the confirmation dialog; the download starts when it is confirmed.
+  // The click event is remembered so the dialog can give focus back to the button on close.
+  const handleExportXlsx = (event?: React.MouseEvent<HTMLElement>) => {
+    exportTriggerRef.current = event?.currentTarget ?? null;
+    setIsExportOpen(true);
   };
 
-  const handleExportTally = () => {
-    window.open(`${API_BASE}/reconciliation/default/export-tally-xml`, "_blank");
+  const confirmExportXlsx = () => {
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export-xlsx`, "_blank");
   };
+
+  const handleExportTally = () => setIsTallyConfirmOpen(true);
+
+  const confirmExportTally = () => {
+    setIsTallyConfirmOpen(false);
+    window.open(`${API_BASE}/reconciliation/${encodeURIComponent(activeBatchId)}/export-tally-xml`, "_blank");
+  };
+  const cancelExportTally = useCallback(() => setIsTallyConfirmOpen(false), []);
 
   const isEmpty = Boolean(status && status.total_records === 0);
   return (
@@ -338,6 +401,14 @@ export default function DashboardPage() {
         periodDate={status?.last_reconciled_at}
       />
 
+      <TallyExportModal
+        isOpen={isTallyConfirmOpen}
+        status={status}
+        batchId={activeBatchId}
+        onConfirm={confirmExportTally}
+        onCancel={cancelExportTally}
+      />
+
       {/* Main Financial Workspace */}
       <main className="flex-1 w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 space-y-6">
         {(actionError || conflictLoading) && <div role={actionError ? "alert" : "status"} className="text-sm text-amber-300">
@@ -349,6 +420,7 @@ export default function DashboardPage() {
         </div>}
         <SummaryCards
           status={status}
+          batchId={activeBatchId}
           records={records}
           activeDiagnostic={selectedDiagnostic}
           activeTab={activeTab}
@@ -377,6 +449,10 @@ export default function DashboardPage() {
               onDiagnosticChange={setSelectedDiagnostic}
               onBatchApprove={handleBatchApprove}
               batchApproveLoading={batchApproveLoading}
+              fromDate={fromDate}
+              toDate={toDate}
+              onDateRangeChange={handleDateRangeChange}
+              periodDate={status?.last_reconciled_at}
             />
 
              <ReconciliationTable
@@ -411,6 +487,7 @@ export default function DashboardPage() {
       {/* Bank Statement Upload Modal */}
       <UploadModal
         isOpen={isUploadOpen}
+        batchId={activeBatchId}
         onClose={() => setIsUploadOpen(false)}
         onUploadSuccess={loadData}
       />
@@ -418,8 +495,19 @@ export default function DashboardPage() {
       {/* Demo Sync / Synthetic Seeder Modal */}
       <DemoSyncModal
         isOpen={isSyncOpen}
+        batchId={activeBatchId}
         onClose={() => setIsSyncOpen(false)}
         onSuccess={loadData}
+      />
+
+      {/* Export Excel confirmation: shows what the workbook holds before it downloads */}
+      <ExportConfirmModal
+        isOpen={isExportOpen}
+        onClose={() => setIsExportOpen(false)}
+        onConfirm={confirmExportXlsx}
+        batchId={activeBatchId}
+        status={status}
+        returnFocusRef={exportTriggerRef}
       />
 
       {/* Conflict Resolution Drawer */}

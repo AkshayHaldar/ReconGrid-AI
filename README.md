@@ -208,6 +208,9 @@ pip install -r requirements.txt
 # On macOS/Linux: cp .env.example .env
 cp .env.example .env
 
+# Optional: enable synthetic demo endpoints (/api/v1/demo/seed & /reset) for local evaluation
+# Set ENABLE_DEMO=true in .env before starting uvicorn
+
 # Apply database migrations
 alembic upgrade head
 
@@ -237,7 +240,7 @@ Open your browser to: **[http://localhost:3000](http://localhost:3000)**.
 
 ### Step 4: Seed Demo Data (See It in Action Immediately)
 
-With both servers running, open a third terminal and run:
+Ensure `ENABLE_DEMO=true` is set in your `.env` (it defaults to `false` for safety). With both servers running, open a third terminal and run:
 
 ```bash
 # Seed 60 synthetic records with exact matches, fee deltas, refunds, and anomalies:
@@ -369,6 +372,8 @@ All routes are under `/api/v1`:
 | `POST` | `/razorpay/sync` | Trigger settlement pull from Razorpay REST API |
 | `GET` | `/razorpay/settlements` | List stored settlements |
 | `POST` | `/webhooks/razorpay` | Ingest real-time webhooks (HMAC-SHA256 verified) |
+| `GET` | `/webhooks/recent` | Last 15 webhook deliveries with signature and ingestion status (including rejected ones) |
+| `GET` | `/webhooks/health` | Gateway pulse: `live`, `idle` (nothing in 24h) or `warning` (latest delivery rejected) |
 | `GET` | `/reconciliation/{batch_id}/status` | Summary metrics (match rate, ₹ reconciled) |
 | `GET` | `/reconciliation/{batch_id}/scorecard` | Audit scorecard with separate Tier 0/1/1.5/2/3 breakdown |
 | `GET` | `/reconciliation/{batch_id}/records` | Paginated records filtered by status or diagnostic code |

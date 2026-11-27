@@ -33,6 +33,7 @@ import {
 
 interface UploadModalProps {
   isOpen: boolean;
+  batchId?: string;
   onClose: () => void;
   onUploadSuccess: () => void;
 }
@@ -82,6 +83,7 @@ const DEFAULT_BANK_HINTS = [
 
 export const UploadModal: React.FC<UploadModalProps> = ({
   isOpen,
+  batchId = "default",
   onClose,
   onUploadSuccess,
 }) => {
@@ -345,7 +347,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         }
       }
 
-      await uploadBankStatement(file, "default", password, customMappings);
+      await uploadBankStatement(file, batchId, password, customMappings);
       onUploadSuccess();
       onClose();
     } catch (err: any) {

@@ -54,10 +54,81 @@ NON_UTR_WORDS = {
     "BALANCE",
     "OPENING",
     "CLOSING",
+    "AXIS",
+    "AXISBANK",
+    "UTIB",
+    "KOTAK",
+    "KOTAKBANK",
+    "KKBK",
+    "HDFC",
+    "HDFCBANK",
+    "ICICI",
+    "ICICIBANK",
+    "STATE",
+    "STATEBANK",
+    "SBIBANK",
+    "CHEQUE",
+    "CHQNO",
+    "BRANCH",
+    "NARIMAN",
+    "POINT",
+    "ACCOUNT",
+    "SAVINGS",
+    "CURRENT",
+    "CORPORATE",
+    "MAHINDRA",
 }
 
 # Regex for tokenizing narrations into candidate reference strings
 TOKEN_SPLIT_REGEX = re.compile(r"[\/\s\-_:,;#]+", re.IGNORECASE)
+
+
+def is_placeholder_ref(val: str | None) -> bool:
+    """Returns True if raw reference value is empty, punctuation, or a dummy placeholder."""
+    if not val:
+        return True
+    clean = val.strip().upper()
+    if not clean:
+        return True
+    placeholder_set = {
+        "-",
+        "--",
+        "---",
+        ".",
+        "..",
+        "NA",
+        "N/A",
+        "NONE",
+        "NIL",
+        "NULL",
+        "0",
+        "00",
+        "000",
+        "0000",
+        "000000",
+        "00000000",
+        "000000000000",
+        "CHQNO",
+        "REF",
+    }
+    if clean in placeholder_set:
+        return True
+    if all(c in "0-." for c in clean):
+        return True
+    return False
+
+
+def is_zero_or_placeholder_amount(val: str | None) -> bool:
+    """Returns True if raw amount string is empty, zero, or placeholder dash/text."""
+    if not val:
+        return True
+    clean = val.strip().upper()
+    if not clean or clean in {"-", "--", "---", "NA", "N/A", "NIL", "NONE", ".", "0", "0.00", "0.0", "00"}:
+        return True
+    if all(c in "0-." for c in clean) and not any(c.isdigit() and c != "0" for c in clean):
+        return True
+    return False
+
 
 # Standardized Bank Formats Header Signatures
 BANK_COLUMN_MAPPINGS = {
@@ -83,27 +154,31 @@ BANK_COLUMN_MAPPINGS = {
         "deposit": ["Credit", "Credit Amount", "Cr Amount"],
     },
     "AXIS": {
-        "date": ["Tran Date", "Date", "Value Date", "Txn Date"],
-        "narration": ["PARTICULARS", "Particulars", "Description", "Narration"],
-        "ref": ["CHQNO", "Ref No", "Reference Number", "Ref No."],
+        "date": ["Tran Date", "Txn Date", "Transaction Date", "Date", "Value Date"],
+        "narration": ["PARTICULARS", "Particulars", "Description", "Narration", "Transaction Details"],
+        "ref": ["CHQ/REF NO", "CHQ/REF NO.", "CHQNO", "Chq No", "Ref No", "Reference Number", "Ref No.", "Chq/Ref No."],
+        "amount": ["TRAN AMT", "Tran Amt", "Amount", "Net Amount", "Txn Amount"],
+        "direction": ["DR/CR", "CR/DR", "DR / CR", "CR / DR", "Type", "Dr/Cr"],
         "withdrawal": ["DR", "Debit", "Withdrawal Amount", "DR Amount"],
         "deposit": ["CR", "Credit", "Deposit Amount", "CR Amount"],
     },
     "KOTAK": {
-        "date": ["Transaction Date", "Date", "Value Date"],
-        "narration": ["Description", "Narration", "Transaction Details"],
-        "ref": ["Ref / Chq No", "Ref No", "Chq No"],
-        "withdrawal": ["Debit (Dr)", "Debit", "Dr"],
-        "deposit": ["Credit (Cr)", "Credit", "Cr"],
+        "date": ["Transaction Date", "Date", "Value Date", "Txn Date"],
+        "narration": ["Description", "Narration", "Transaction Details", "Particulars"],
+        "ref": ["Ref No.", "Ref No", "Ref / Chq No", "Ref / Chq No.", "Chq / Ref No.", "Chq / Ref No", "Chq No", "Transaction Reference Number"],
+        "amount": ["Amount", "Transaction Amount", "Txn Amount"],
+        "direction": ["Dr/Cr", "DR/CR", "Cr/Dr", "Type"],
+        "withdrawal": ["Debit (Dr)", "Debit Amount", "Debit", "Dr Amount", "Dr"],
+        "deposit": ["Credit (Cr)", "Credit Amount", "Credit", "Cr Amount", "Cr"],
     },
     "GENERIC": {
-        "date": ["date", "txn_date", "transaction_date", "tran_date", "timestamp", "booking_date", "value_date"],
-        "narration": ["description", "narration", "remarks", "particulars", "desc", "details", "memo", "transaction_details"],
-        "ref": ["utr", "ref", "reference", "utr_number", "rrn", "ref_no", "chq_no", "cheque_no", "ref_no.", "reference_number"],
-        "amount": ["amount", "net_amount", "txn_amount", "transaction_amount", "total_amount"],
-        "direction": ["type", "direction", "dr_cr", "cr_dr", "transaction_type", "dr/cr", "cr/dr"],
-        "withdrawal": ["debit", "withdrawal", "dr", "debit_amount", "dr_amount", "outflow", "withdrawal_amount"],
-        "deposit": ["credit", "deposit", "cr", "credit_amount", "cr_amount", "inflow", "deposit_amount"],
+        "date": ["date", "txn_date", "transaction_date", "tran_date", "timestamp", "booking_date", "value_date", "txn date", "tran date", "transaction date", "value date"],
+        "narration": ["description", "narration", "remarks", "particulars", "desc", "details", "memo", "transaction_details", "transaction remarks", "transaction description"],
+        "ref": ["utr", "ref", "reference", "utr_number", "rrn", "ref_no", "chq_no", "cheque_no", "ref_no.", "reference_number", "chq/ref no", "chq/ref no.", "chq / ref no.", "chq / ref no", "ref / chq no", "ref / chq no.", "chqno", "instrument id", "doc number"],
+        "amount": ["amount", "net_amount", "txn_amount", "transaction_amount", "total_amount", "tran amt", "tran_amt"],
+        "direction": ["type", "direction", "dr_cr", "cr_dr", "transaction_type", "dr/cr", "cr/dr", "dr / cr", "cr / dr", "cr_dr_flag", "dr_cr_flag"],
+        "withdrawal": ["debit", "withdrawal", "dr", "debit_amount", "dr_amount", "outflow", "withdrawal_amount", "debit (dr)", "paid out"],
+        "deposit": ["credit", "deposit", "cr", "credit_amount", "cr_amount", "inflow", "deposit_amount", "credit (cr)", "paid in"],
     },
 }
 
@@ -121,6 +196,8 @@ def extract_utr_from_text(text: str | None) -> str | None:
     for tok in tokens:
         candidate = tok.strip().upper()
         if 8 <= len(candidate) <= 24 and candidate not in NON_UTR_WORDS:
+            if is_placeholder_ref(candidate):
+                continue
             # Must contain at least one digit or match standard banking prefixes
             if any(c.isdigit() for c in candidate) or candidate.startswith("CMS") or candidate.startswith("UTR"):
                 return candidate
@@ -148,14 +225,22 @@ def parse_flexible_date(date_str: str) -> datetime:
         "%d-%b-%y",
         "%d %B %Y",
         "%d-%B-%Y",
+        "%d/%b/%Y",
+        "%d/%b/%y",
+        "%d/%B/%Y",
         "%b %d, %Y",
         "%B %d, %Y",
         "%Y-%m-%d %H:%M:%S",
         "%d/%m/%Y %H:%M:%S",
         "%d-%m-%Y %H:%M:%S",
+        "%d-%b-%Y %H:%M:%S",
+        "%d %b %Y %H:%M:%S",
+        "%d/%b/%Y %H:%M:%S",
         "%Y-%m-%d %H:%M",
         "%d/%m/%Y %H:%M",
         "%d-%m-%Y %H:%M",
+        "%d-%b-%Y %H:%M",
+        "%d %b %Y %H:%M",
     ]
     for fmt in date_formats:
         try:
@@ -202,12 +287,20 @@ class BankCsvParser:
 
         mapping: dict[str, str] = {}
 
+        def _is_direction_header(h_lower: str) -> bool:
+            return bool(
+                re.search(r"\bdr\s*/\s*cr\b|\bcr\s*/\s*dr\b|\bdr_cr\b|\bcr_dr\b", h_lower)
+                or h_lower in {"dr/cr", "cr/dr", "dr / cr", "cr / dr", "type", "direction"}
+            )
+
         # 1. Exact lowercased matches on generic mappings
         for canonical, options in BANK_COLUMN_MAPPINGS["GENERIC"].items():
             for opt in options:
                 if opt in lower_map:
-                    mapping[canonical] = lower_map[opt]
-                    break
+                    raw_h = lower_map[opt]
+                    if raw_h not in mapping.values():
+                        mapping[canonical] = raw_h
+                        break
 
         # 2. Check bank-specific exact mappings
         for bank_name, bank_map in BANK_COLUMN_MAPPINGS.items():
@@ -216,11 +309,14 @@ class BankCsvParser:
             for canonical, options in bank_map.items():
                 if canonical not in mapping:
                     for opt in options:
+                        raw_h = None
                         if opt in clean_fields:
-                            mapping[canonical] = clean_fields[opt]
-                            break
+                            raw_h = clean_fields[opt]
                         elif opt.lower() in lower_map:
-                            mapping[canonical] = lower_map[opt.lower()]
+                            raw_h = lower_map[opt.lower()]
+
+                        if raw_h and raw_h not in mapping.values():
+                            mapping[canonical] = raw_h
                             break
 
         # 3. Word-boundary regex matching for composite headers (e.g. "Withdrawal Amount (INR )", "Debit (Dr)")
@@ -228,6 +324,11 @@ class BankCsvParser:
             if canonical not in mapping:
                 for opt in options:
                     for header_lower, raw_header in lower_map.items():
+                        if raw_header in mapping.values():
+                            continue
+                        # Guard: Never map a direction header (e.g. "DR/CR") to withdrawal, deposit, or amount
+                        if canonical in {"withdrawal", "deposit", "amount"} and _is_direction_header(header_lower):
+                            continue
                         # Use word boundary to avoid matching "dr" inside "description"
                         pattern = rf"\b{re.escape(opt)}\b"
                         if re.search(pattern, header_lower):
@@ -249,7 +350,7 @@ class BankCsvParser:
         best_header_fields: list[str] = []
         best_score = 0
 
-        for idx, line in enumerate(lines[:30]):  # check up to first 30 lines for table header
+        for idx, line in enumerate(lines[:50]):  # check up to first 50 lines for table header
             clean = line.lstrip("﻿").strip()
             if not clean:
                 continue
@@ -421,7 +522,10 @@ class BankCsvParser:
 
                 description = get_cell(target_indices.get("narration"))
                 raw_ref = get_cell(target_indices.get("ref"))
-                utr = raw_ref or extract_utr_from_text(description)
+                if raw_ref and not is_placeholder_ref(raw_ref):
+                    utr = raw_ref
+                else:
+                    utr = extract_utr_from_text(description)
 
                 raw_dep = get_cell(target_indices.get("deposit"))
                 raw_wdr = get_cell(target_indices.get("withdrawal"))
@@ -432,7 +536,7 @@ class BankCsvParser:
                 direction: Literal["CREDIT", "DEBIT"] = "CREDIT"
 
                 # 1. Check Deposit column
-                if raw_dep:
+                if raw_dep and not is_zero_or_placeholder_amount(raw_dep):
                     val, dep_dir = parse_amount_and_direction(raw_dep)
                     if val > Decimal("0.00"):
                         dep_name = clean_header_row[target_indices["deposit"]] if "deposit" in target_indices else "Deposit"
@@ -441,7 +545,7 @@ class BankCsvParser:
                         direction = dep_dir if dep_dir == "DEBIT" else "CREDIT"
 
                 # 2. Check Withdrawal column (for debit rows)
-                if amount == Decimal("0.00") and raw_wdr:
+                if amount == Decimal("0.00") and raw_wdr and not is_zero_or_placeholder_amount(raw_wdr):
                     val, wdr_dir = parse_amount_and_direction(raw_wdr)
                     if val > Decimal("0.00"):
                         wdr_name = clean_header_row[target_indices["withdrawal"]] if "withdrawal" in target_indices else "Withdrawal"
@@ -450,7 +554,7 @@ class BankCsvParser:
                         direction = "DEBIT"
 
                 # 3. Check Generic Amount column if deposit/withdrawal not found
-                if amount == Decimal("0.00") and raw_amt:
+                if amount == Decimal("0.00") and raw_amt and not is_zero_or_placeholder_amount(raw_amt):
                     val, detected_dir = parse_amount_and_direction(raw_amt)
                     if val > Decimal("0.00"):
                         amt_name = clean_header_row[target_indices["amount"]] if "amount" in target_indices else "Amount"

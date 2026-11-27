@@ -1,4 +1,4 @@
-import { ApiResponse, QaAskResponse, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
+import { ApiResponse, GatewayHealth, QaAskResponse, WebhookEventItem, ReconciliationRecordItem, ReconciliationStatus, TaxSchedule } from "./types";
 
 /**
  * Resolves the API base URL depending on execution environment:
@@ -28,6 +28,10 @@ export interface RecordQuery {
   sort: LedgerSort;
   direction: "asc" | "desc";
   settlementId?: string;
+  fromDate?: string;
+  toDate?: string;
+  from_date?: string;
+  to_date?: string;
 }
 export interface RecordWindow {
   records: ReconciliationRecordItem[];
@@ -47,6 +51,10 @@ export async function fetchRecordWindow(
   if (cursor) params.set("cursor", cursor);
   if (anchorId) params.set("anchor_id", anchorId);
   if (query.settlementId) params.set("settlement_id", query.settlementId);
+  const fromDate = query.fromDate || query.from_date;
+  const toDate = query.toDate || query.to_date;
+  if (fromDate) params.set("from_date", fromDate);
+  if (toDate) params.set("to_date", toDate);
   const response = await fetch(`${getApiBase()}/reconciliation/${encodeURIComponent(query.batchId)}/records?${params}`, {
     cache: "no-store", signal,
   });
@@ -94,7 +102,9 @@ export async function fetchRecords(
   status: string = "ALL",
   search: string = "",
   page: number = 1,
-  pageSize: number = 100
+  pageSize: number = 100,
+  fromDate?: string,
+  toDate?: string
 ): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
   const params = new URLSearchParams({
     status,
@@ -102,12 +112,50 @@ export async function fetchRecords(
     page: page.toString(),
     page_size: pageSize.toString(),
   });
+  if (fromDate) params.set("from_date", fromDate);
+  if (toDate) params.set("to_date", toDate);
   const res = await fetch(`${getApiBase()}/reconciliation/${batchId}/records?${params}`, {
     cache: "no-store",
   });
   if (!res.ok) throw new Error("Failed to fetch reconciliation records");
   const json = await res.json();
   return json.data;
+}
+
+export interface FetchReconciliationRecordsOptions {
+  batchId?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+  fromDate?: string;
+  toDate?: string;
+  from_date?: string;
+  to_date?: string;
+}
+
+export async function fetchReconciliationRecords(
+  batchIdOrOptions: string | FetchReconciliationRecordsOptions = "default",
+  status: string = "ALL",
+  search: string = "",
+  page: number = 1,
+  pageSize: number = 100,
+  fromDate?: string,
+  toDate?: string
+): Promise<{ records: ReconciliationRecordItem[]; total_count: number }> {
+  if (typeof batchIdOrOptions === "object" && batchIdOrOptions !== null) {
+    const opts = batchIdOrOptions;
+    return fetchRecords(
+      opts.batchId || "default",
+      opts.status || "ALL",
+      opts.search || "",
+      opts.page || 1,
+      opts.pageSize || 100,
+      opts.fromDate || opts.from_date,
+      opts.toDate || opts.to_date
+    );
+  }
+  return fetchRecords(batchIdOrOptions, status, search, page, pageSize, fromDate, toDate);
 }
 
 // The API caps page_size at 200. Walk every page so the (virtualized) ledger
@@ -165,6 +213,17 @@ export async function denyRecord(recordId: string, note?: string): Promise<Recon
     body: JSON.stringify({ note }),
   });
   if (!res.ok) throw new Error("Failed to deny record");
+  const json = await res.json();
+  return json.data;
+}
+
+export async function revertRecord(recordId: string, note?: string): Promise<ReconciliationRecordItem> {
+  const res = await fetch(`${getApiBase()}/reconciliation/records/${recordId}/revert`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ note }),
+  });
+  if (!res.ok) throw new Error("Failed to revert action");
   const json = await res.json();
   return json.data;
 }
@@ -279,5 +338,19 @@ export async function askQaAgent(
   });
   if (!res.ok) throw new Error("Failed to consult Settlement Q&A Agent");
   const json: ApiResponse<QaAskResponse> = await res.json();
+  return json.data;
+}
+
+export async function fetchGatewayHealth(signal?: AbortSignal): Promise<GatewayHealth> {
+  const res = await fetch(`${getApiBase()}/webhooks/health`, { cache: "no-store", signal });
+  if (!res.ok) throw new Error("Failed to fetch gateway health");
+  const json: ApiResponse<GatewayHealth> = await res.json();
+  return json.data;
+}
+
+export async function fetchRecentWebhookEvents(signal?: AbortSignal): Promise<WebhookEventItem[]> {
+  const res = await fetch(`${getApiBase()}/webhooks/recent`, { cache: "no-store", signal });
+  if (!res.ok) throw new Error("Failed to fetch recent webhook events");
+  const json: ApiResponse<WebhookEventItem[]> = await res.json();
   return json.data;
 }

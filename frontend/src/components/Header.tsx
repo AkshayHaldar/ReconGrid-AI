@@ -1,5 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { formatFiscalPeriod } from "@/lib/formatters";
+import { fetchGatewayHealth } from "@/lib/api";
+import { GATEWAY_POLL_MS, formatRelative, pulseView } from "@/lib/gatewayPulse";
+import { GatewayHealth } from "@/lib/types";
+import { GatewayPulseDrawer } from "./GatewayPulseDrawer";
 import {
   UploadCloud,
   Building2,
@@ -38,6 +42,34 @@ export const Header: React.FC<HeaderProps> = ({
   periodDate,
 }) => {
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [health, setHealth] = useState<GatewayHealth | null>(null);
+  const [healthFailed, setHealthFailed] = useState(false);
+  const [pulseOpen, setPulseOpen] = useState(false);
+  const latestPoll = useRef(0);
+
+  // Heartbeat: ask the backend for webhook health now and every 30 seconds.
+  useEffect(() => {
+    const controller = new AbortController();
+    const poll = async () => {
+      const pollId = ++latestPoll.current; // a slow older poll must not overwrite a newer answer
+      try {
+        const next = await fetchGatewayHealth(controller.signal);
+        if (pollId !== latestPoll.current) return;
+        setHealth(next);
+        setHealthFailed(false);
+      } catch {
+        if (!controller.signal.aborted && pollId === latestPoll.current) setHealthFailed(true);
+      }
+    };
+    poll();
+    const timer = setInterval(poll, GATEWAY_POLL_MS);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, []);
+
+  const pulse = pulseView(health, healthFailed);
 
   return (
     <>
@@ -65,20 +97,39 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
 
-            {/* Live Gateway Pill (Mobile / Tablet) */}
-            <div className="flex sm:hidden items-center gap-1.5 px-2 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-[9px] font-mono text-neutral-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              <span>Live Engine</span>
-            </div>
+            {/* Gateway pulse (Mobile / Tablet) */}
+            <button
+              onClick={() => setPulseOpen(true)}
+              className="flex sm:hidden items-center gap-1.5 px-2 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-[9px] font-mono text-neutral-300 cursor-pointer"
+              aria-label={`Gateway webhook status: ${pulse.label}. Open activity`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${pulse.dotClass}`}></span>
+              <span>{pulse.label}</span>
+            </button>
           </div>
 
           {/* Controls & Action Center */}
           <div className="flex flex-wrap xl:flex-nowrap items-center gap-2 w-full xl:w-auto min-w-0">
-            {/* Live Gateway Status Badge (wide desktop) */}
-            <div className="hidden 2xl:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] rounded-md text-[10px] font-mono text-emerald-400 shrink-0">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              <span>Gateway Connected</span>
-            </div>
+            {/* Gateway webhook pulse: opens the activity drawer */}
+            <button
+              onClick={() => setPulseOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] hover:bg-[#161922] border border-[#1e222d] hover:border-neutral-700 rounded-md text-[10px] font-mono shrink-0 transition cursor-pointer"
+              title={health?.message ?? "Gateway webhook status"}
+              aria-label={`Gateway webhook status: ${pulse.label}. Open activity`}
+            >
+              <span className="relative flex w-1.5 h-1.5">
+                {pulse.key === "live" && (
+                  <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping ${pulse.dotClass}`}></span>
+                )}
+                <span className={`relative inline-flex w-1.5 h-1.5 rounded-full ${pulse.dotClass}`}></span>
+              </span>
+              <span className={pulse.textClass}>Gateway {pulse.label}</span>
+              {health?.last_verified_at && pulse.key !== "warning" && (
+                <span className="hidden 2xl:inline text-neutral-500" suppressHydrationWarning>
+                  {formatRelative(health.last_verified_at)}
+                </span>
+              )}
+            </button>
 
             {/* Fiscal Accounting Period (follows the active batch date) */}
             <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] rounded-md text-xs text-neutral-300 font-mono shrink-0">
@@ -192,6 +243,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </header>
+
+      <GatewayPulseDrawer open={pulseOpen} health={health} onClose={() => setPulseOpen(false)} />
 
       {/* Keyboard Shortcuts Cheat Sheet Modal */}
       {showShortcuts && (

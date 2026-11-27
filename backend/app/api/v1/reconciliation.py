@@ -5,6 +5,7 @@ import io
 import json
 import re
 from dataclasses import asdict
+from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -89,7 +90,7 @@ async def get_batch_status(
     batch_id: str = "default",
     db: AsyncSession = Depends(get_db),
 ):
-    """Returns aggregated summary metrics for Ramesh's dashboard cards."""
+    """Returns aggregated summary metrics for the dashboard summary cards."""
     repo = ReconciliationRepository(db)
     summary = await repo.get_summary_metrics(batch_id)
     return ApiResponse.ok(ReconciliationStatusResponse(**summary))
@@ -151,15 +152,41 @@ async def get_reconciliation_records(
     direction: Literal["asc", "desc"] = "desc",
     anchor_id: str | None = Query(default=None, max_length=36),
     settlement_id: str = Query(default="", max_length=36),
+    from_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Filter from date (YYYY-MM-DD) in IST"
+    ),
+    to_date: str | None = Query(
+        default=None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Filter to date (YYYY-MM-DD) in IST"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Returns filtered, paginated reconciliation records for the ledger table."""
+    # Validate before either pagination path; regex alone accepts February 31.
+    for value in (from_date, to_date):
+        if value is not None:
+            try:
+                date.fromisoformat(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="Invalid calendar date; use YYYY-MM-DD.") from exc
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=400, detail="Start date must not be after end date.")
     repo = ReconciliationRepository(db)
     next_cursor, has_more = None, False
     if limit is not None or cursor is not None or anchor_id is not None:
         try:
             logs, total_count, next_cursor, has_more = await repo.get_log_window(
-                batch_id, status, q, diagnostic, sort, direction, limit or page_size, cursor, anchor_id, settlement_id
+                batch_id,
+                status,
+                q,
+                diagnostic,
+                sort,
+                direction,
+                limit or page_size,
+                cursor,
+                anchor_id,
+                settlement_id,
+                from_date,
+                to_date,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -167,7 +194,13 @@ async def get_reconciliation_records(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     else:
         logs, total_count = await repo.get_active_logs(
-            batch_id=batch_id, status_filter=status, search=q, page=page, page_size=page_size
+            batch_id=batch_id,
+            status_filter=status,
+            search=q,
+            page=page,
+            page_size=page_size,
+            from_date=from_date,
+            to_date=to_date,
         )
     records = [_map_log_to_item(l) for l in logs]
 
@@ -232,6 +265,38 @@ async def deny_suggested_match(
     log.human_action = "DENIED"
     log.diagnostic_type = "UNRESOLVED"
     log.diagnostic_note = f"Human CA rejected suggestion{': ' + action_req.note if action_req.note else ''}"
+    await db.flush()
+
+    return ApiResponse.ok(_map_log_to_item(log))
+
+
+@router.post("/records/{record_id}/revert", response_model=ApiResponse[ReconciliationRecordItem])
+async def revert_human_action(
+    record_id: str,
+    action_req: ActionRequest = ActionRequest(),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reverts a human APPROVED or DENIED action back to SUGGESTED."""
+    repo = ReconciliationRepository(db)
+    log = await repo.get_by_id(record_id)
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    if log.human_action not in ("APPROVED", "DENIED"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only approved or denied suggestions can be reverted.",
+        )
+
+    log.match_status = "SUGGESTED"
+    log.human_action = None
+    if log.diagnostic_type == "UNRESOLVED" and log.rzp_settlement_id is not None:
+        if log.match_tier == "TIER_0":
+            log.diagnostic_type = "DATE_AMOUNT_FALLBACK"
+        elif log.match_tier == "TIER_2":
+            log.diagnostic_type = "FUZZY_MATCH"
+        else:
+            log.diagnostic_type = "EXACT_MATCH"
+    log.diagnostic_note += f" [Reverted by CA{': ' + action_req.note if action_req.note else ''}]"
     await db.flush()
 
     return ApiResponse.ok(_map_log_to_item(log))

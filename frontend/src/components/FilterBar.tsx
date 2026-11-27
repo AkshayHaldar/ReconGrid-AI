@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { ReconciliationStatus } from "@/lib/types";
+import { FiscalDateRangePicker } from "./FiscalDateRangePicker";
 
 interface FilterBarProps {
   activeTab: string;
@@ -23,6 +24,10 @@ interface FilterBarProps {
   onDiagnosticChange?: (d: string) => void;
   onBatchApprove?: () => void;
   batchApproveLoading?: boolean;
+  fromDate?: string;
+  toDate?: string;
+  onDateRangeChange?: (fromDate?: string, toDate?: string) => void;
+  periodDate?: string | Date | null;
 }
 
 export const FilterBar: React.FC<FilterBarProps> = ({
@@ -36,6 +41,10 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   onDiagnosticChange,
   onBatchApprove,
   batchApproveLoading = false,
+  fromDate,
+  toDate,
+  onDateRangeChange,
+  periodDate,
 }) => {
   const tabs = [
     { id: "ALL", label: "All Records", count: status?.total_records || 0, shortcut: "1" },
@@ -122,8 +131,18 @@ export const FilterBar: React.FC<FilterBarProps> = ({
           })}
         </div>
 
-        {/* Search, Diagnostic Sub-Filter, and Export */}
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+        {/* Search, Date Range, Diagnostic Sub-Filter, and Export */}
+        <div className="flex flex-wrap lg:flex-nowrap items-center gap-2">
+          {/* Fiscal Date Range Picker (Indian FY presets) */}
+          {onDateRangeChange && (
+            <FiscalDateRangePicker
+              fromDate={fromDate}
+              toDate={toDate}
+              onChange={onDateRangeChange}
+              periodDate={periodDate}
+            />
+          )}
+
           {/* Diagnostic Sub-Filter */}
           {onDiagnosticChange && (
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#111318] border border-[#1e222d] hover:border-neutral-700 rounded-md text-xs text-neutral-300 flex-1 sm:flex-initial min-w-0 transition shadow-xs">

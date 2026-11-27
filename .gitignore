@@ -72,6 +72,8 @@ $RECYCLE.BIN/
 # =========================
 #  AI Assistant & Tool Caches
 # =========================
+.agents/
+skills-lock.json
 .claude/
 .claude-*/
 .cursor/
