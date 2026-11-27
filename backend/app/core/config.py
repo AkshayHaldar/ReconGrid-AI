@@ -42,7 +42,7 @@ class Settings(BaseSettings):
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]
-    MAX_CSV_UPLOAD_MB: int = 10
+    MAX_CSV_UPLOAD_MB: int = 15
     MAX_CSV_ROWS: int = 50000
     RECONCILIATION_TOLERANCE_INR: Decimal = Decimal("1.00")
     FUZZY_MATCH_CONFIDENCE_THRESHOLD: float = 0.90
