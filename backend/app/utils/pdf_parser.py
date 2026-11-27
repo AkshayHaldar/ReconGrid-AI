@@ -2,6 +2,7 @@
 
 import base64
 import io
+import json
 import re
 from decimal import Decimal
 from typing import Any
@@ -73,7 +74,9 @@ class BankPdfParser:
 
     # Common bank column regex patterns
     DATE_HEADER = re.compile(r"(date|txn\s*date|trans\s*date|value\s*date)", re.IGNORECASE)
-    NARRATION_HEADER = re.compile(r"(narration|description|particulars|remarks|details|transaction\s*details)", re.IGNORECASE)
+    NARRATION_HEADER = re.compile(
+        r"(narration|description|particulars|remarks|details|transaction\s*details)", re.IGNORECASE
+    )
     REF_HEADER = re.compile(r"(chq|ref|cheque|reference|utr|rrn|txn\s*id)", re.IGNORECASE)
     DEBIT_HEADER = re.compile(r"(debit|dr|withdrawal|dr\s*amount|withdrawal\s*amt)", re.IGNORECASE)
     CREDIT_HEADER = re.compile(r"(credit|cr|deposit|cr\s*amount|deposit\s*amt)", re.IGNORECASE)
@@ -256,23 +259,25 @@ class BankPdfParser:
 
                 row_hash = compute_row_hash(parsed_date, amount, direction, utr, description)
 
-                results.append({
-                    "row_index": len(results) + 1,
-                    "row_hash": row_hash,
-                    "date": parsed_date,
-                    "amount": amount,
-                    "direction": direction,
-                    "utr": utr if utr else None,
-                    "description": description,
-                    "raw_csv_row": {
-                        "date": raw_date,
+                results.append(
+                    {
+                        "row_index": len(results) + 1,
+                        "row_hash": row_hash,
+                        "date": parsed_date,
+                        "amount": amount,
+                        "direction": direction,
+                        "utr": utr if utr else None,
                         "description": description,
-                        "ref": raw_ref,
-                        "withdrawal": raw_wdr,
-                        "deposit": raw_dep,
-                        "page": page_idx,
-                    },
-                })
+                        "raw_csv_row": {
+                            "date": raw_date,
+                            "description": description,
+                            "ref": raw_ref,
+                            "withdrawal": raw_wdr,
+                            "deposit": raw_dep,
+                            "page": page_idx,
+                        },
+                    }
+                )
 
         return results
 
@@ -364,95 +369,209 @@ class BankPdfParser:
             utr = extract_utr_from_text(description)
             row_hash = compute_row_hash(parsed_date, amount_val, direction, utr, description)
 
-            results.append({
-                "row_index": len(results) + 1,
-                "row_hash": row_hash,
-                "date": parsed_date,
-                "amount": amount_val,
-                "direction": direction,
-                "utr": utr if utr else None,
-                "description": description,
-                "raw_csv_row": {
-                    "raw_line": line_str,
-                    "page": page_idx,
-                },
-            })
+            results.append(
+                {
+                    "row_index": len(results) + 1,
+                    "row_hash": row_hash,
+                    "date": parsed_date,
+                    "amount": amount_val,
+                    "direction": direction,
+                    "utr": utr if utr else None,
+                    "description": description,
+                    "raw_csv_row": {
+                        "raw_line": line_str,
+                        "page": page_idx,
+                    },
+                }
+            )
 
         return results
 
+    _SUPPORTED_OCR_PROVIDERS = {"gemini", "openai", "ocr_space"}
+    _OCR_EXTRACTION_PROMPT = (
+        "Extract all bank statement transaction rows from this page image in structured format.\n"
+        "Output ONLY valid JSON array with objects containing:\n"
+        "date (YYYY-MM-DD), description (string), utr (string or null), amount (number), direction ('CREDIT' or 'DEBIT')."
+    )
+
+    @staticmethod
+    def _resolve_ocr_provider_and_key() -> tuple[str, str]:
+        """Validate OCR_PROVIDER and return normalized (provider, api_key)."""
+        provider = (settings.OCR_PROVIDER or "gemini").strip().lower()
+        if provider not in BankPdfParser._SUPPORTED_OCR_PROVIDERS:
+            raise ValueError(
+                f"Unsupported OCR_PROVIDER '{settings.OCR_PROVIDER}'. Supported providers: gemini, openai, ocr_space."
+            )
+        if provider == "gemini":
+            api_key = settings.GEMINI_API_KEY or settings.OCR_API_KEY or settings.LLM_API_KEY
+        elif provider == "openai":
+            api_key = settings.OCR_API_KEY or settings.LLM_API_KEY
+        else:
+            api_key = settings.OCR_API_KEY
+        return provider, api_key
+
+    @classmethod
+    def _parse_ocr_json_transactions(cls, text_out: str, row_offset: int) -> list[dict[str, Any]]:
+        """Extract canonical bank transaction dicts from an OCR JSON array string."""
+        clean_json = re.search(r"\[\s*\{.*\}\s*\]", text_out, re.DOTALL)
+        if not clean_json:
+            return []
+        tx_list = json.loads(clean_json.group(0))
+        extracted: list[dict[str, Any]] = []
+        for row in tx_list:
+            dt = parse_flexible_date(str(row.get("date", "")))
+            amt = to_decimal(row.get("amount", "0"))
+            direct = str(row.get("direction", "CREDIT")).upper()
+            desc = str(row.get("description", ""))
+            utr = row.get("utr") or extract_utr_from_text(desc)
+            h = compute_row_hash(dt, amt, direct, utr, desc)
+            extracted.append(
+                {
+                    "row_index": row_offset + len(extracted) + 1,
+                    "row_hash": h,
+                    "date": dt,
+                    "amount": amt,
+                    "direction": direct,
+                    "utr": utr,
+                    "description": desc,
+                    "raw_csv_row": row,
+                }
+            )
+        return extracted
+
+    @classmethod
+    def _ocr_page_gemini(
+        cls,
+        client: httpx.Client,
+        api_key: str,
+        b64_data: str,
+        row_offset: int,
+    ) -> list[dict[str, Any]]:
+        model = (settings.OCR_GEMINI_MODEL or "gemini-1.5-flash").strip()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": cls._OCR_EXTRACTION_PROMPT},
+                        {"inline_data": {"mime_type": "image/png", "data": b64_data}},
+                    ]
+                }
+            ]
+        }
+        resp = client.post(
+            url,
+            json=payload,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+        )
+        if resp.status_code != 200:
+            logger.warning("ocr_gemini_http_error", status_code=resp.status_code)
+            return []
+        data = resp.json()
+        text_out = data["candidates"][0]["content"]["parts"][0]["text"]
+        return cls._parse_ocr_json_transactions(text_out, row_offset)
+
+    @classmethod
+    def _ocr_page_openai(
+        cls,
+        client: httpx.Client,
+        api_key: str,
+        b64_data: str,
+        row_offset: int,
+    ) -> list[dict[str, Any]]:
+        base_url = (settings.OCR_OPENAI_BASE_URL or "https://api.openai.com/v1").strip().rstrip("/")
+        model = (settings.OCR_OPENAI_MODEL or "gpt-4o-mini").strip()
+        url = f"{base_url}/chat/completions"
+        payload = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": cls._OCR_EXTRACTION_PROMPT},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{b64_data}"},
+                        },
+                    ],
+                }
+            ],
+            "temperature": 0,
+        }
+        resp = client.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        if resp.status_code != 200:
+            logger.warning("ocr_openai_http_error", status_code=resp.status_code)
+            return []
+        data = resp.json()
+        text_out = data["choices"][0]["message"]["content"]
+        return cls._parse_ocr_json_transactions(text_out, row_offset)
+
+    @classmethod
+    def _ocr_page_ocr_space(
+        cls,
+        client: httpx.Client,
+        api_key: str,
+        b64_data: str,
+        page_idx: int,
+        row_offset: int,
+    ) -> list[dict[str, Any]]:
+        resp = client.post(
+            "https://api.ocr.space/parse/image",
+            headers={"apikey": api_key},
+            data={
+                "base64Image": f"data:image/png;base64,{b64_data}",
+                "language": "eng",
+                "isTable": "true",
+                "OCREngine": "2",
+            },
+        )
+        if resp.status_code != 200:
+            logger.warning("ocr_space_http_error", status_code=resp.status_code)
+            return []
+        data = resp.json()
+        if data.get("IsErroredOnProcessing"):
+            logger.warning("ocr_space_processing_error", error=data.get("ErrorMessage"))
+            return []
+        parsed_results = data.get("ParsedResults") or []
+        if not parsed_results:
+            return []
+        parsed_text = str(parsed_results[0].get("ParsedText") or "").strip()
+        if not parsed_text:
+            return []
+        rows = cls._extract_from_text_lines(parsed_text, page_idx)
+        for idx, row in enumerate(rows, start=1):
+            row["row_index"] = row_offset + idx
+        return rows
+
     @classmethod
     def _extract_via_ocr(cls, pdf: pdfplumber.PDF) -> list[dict[str, Any]]:
-        """Extracts transactions from scanned PDF pages via LLM Vision / OCR."""
+        """Extracts transactions from scanned PDF pages via configured OCR provider."""
+        provider, api_key = cls._resolve_ocr_provider_and_key()
         results: list[dict[str, Any]] = []
-        api_key = settings.GEMINI_API_KEY or settings.OCR_API_KEY or settings.LLM_API_KEY
         if not api_key:
             return results
 
-        # Process each page as an image
-        for page_idx, page in enumerate(pdf.pages, start=1):
-            try:
-                img = page.to_image(resolution=200).original
-                img_byte_arr = io.BytesIO()
-                img.save(img_byte_arr, format="PNG")
-                b64_data = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
+        with httpx.Client(timeout=30.0) as client:
+            for page_idx, page in enumerate(pdf.pages, start=1):
+                try:
+                    img = page.to_image(resolution=200).original
+                    img_byte_arr = io.BytesIO()
+                    img.save(img_byte_arr, format="PNG")
+                    b64_data = base64.b64encode(img_byte_arr.getvalue()).decode("utf-8")
 
-                # If Gemini API key is available
-                if settings.GEMINI_API_KEY or (settings.LLM_PROVIDER == "gemini" and api_key):
-                    gemini_key = settings.GEMINI_API_KEY or api_key
-                    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-                    prompt = (
-                        "Extract all bank statement transaction rows from this page image in structured format.\n"
-                        "Output ONLY valid JSON array with objects containing:\n"
-                        "date (YYYY-MM-DD), description (string), utr (string or null), amount (number), direction ('CREDIT' or 'DEBIT')."
-                    )
-                    payload = {
-                        "contents": [
-                            {
-                                "parts": [
-                                    {"text": prompt},
-                                    {
-                                        "inline_data": {
-                                            "mime_type": "image/png",
-                                            "data": b64_data,
-                                        }
-                                    },
-                                ]
-                            }
-                        ]
-                    }
-                    headers = {
-                        "x-goog-api-key": gemini_key,
-                        "Content-Type": "application/json",
-                    }
-                    with httpx.Client(timeout=30.0) as client:
-                        resp = client.post(url, json=payload, headers=headers)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            text_out = data["candidates"][0]["content"]["parts"][0]["text"]
-                            # Parse JSON array from output
-                            clean_json = re.search(r"\[\s*\{.*\}\s*\]", text_out, re.DOTALL)
-                            if clean_json:
-                                import json
-                                tx_list = json.loads(clean_json.group(0))
-                                for row in tx_list:
-                                    dt = parse_flexible_date(str(row.get("date", "")))
-                                    amt = to_decimal(row.get("amount", "0"))
-                                    direct = str(row.get("direction", "CREDIT")).upper()
-                                    desc = str(row.get("description", ""))
-                                    utr = row.get("utr") or extract_utr_from_text(desc)
-                                    h = compute_row_hash(dt, amt, direct, utr, desc)
-                                    results.append({
-                                        "row_index": len(results) + 1,
-                                        "row_hash": h,
-                                        "date": dt,
-                                        "amount": amt,
-                                        "direction": direct,
-                                        "utr": utr,
-                                        "description": desc,
-                                        "raw_csv_row": row,
-                                    })
-            except Exception as ocr_err:
-                logger.warning("ocr_page_failed", page=page_idx, error=str(ocr_err))
-                continue
+                    if provider == "gemini":
+                        page_rows = cls._ocr_page_gemini(client, api_key, b64_data, len(results))
+                    elif provider == "openai":
+                        page_rows = cls._ocr_page_openai(client, api_key, b64_data, len(results))
+                    else:
+                        page_rows = cls._ocr_page_ocr_space(client, api_key, b64_data, page_idx, len(results))
+                    results.extend(page_rows)
+                except Exception as ocr_err:
+                    logger.warning("ocr_page_failed", provider=provider, page=page_idx, error=str(ocr_err))
+                    continue
 
         return results

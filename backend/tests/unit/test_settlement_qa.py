@@ -337,10 +337,13 @@ async def test_qa_agent_with_llm_api_failure():
     repo.find_reconciliation_record.return_value = log
     agent = SettlementQaAgent(repo)
 
-    with patch.object(settings, "LLM_API_KEY", "test_key"), patch.object(
-        agent,
-        "_call_llm_narration",
-        AsyncMock(side_effect=RuntimeError("LLM API 500 Internal Error")),
+    with (
+        patch.object(settings, "LLM_API_KEY", "test_key"),
+        patch.object(
+            agent,
+            "_call_llm_narration",
+            AsyncMock(side_effect=RuntimeError("LLM API 500 Internal Error")),
+        ),
     ):
         res = await agent.answer_query("order #123456")
         assert "unresolved EXCEPTION" in res.answer
@@ -424,8 +427,25 @@ async def test_qa_general_query_not_hijacked_by_active_context_record():
 async def test_qa_followup_verification_guidance_for_conflict():
     """Ensures 'how i verfie' on a conflict record returns actionable conflict resolution steps."""
     now = datetime.now(UTC)
-    bank = BankTransaction(id="b1", amount=Decimal("50000.00"), date=now, direction="CREDIT", utr="CMS123456", description="CMS/123", row_hash="h1")
-    rzp = RazorpaySettlement(id="r1", settlement_id="setl_Kjs9283jkd911", amount=Decimal("50000.00"), gross_amount=Decimal("50000.00"), fees=Decimal("0.00"), tax=Decimal("0.00"), utr="CMS123456", settlement_created_at=now)
+    bank = BankTransaction(
+        id="b1",
+        amount=Decimal("50000.00"),
+        date=now,
+        direction="CREDIT",
+        utr="CMS123456",
+        description="CMS/123",
+        row_hash="h1",
+    )
+    rzp = RazorpaySettlement(
+        id="r1",
+        settlement_id="setl_Kjs9283jkd911",
+        amount=Decimal("50000.00"),
+        gross_amount=Decimal("50000.00"),
+        fees=Decimal("0.00"),
+        tax=Decimal("0.00"),
+        utr="CMS123456",
+        settlement_created_at=now,
+    )
     log_conflict = ReconciliationLog(
         id="l_conflict",
         bank_tx_id="b1",
@@ -452,3 +472,99 @@ async def test_qa_followup_verification_guidance_for_conflict():
     assert "Conflict Resolution Drawer" in res.answer
     assert res.source_record_id == "l_conflict"
 
+
+@pytest.mark.asyncio
+async def test_local_ollama_keyless_narration_and_guardrail_rejection():
+    """Keyless Ollama backend narrates valid responses and triggers guardrail on invented numbers."""
+    now = datetime.now(UTC)
+    bank = BankTransaction(
+        id="b1",
+        amount=Decimal("50000.00"),
+        date=now,
+        direction="CREDIT",
+        utr="CMS123456",
+        description="CMS/123456",
+        row_hash="h1",
+    )
+    rzp = RazorpaySettlement(
+        id="r1",
+        settlement_id="setl_OllamaTest01",
+        amount=Decimal("50000.00"),
+        gross_amount=Decimal("50000.00"),
+        fees=Decimal("0.00"),
+        tax=Decimal("0.00"),
+        utr="CMS123456",
+        settlement_created_at=now,
+    )
+    log = ReconciliationLog(
+        id="l1",
+        bank_tx_id="b1",
+        rzp_settlement_id="r1",
+        match_status="MATCHED",
+        match_tier="TIER_1",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type="EXACT_MATCH",
+        diagnostic_note="Exact match",
+        bank_transaction=bank,
+        rzp_settlement=rzp,
+        matched_at=now,
+    )
+    repo = AsyncMock()
+    repo.find_reconciliation_record.return_value = log
+    repo.log_interaction = AsyncMock()
+    agent = SettlementQaAgent(repo)
+
+    valid_resp = MagicMock(status_code=200)
+    valid_resp.json.return_value = {
+        "choices": [{"message": {"content": "Settlement setl_OllamaTest01 matched for 50000.00 with 0.00 delta."}}]
+    }
+    hallucinated_resp = MagicMock(status_code=200)
+    hallucinated_resp.json.return_value = {
+        "choices": [{"message": {"content": "Settlement settled for 99999.00 after extra fee."}}]
+    }
+
+    with (
+        patch.object(settings, "LLM_PROVIDER", "ollama"),
+        patch.object(settings, "LLM_API_KEY", ""),
+        patch.object(settings, "LLM_BASE_URL", "http://localhost:11434/v1"),
+        patch.object(settings, "LLM_MODEL", "llama3.1:8b"),
+    ):
+        post_mock = AsyncMock(return_value=valid_resp)
+        with patch("httpx.AsyncClient.post", post_mock):
+            res = await agent.answer_query("Explain setl_OllamaTest01")
+
+        assert res.guardrail_rejected is False
+        assert "setl_OllamaTest01" in res.answer
+        assert post_mock.call_args.args[0] == "http://localhost:11434/v1/chat/completions"
+        assert "Authorization" not in post_mock.call_args.kwargs["headers"]
+
+        with patch("httpx.AsyncClient.post", AsyncMock(return_value=hallucinated_resp)):
+            res_bad = await agent.answer_query("Explain setl_OllamaTest01")
+
+        assert res_bad.guardrail_rejected is True
+        assert "99999.00" not in res_bad.answer
+
+
+@pytest.mark.asyncio
+async def test_local_vllm_keyless_general_qa_defaults_url():
+    """Keyless vLLM backend works for general Q&A and defaults to localhost:8000/v1."""
+    repo = AsyncMock()
+    repo.find_reconciliation_record.return_value = None
+    repo.log_interaction = AsyncMock()
+    agent = SettlementQaAgent(repo)
+
+    vllm_resp = MagicMock(status_code=200)
+    vllm_resp.json.return_value = {"choices": [{"message": {"content": "ReconGrid local vLLM answer."}}]}
+    post_mock = AsyncMock(return_value=vllm_resp)
+
+    with (
+        patch.object(settings, "LLM_PROVIDER", "vllm"),
+        patch.object(settings, "LLM_API_KEY", ""),
+        patch.object(settings, "LLM_BASE_URL", "https://integrate.api.nvidia.com/v1"),
+        patch.object(settings, "LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
+        patch("httpx.AsyncClient.post", post_mock),
+    ):
+        res = await agent.answer_query("How do reconciliation audits work?")
+
+    assert res.answer == "ReconGrid local vLLM answer."
+    assert post_mock.call_args.args[0] == "http://localhost:8000/v1/chat/completions"

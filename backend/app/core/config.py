@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     SETTLEMENT_PENDING_WINDOW_DAYS: int = 5
 
     # Settlement Q&A Agent & OCR
-    LLM_PROVIDER: str = "nvidia"  # "nvidia", "openai", or "anthropic"
+    LLM_PROVIDER: str = "nvidia"  # "nvidia", "openai", "anthropic", "ollama", or "vllm"
     LLM_API_KEY: str = ""
     LLM_MODEL: str = "meta/llama-3.1-70b-instruct"
     LLM_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # OCR / Vision Configuration (Optional for scanned PDFs)
     OCR_API_KEY: str = ""
     OCR_PROVIDER: str = "gemini"  # "gemini", "openai", "ocr_space"
+    OCR_GEMINI_MODEL: str = "gemini-1.5-flash"
+    OCR_OPENAI_MODEL: str = "gpt-4o-mini"
+    OCR_OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     GEMINI_API_KEY: str = ""
 
     # Feature Flags
