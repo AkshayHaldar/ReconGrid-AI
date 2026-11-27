@@ -76,6 +76,14 @@ async def settlement_ids() -> list[str]:
         return sorted((await db.scalars(select(RazorpaySettlement.settlement_id))).all())
 
 
+@pytest.fixture(autouse=True)
+def worker_settings(monkeypatch):
+    """Pin the defaults so a local .env cannot change what these tests mean; tests override as needed."""
+    monkeypatch.setattr(settings, "WEBHOOK_INLINE_RECONCILE", True)
+    monkeypatch.setattr(settings, "WEBHOOK_STALE_AFTER_SECONDS", 60)
+    monkeypatch.setattr(settings, "WEBHOOK_WORKER_POLL_SECONDS", 5.0)
+
+
 @pytest.fixture
 def reconcile(monkeypatch):
     """Count reconcile_batch calls without running the matching engine."""
@@ -86,7 +94,7 @@ def reconcile(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_event_left_queued_by_a_crash_is_recovered_once_it_is_stale(monkeypatch, reconcile):
+async def test_event_left_queued_by_a_crash_is_recovered_once_it_is_stale(reconcile):
     entered, released = asyncio.Event(), asyncio.Event()
 
     async def crash_midway(*args, **kwargs):
@@ -107,8 +115,7 @@ async def test_event_left_queued_by_a_crash_is_recovered_once_it_is_stale(monkey
     assert await settlement_ids() == []
 
     reconcile.side_effect = None
-    monkeypatch.setattr(settings, "WEBHOOK_STALE_AFTER_SECONDS", 60)
-    # A fresh row still belongs to the API fast path.
+    # A fresh row still belongs to the API fast path (WEBHOOK_STALE_AFTER_SECONDS=60).
     assert await worker.drain_once() == 0
     assert await statuses() == {"evt_crash": "QUEUED"}
 
