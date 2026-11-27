@@ -67,9 +67,11 @@ export default function DashboardPage() {
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
 
-  // Active highlighted record from Q&A citation jump
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const [scrollRequest, setScrollRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const scrollNonce = useRef(0);
+  const handleScrollConsumed = useCallback((nonce: number) => {
+    setScrollRequest((current) => current?.nonce === nonce ? null : current);
+  }, []);
 
   const [sort, setSort] = useState<LedgerSort>("date");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
@@ -81,7 +83,6 @@ export default function DashboardPage() {
   const setSearchQuery = (value: string) => { setAnchorId(undefined); setSearchQueryState(value); };
   const setSelectedBank = (value: string) => {
     setAnchorId(undefined);
-    setHighlightedId(null);
     setToast(null);
     setSelectedBankState(value);
   };
@@ -349,7 +350,7 @@ export default function DashboardPage() {
 
   // Handle source record jump from Q&A
   const handleSelectRecordFromQa = (recordId: string) => {
-    setHighlightedId(recordId);
+    setIsQaOpen(false);
     setActiveTab("ALL"); // Reset filter so record is visible
     setSelectedDiagnostic("ALL");
     setSearchQuery("");
@@ -359,7 +360,7 @@ export default function DashboardPage() {
     setDirection("desc");
     setAnchorId(recordId);
     // The table is virtualized, so the row may not be in the DOM; let it scroll by index.
-    setScrollRequest({ id: recordId, nonce: Date.now() });
+    setScrollRequest({ id: recordId, nonce: ++scrollNonce.current });
   };
 
   const handleExportCsv = () => {
@@ -466,8 +467,8 @@ export default function DashboardPage() {
                 onRetry={pager.retry}
                 serverSort={{ field: sort, order: direction }}
                 onSortChange={(field, order) => { setSort(field); setDirection(order); setAnchorId(undefined); }}
-                highlightedRecordId={highlightedId}
                 scrollRequest={scrollRequest}
+                onScrollConsumed={handleScrollConsumed}
                 onApprove={handleApprove}
                 onDeny={handleDeny}
                 onOpenConflict={openConflict}

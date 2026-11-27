@@ -153,6 +153,58 @@ test('Header bank selection scopes subsequent batch actions to that bank batch',
   assert.deepEqual(calls, [['hdfc', 0.9]]);
 });
 
+test('citation resets the actual filter props, closes the drawer, and creates a new request each time', () => {
+  const states = [], refs = [];
+  let cursor = 0, refCursor = 0;
+  const hooks = {
+    ...React,
+    useState(initial) {
+      const i = cursor++;
+      if (!(i in states)) states[i] = initial;
+      return [states[i], value => { states[i] = typeof value === 'function' ? value(states[i]) : value; }];
+    },
+    useRef(initial) { const i = refCursor++; return refs[i] ||= { current: initial }; },
+    useMemo: fn => fn(), useCallback: fn => fn, useEffect() {},
+  };
+  const exports = {};
+  const source = readFileSync(path.join(__dirname, '../src/app/page.tsx'), 'utf8');
+  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+  vm.runInNewContext(code, {
+    exports, console,
+    require(name) {
+      if (name === 'react') return hooks;
+      if (name === 'react/jsx-runtime') return require(name);
+      if (name === '@/lib/api') return {};
+      if (name === '@/lib/useLedgerRecords') return { useLedgerRecords: () => ({ records: [], loading: false, pager: { setRecords() {} } }) };
+      return new Proxy({}, { get: (_, key) => key });
+    },
+  });
+  const render = () => { cursor = 0; refCursor = 0; return exports.default(); };
+  const find = (node, type) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === type) return node.props;
+    for (const child of React.Children.toArray(node.props?.children)) {
+      const found = find(child, type);
+      if (found) return found;
+    }
+  };
+  let tree = render();
+  const filters = find(tree, 'FilterBar');
+  filters.onTabChange('CONFLICT');
+  filters.onDiagnosticChange('MISSING_BANK');
+  filters.onSearchChange('query');
+  tree = render();
+  find(tree, 'SettlementQaPanel').onSelectRecord('record-1');
+  tree = render();
+  assert.equal(find(tree, 'FilterBar').activeTab, 'ALL');
+  assert.equal(find(tree, 'FilterBar').selectedDiagnostic, 'ALL');
+  assert.equal(find(tree, 'FilterBar').searchQuery, '');
+  assert.equal(find(tree, 'SettlementQaPanel').isOpen, false);
+  const first = find(tree, 'ReconciliationTable').scrollRequest;
+  find(tree, 'SettlementQaPanel').onSelectRecord('record-1');
+  assert.notEqual(find(render(), 'ReconciliationTable').scrollRequest.nonce, first.nonce);
+});
+
 test('Undo toast triggers revertRecord on backend before refreshing ledger', async () => {
   const reverted = [];
   const state = [];

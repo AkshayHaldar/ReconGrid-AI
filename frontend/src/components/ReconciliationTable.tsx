@@ -26,9 +26,9 @@ import { LedgerSort } from "@/lib/api";
 
 interface ReconciliationTableProps {
   records: ReconciliationRecordItem[];
-  highlightedRecordId: string | null;
   /** Ask the table to scroll a record into view; bump `nonce` to repeat a jump. */
   scrollRequest?: { id: string; nonce: number } | null;
+  onScrollConsumed?: (nonce: number) => void;
   onApprove: (recordId: string) => void;
   onDeny: (recordId: string) => void;
   onOpenConflict: (record: ReconciliationRecordItem) => void;
@@ -71,6 +71,8 @@ interface LedgerRowProps {
   r: ReconciliationRecordItem;
   index: number;
   isHighlighted: boolean;
+  highlightNonce?: number;
+  onRowMount: (id: string, node: HTMLTableRowElement | null) => void;
   isExpanded: boolean;
   copiedKey: string | null;
   measureRef: (node: Element | null) => void;
@@ -88,6 +90,8 @@ const LedgerRow = React.memo(function LedgerRow({
   r,
   index,
   isHighlighted,
+  highlightNonce,
+  onRowMount,
   isExpanded,
   copiedKey,
   measureRef,
@@ -101,6 +105,7 @@ const LedgerRow = React.memo(function LedgerRow({
   const isDebit = r.bank_direction === "DEBIT";
   const deltaNum = parseFloat(r.delta_amount || "0");
   const hasNonZeroDelta = deltaNum > 0;
+  const rowRef = useCallback((node: HTMLTableRowElement | null) => onRowMount(r.id, node), [onRowMount, r.id]);
 
   return (
         <tbody
@@ -109,6 +114,8 @@ const LedgerRow = React.memo(function LedgerRow({
           className="font-sans"
         >
           <tr
+            key={highlightNonce}
+            ref={rowRef}
             id={`record-${r.id}`}
             aria-rowindex={index + 2}
             onClick={() => onToggle(r.id)}
@@ -405,8 +412,8 @@ const LedgerRow = React.memo(function LedgerRow({
 
 export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   records,
-  highlightedRecordId,
   scrollRequest,
+  onScrollConsumed,
   onApprove,
   onDeny,
   onOpenConflict,
@@ -420,7 +427,25 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const pendingScroll = useRef<number | null>(null);
+  const pendingScroll = useRef<{ id: string; nonce: number; positioned: boolean } | null>(null);
+  const lastScrollNonce = useRef<number | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeHighlight, setActiveHighlight] = useState<{ id: string; nonce: number } | null>(null);
+
+  const onRowMount = useCallback((id: string, node: HTMLTableRowElement | null) => {
+    const pending = pendingScroll.current;
+    if (!node || !pending || pending.id !== id || !pending.positioned || pending.nonce !== scrollRequest?.nonce) return;
+    pendingScroll.current = null;
+    onScrollConsumed?.(pending.nonce);
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+    setActiveHighlight({ id, nonce: pending.nonce });
+    highlightTimer.current = setTimeout(() => setActiveHighlight(null), 2500);
+  }, [onScrollConsumed, scrollRequest]);
+
+  useEffect(() => () => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current);
+  }, []);
 
   const handleCopy = useCallback((text: string, id: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -487,23 +512,23 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
   // Jump to a record (e.g. from an Audit Assistant citation). The row may not be
   // mounted, so scroll by index; wait until the record is in the current list.
   useEffect(() => {
-    if (scrollRequest) pendingScroll.current = scrollRequest.nonce;
+    if (scrollRequest && scrollRequest.nonce !== lastScrollNonce.current) {
+      lastScrollNonce.current = scrollRequest.nonce;
+      pendingScroll.current = { ...scrollRequest, positioned: false };
+      if (highlightTimer.current) clearTimeout(highlightTimer.current);
+      setActiveHighlight(null);
+    }
   }, [scrollRequest]);
 
   useEffect(() => {
-    if (!scrollRequest || pendingScroll.current !== scrollRequest.nonce) return;
-    const index = sortedRecords.findIndex((r) => r.id === scrollRequest.id);
+    const pending = pendingScroll.current;
+    if (!pending || pending.positioned) return;
+    const index = sortedRecords.findIndex((r) => r.id === pending.id);
     if (index < 0) return;
-    pendingScroll.current = null;
+    pending.positioned = true;
     virtualizer.scrollToIndex(index, { align: "center" });
-    // Once the row is mounted, also bring the ledger itself into view on the page.
-    const timer = setTimeout(() => {
-      document
-        .getElementById(`record-${scrollRequest.id}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }, 80);
-    return () => clearTimeout(timer);
-  }, [scrollRequest, sortedRecords, virtualizer]);
+    onRowMount(pending.id, document.getElementById(`record-${pending.id}`) as HTMLTableRowElement | null);
+  }, [scrollRequest, sortedRecords, virtualizer, onRowMount]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const lastVisibleIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
@@ -630,7 +655,9 @@ export const ReconciliationTable: React.FC<ReconciliationTableProps> = ({
                   key={r.id}
                   r={r}
                   index={vi.index}
-                  isHighlighted={highlightedRecordId === r.id}
+                  isHighlighted={activeHighlight?.id === r.id}
+                  highlightNonce={activeHighlight?.id === r.id ? activeHighlight.nonce : undefined}
+                  onRowMount={onRowMount}
                   isExpanded={expandedRowId === r.id}
                   copiedKey={copiedId === `utr-${r.id}` || copiedId === `setl-${r.id}` ? copiedId : null}
                   measureRef={virtualizer.measureElement}
