@@ -36,9 +36,8 @@
 flowchart TB
     FE["Next.js Frontend"] -->|REST /api/v1| API["FastAPI Server"]
     API --> DB[(PostgreSQL)]
-    API -.->|Planned| Q["Job Queue (Redis)"]
-    Q -.->|Planned| Worker["Reconciliation Worker"]
-    Worker -.-> DB
+    API -->|QUEUED webhook events| DB
+    Worker["Webhook Outbox Worker"] -->|polls QUEUED events, reconciles| DB
     RZP["Razorpay API"] -->|Webhook: settlement.processed| API
     API -->|Polled fetch: settlements| RZP
     API --> QA["Settlement Q&A Agent"]
@@ -46,7 +45,7 @@ flowchart TB
     QA -->|2. narrate only| LLM["LLM Provider (NVIDIA NIM)"]
 ```
 
-> **Implementation Status:** Webhook reconciliation currently executes via FastAPI `BackgroundTasks` inside the API process (`backend/app/api/v1/webhooks.py`). Offloading to a durable Redis queue and standalone worker with stale-job recovery is planned (see open architecture issue).
+> **Implementation Status:** Accepted webhooks are stored as `QUEUED` rows in `processed_webhook_events`, which acts as the outbox. The API reconciles them in a FastAPI background task by default, and `python -m app.worker` (`backend/app/worker.py`) recovers events still `QUEUED` after a crash or restart. With `WEBHOOK_INLINE_RECONCILE=false` (the docker-compose default) the worker does all of it. Every batch writer shares one per-batch lock (`backend/app/core/locks.py`). Details in `backend/README.md`.
 
 ### Why a Queue for Reconciliation?
 Razorpay expects webhooks to be acknowledged in under 500ms. A full reconciliation run across a large batch can take several seconds. So:
@@ -146,7 +145,7 @@ sequenceDiagram
 | **Razorpay API down** | `httpx` timeout / 5xx error | Retries with exponential backoff (max 5), then marks job `FAILED` and alerts operator |
 | **Invalid webhook signature** | HMAC check fails | Returns `400`, logs the attempt, makes no database changes |
 | **Duplicate webhook** | `event_id` already in DB | Returns `200` immediately without re-processing |
-| **Worker crashes mid-batch** | Job stuck in `PROCESSING` | Reaper task detects timed-out jobs and re-queues them |
+| **API or worker crashes mid-reconcile** | Event row still `QUEUED` (the attempt was one transaction and rolled back) | Worker picks up `QUEUED` events older than `WEBHOOK_STALE_AFTER_SECONDS` and reconciles them once |
 | **Two bank rows match one settlement** | Engine finds >1 candidate | Both marked `CONFLICT` (confidence 0.50). Allocating to one bank row automatically displaces competing rows to `EXCEPTION` (`AUTO_DISPLACED`) |
 | **Malformed row in CSV** | Row-level parse exception | That row gets an `EXCEPTION` with raw text preserved; rest of file continues |
 | **DB write fails on log insert** | Transaction error | Entire record decision is rolled back — never a match without its audit row |

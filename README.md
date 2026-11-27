@@ -220,6 +220,8 @@ uvicorn app.main:app --reload --port 8000
 
 > **Database Note:** By default, `.env` runs on SQLite (`sqlite+aiosqlite:///./recongrid.db`) with zero setup. If you prefer PostgreSQL, set `DATABASE_URL=postgresql+asyncpg://recongrid:recongrid@localhost:5432/recongrid` and run `alembic upgrade head`.
 
+> **Webhook worker:** Razorpay webhooks are reconciled by the API right after they are acknowledged. To also recover events a crash or restart left `QUEUED`, run `python -m app.worker` from `backend/` in another terminal. See `backend/README.md` (Outbox worker and crash recovery).
+
 Your interactive Swagger documentation will be live at: **[http://localhost:8000/docs](http://localhost:8000/docs)**.
 
 ---
@@ -266,6 +268,7 @@ docker compose up --build -d
 - **FastAPI OpenAPI Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 - **PostgreSQL:** Port `5432` (credentials: `recongrid`/`recongrid`)
 - **Redis:** Port `6379`
+- **Webhook worker:** the `worker` service runs `python -m app.worker` from the backend image (no port). Compose sets `WEBHOOK_INLINE_RECONCILE=false`, so the API only enqueues webhook events and the worker reconciles them.
 
 ---
 
@@ -439,7 +442,7 @@ ReconGrid-AI/
 │   └── Dockerfile          # Frontend container image definition
 ├── docs/                   # Deep dives on architecture, system design, Razorpay setup
 ├── sample_data/            # Sample statement fixtures (HDFC, ICICI, SBI)
-└── docker-compose.yml      # PostgreSQL 15, Redis 7, Backend & Frontend services
+└── docker-compose.yml      # PostgreSQL 15, Redis 7, Backend, webhook Worker & Frontend services
 ```
 
 ---
