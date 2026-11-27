@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
+from app.core.locks import lock_batch
 from app.core.logging import logger
 from app.core.security import resolve_secret
 from app.models.razorpay_settlement import RazorpaySettlement
@@ -231,6 +232,9 @@ class RazorpayClient:
                         skip += len(items)
             except Exception as ex:
                 logger.error("razorpay_fetch_failed_using_cached_or_test", error=str(ex))
+
+        # The network fetch is done; serialize the writes and the reconcile with other writers of the batch.
+        await lock_batch(self.session, batch_id)
 
         # Save to database
         for s_data in settlement_records:

@@ -4,6 +4,7 @@ from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.locks import lock_batch
 from app.core.logging import logger
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
@@ -136,6 +137,10 @@ class IngestionService:
                 detail="No valid bank transaction rows could be parsed from the uploaded file.",
             )
 
+        # Hold the batch lock from the first write until commit, so a webhook or sync on the same batch
+        # cannot commit an older reconciliation snapshot over this one. It is taken before the audit
+        # chain lock because every other writer gets that one later, when it flushes new log rows.
+        await lock_batch(self.session, batch_id)
         await self.recon_repo.lock_batch_before_upload(batch_id)
         inserted_count = 0
         duplicate_count = 0
