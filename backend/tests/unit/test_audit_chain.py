@@ -7,7 +7,7 @@ import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -84,17 +84,20 @@ async def _verify(session: AsyncSession, batch_id: str = BATCH):
 
 
 @pytest.mark.asyncio
-async def test_engine_locks_batch_before_reading_or_updating_ledger():
-    repo = AsyncMock(spec=ReconciliationRepository)
-    repo.get_active_status_map.return_value = {}
-    repo.add_logs_bulk.return_value = []
+async def test_engine_locks_batch_before_reading_or_updating_ledger(db_session: AsyncSession, monkeypatch):
+    repo = ReconciliationRepository(db_session)
+    calls = Mock()
+    for name in ("lock_human_decisions", "get_active_status_map", "supersede_batch_logs", "add_logs_bulk"):
+        spy = AsyncMock(wraps=getattr(repo, name))
+        calls.attach_mock(spy, name)
+        monkeypatch.setattr(repo, name, spy)
 
     await ReconciliationEngine(repo).reconcile_batch([], [], batch_id=BATCH)
 
-    assert repo.mock_calls == [
+    assert calls.mock_calls == [
         call.lock_human_decisions(BATCH),
         call.get_active_status_map(batch_id=BATCH),
-        call.supersede_batch_logs([]),
+        call.supersede_batch_logs([], batch_id=BATCH),
         call.add_logs_bulk([]),
     ]
 
