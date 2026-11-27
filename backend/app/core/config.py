@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     RAZORPAY_WEBHOOK_SECRET: str = ""
     # Urlsafe base64 of 32 random bytes. Secrets stored as "enc:..." are decrypted with it at use time.
     ENCRYPTION_MASTER_KEY: str = ""
+    # HMAC key used to sign Audit Compliance Certificates. Empty means certificates carry a content hash only.
+    AUDIT_SIGNING_KEY: str = ""
 
     # Database: Defaults to SQLite for zero-friction local run/tests, easily points to PostgreSQL
     DATABASE_URL: str = "sqlite+aiosqlite:///./recongrid.db"

@@ -1,19 +1,22 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import Row, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
+from app.models.reconciliation_log import ReconciliationLog, audit_columns, row_matches_seal
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
+
+CHAIN_STREAM_CHUNK = 1000  # rows fetched per round trip when walking a whole batch
 
 
 class ReconciliationRepository:
@@ -79,14 +82,28 @@ class ReconciliationRepository:
     async def batch_approve_suggestions(self, batch_id: str, min_confidence: float) -> int:
         """Approve eligible active suggestions with one atomic conditional UPDATE."""
         suffix = f" [Batch Approved >= {min_confidence * 100:g}% by CA]"
+        conditions = (
+            ReconciliationLog.batch_id == batch_id,
+            ReconciliationLog.match_status == "SUGGESTED",
+            ReconciliationLog.confidence_score >= min_confidence,
+            ReconciliationLog.superseded == False,
+        )
+        # The bulk UPDATE bypasses the ORM, so note which rows still match their seal before it runs.
+        # Only those are re-sealed afterwards; a row edited with plain SQL keeps its old hash and stays flagged.
+        intact_ids: set[str] = set()
+        before = await self.session.stream(
+            select(*audit_columns()).where(*conditions).execution_options(yield_per=CHAIN_STREAM_CHUNK)
+        )
+        try:
+            async for row in before:
+                if row_matches_seal(row):
+                    intact_ids.add(row.id)
+        finally:
+            await before.close()
+
         stmt = (
             update(ReconciliationLog)
-            .where(
-                ReconciliationLog.batch_id == batch_id,
-                ReconciliationLog.match_status == "SUGGESTED",
-                ReconciliationLog.confidence_score >= min_confidence,
-                ReconciliationLog.superseded == False,
-            )
+            .where(*conditions)
             .values(
                 match_status="MATCHED",
                 human_action="APPROVED",
@@ -95,7 +112,37 @@ class ReconciliationRepository:
             .returning(ReconciliationLog.id)
         )
         result = await self.session.execute(stmt)
-        return len(result.scalars().all())
+        approved_ids = list(result.scalars().all())
+        to_seal = [log_id for log_id in approved_ids if log_id in intact_ids]
+        for start in range(0, len(to_seal), 500):
+            touched = await self.session.execute(
+                select(ReconciliationLog)
+                .where(ReconciliationLog.id.in_(to_seal[start : start + 500]))
+                .execution_options(populate_existing=True)
+            )
+            for log in touched.scalars():
+                log.seal()
+            await self.session.flush()
+        return len(approved_ids)
+
+    async def stream_chain_rows(self, batch_id: str) -> AsyncIterator[Row[Any]]:
+        """Audit columns of every log of the batch (superseded ones included) in chain order, read in chunks.
+
+        Reads plain rows straight from the database instead of ORM objects, so a large batch is never held
+        in memory at once and the session's identity map cannot hide an out-of-band edit.
+        """
+        stmt = (
+            select(*audit_columns())
+            .where(ReconciliationLog.batch_id == batch_id)
+            .order_by(ReconciliationLog.created_at, ReconciliationLog.id)
+            .execution_options(yield_per=CHAIN_STREAM_CHUNK)
+        )
+        result = await self.session.stream(stmt)
+        try:
+            async for row in result:
+                yield row
+        finally:
+            await result.close()
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""
