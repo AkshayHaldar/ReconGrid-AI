@@ -27,6 +27,7 @@ from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import AUDITED_FIELDS, ReconciliationLog, compute_entry_hash, compute_link_hash
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 from app.services.diagnostics import DiagnosticResult, DiagnosticsService
 from app.utils.fuzzy import is_fuzzy_match
 from app.utils.money import format_inr, is_amount_matching, to_decimal
@@ -106,6 +107,7 @@ class _SettlementEntry:
 class ReconciliationEngine:
     def __init__(self, recon_repo: ReconciliationRepository):
         self.recon_repo = recon_repo
+        self.settlement_repo = SettlementRepository(recon_repo.session)
 
     async def reconcile_batch(
         self,
@@ -119,6 +121,15 @@ class ReconciliationEngine:
             t_start = time.perf_counter()
             tolerance = settings.RECONCILIATION_TOLERANCE_INR
             fuzzy_threshold = settings.FUZZY_MATCH_CONFIDENCE_THRESHOLD
+            refund_totals = await self.settlement_repo.get_processed_refund_totals(
+                {settlement.settlement_id for settlement in settlements}
+            )
+
+            def evaluate(bank_tx: BankTransaction, settlement: RazorpaySettlement) -> DiagnosticResult:
+                return DiagnosticsService.evaluate_delta(
+                    bank_tx, settlement, tolerance,
+                    persisted_refund_total=refund_totals.get(settlement.settlement_id, Decimal("0.00")),
+                )
 
             # Precompute settlement cache entries
             settlement_entries = [_SettlementEntry(s) for s in settlements]
@@ -191,12 +202,12 @@ class ReconciliationEngine:
                             return c, None
                     # 3. Diagnostic match (Fee, TDS, Refund, Reversal, FX)
                     for c in candidate_list:
-                        diag = DiagnosticsService.evaluate_delta(bank_tx, c, tolerance)
+                        diag = evaluate(bank_tx, c)
                         if diag.match_status == "MATCHED":
                             return c, diag
                     # 4. Default to first candidate
                     first_c = candidate_list[0]
-                    return first_c, DiagnosticsService.evaluate_delta(bank_tx, first_c, tolerance)
+                    return first_c, evaluate(bank_tx, first_c)
 
                 # --- TIER 1: Exact UTR Match ---
                 with tracer.start_as_current_span("recon.tier1_exact_match"):
@@ -217,7 +228,7 @@ class ReconciliationEngine:
                             note = f"Tier 1 exact match: UTR {bank_utr or norm_bank_utr} and amount {format_inr(bank_amount)}."
                         else:
                             tier = "TIER_3"
-                            diag = diag_eval or DiagnosticsService.evaluate_delta(bank_tx, candidate, tolerance)
+                            diag = diag_eval or evaluate(bank_tx, candidate)
                             status = diag.match_status
                             diagnostic_type = diag.diagnostic_type
                             delta = diag.delta_amount
@@ -258,7 +269,7 @@ class ReconciliationEngine:
                                     note = f"Tier 1.5 UTR reference substring match ({bank_utr} ~ {s_utr}) and amount {format_inr(bank_amount)}. Flagged as SUGGESTED for verification."
                                 else:
                                     tier = "TIER_3"
-                                    diag = diag_eval or DiagnosticsService.evaluate_delta(bank_tx, candidate, tolerance)
+                                    diag = diag_eval or evaluate(bank_tx, candidate)
                                     status = diag.match_status
                                     diagnostic_type = diag.diagnostic_type
                                     delta = diag.delta_amount
@@ -324,7 +335,7 @@ class ReconciliationEngine:
                             ):
                                 date_candidates.append((time_diff, entry.s))
                             elif bank_amount <= (s_gross if s_gross > Decimal("0.00") else s_amt) + tolerance:
-                                diag = DiagnosticsService.evaluate_delta(bank_tx, entry.s, tolerance)
+                                diag = evaluate(bank_tx, entry.s)
                                 if diag.match_status == "MATCHED":
                                     date_candidates.append((time_diff, entry.s))
 
