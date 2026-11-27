@@ -201,8 +201,10 @@ async def test_writes_return_423_once_locked_and_leave_records_unchanged(db_sess
     deny = await client.post(f"{API}/records/log-late-deny/deny", json={})
     resolve = await client.post(f"{API}/records/log-late-conf/resolve-conflict", json={"chosen_settlement_id": "NONE"})
     batch_approve = await client.post(f"{API}/aug/batch-approve", json={"min_confidence": 0.5})
+    # Undo of an earlier decision is a write too. The guard runs before the "was it approved" check.
+    revert = await client.post(f"{API}/records/log-ok/revert", json={})
 
-    for resp in (approve, deny, resolve, batch_approve):
+    for resp in (approve, deny, resolve, batch_approve, revert):
         assert resp.status_code == 423
         assert resp.json()["error"]["code"] == "BATCH_LOCKED"
         assert resp.json()["error"]["details"]["locked_by"] == SIGN_OFF["locked_by"]
@@ -298,7 +300,7 @@ async def test_late_webhook_stores_settlement_but_does_not_rematch_locked_batch(
     assert [(l.id, l.superseded) for l in logs] == [("log-ok", False)]
 
 
-def test_alembic_0002_creates_and_drops_reconciliation_batches(tmp_path):
+def test_alembic_0003_creates_and_drops_reconciliation_batches(tmp_path):
     import os
     import sqlite3
     import subprocess
@@ -328,5 +330,5 @@ def test_alembic_0002_creates_and_drops_reconciliation_batches(tmp_path):
         "lock_note",
         "closing_totals",
     ]
-    alembic("downgrade", "0001")
+    alembic("downgrade", "0002")
     assert columns() == []

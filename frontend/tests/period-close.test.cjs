@@ -61,6 +61,7 @@ test("approve, deny, resolve and batch approve map HTTP 423 to a BATCH_LOCKED er
     () => api.denyRecord("r1"),
     () => api.resolveConflict("r1", "setl_1"),
     () => api.batchApprove("default"),
+    () => api.revertRecord("r1"),
   ];
   for (const call of calls) {
     await assert.rejects(call(), (err) => err.code === "BATCH_LOCKED" && /locked/.test(err.message));
