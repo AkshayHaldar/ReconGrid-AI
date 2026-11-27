@@ -2,6 +2,8 @@
 
 import csv
 import io
+import json
+import re
 from dataclasses import asdict
 from datetime import date
 from typing import Literal
@@ -10,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository, StaleDecisionError
@@ -27,6 +30,7 @@ from app.schemas.reconciliation import (
 )
 from app.services.diagnostics import DiagnosticsService
 from app.services.export_service import XLSX_MEDIA_TYPE, build_reconciliation_workbook
+from app.services.reconciliation import build_audit_certificate, verify_batch_audit_chain
 from app.services.tally_export import (
     BANK_LEDGER,
     CLEARING_LEDGER,
@@ -105,6 +109,32 @@ async def get_batch_scorecard(
     repo = ReconciliationRepository(db)
     scorecard = await repo.get_scorecard_metrics(batch_id)
     return ApiResponse.ok(ScorecardResponse(**scorecard))
+
+
+@router.get("/{batch_id}/verify-audit-chain")
+async def verify_audit_chain(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Recomputes the SHA-256 audit chain of the batch and reports the first tampered or missing row, if any."""
+    result = await verify_batch_audit_chain(ReconciliationRepository(db), batch_id)
+    return ApiResponse.ok(asdict(result))
+
+
+@router.get("/{batch_id}/audit-certificate")
+async def export_audit_certificate(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloads a JSON Audit Compliance Certificate for the batch (HMAC-signed when AUDIT_SIGNING_KEY is set)."""
+    result = await verify_batch_audit_chain(ReconciliationRepository(db), batch_id)
+    certificate = build_audit_certificate(batch_id, result, settings.AUDIT_SIGNING_KEY)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", batch_id)
+    return Response(
+        content=json.dumps(certificate, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=recongrid_audit_certificate_{safe_name}.json"},
+    )
 
 
 @router.get("/{batch_id}/records", response_model=ApiResponse[ReconciliationRecordListResponse])

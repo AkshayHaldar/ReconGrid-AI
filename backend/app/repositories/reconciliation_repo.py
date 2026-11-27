@@ -1,20 +1,23 @@
 """Reconciliation repository layer for immutable logs and ledger queries."""
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import Row, and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog
+from app.models.reconciliation_log import ReconciliationLog, audit_columns
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
+
+CHAIN_STREAM_CHUNK = 1000  # rows fetched per round trip when walking a whole batch
 
 
 class StaleDecisionError(Exception):
@@ -85,7 +88,7 @@ class ReconciliationRepository:
     async def lock_human_decisions(self, batch_id: str) -> None:
         if self.session.get_bind().dialect.name == "postgresql":
             await self.session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:batch))"),
-                                       {"batch": f"recon-human-decisions:{batch_id}"})
+                                       {"batch": f"recon-audit:{batch_id}"})
 
     async def append_decisions(
         self, transitions: Sequence[tuple[ReconciliationLog, dict[str, object]]],
@@ -168,6 +171,25 @@ class ReconciliationRepository:
             for row in candidates
         ])
         return len(decisions)
+
+    async def stream_chain_rows(self, batch_id: str) -> AsyncIterator[Row[Any]]:
+        """Audit columns of every log of the batch (superseded ones included) in chain order, read in chunks.
+
+        Reads plain rows straight from the database instead of ORM objects, so a large batch is never held
+        in memory at once and the session's identity map cannot hide an out-of-band edit.
+        """
+        stmt = (
+            select(*audit_columns())
+            .where(ReconciliationLog.batch_id == batch_id)
+            .order_by(ReconciliationLog.created_at, ReconciliationLog.id)
+            .execution_options(yield_per=CHAIN_STREAM_CHUNK)
+        )
+        result = await self.session.stream(stmt)
+        try:
+            async for row in result:
+                yield row
+        finally:
+            await result.close()
 
     async def get_active_status_map(self, batch_id: str) -> dict[str, str]:
         """Lightweight query returning bank_tx_id -> match_status without loading full ORM entity graphs."""
