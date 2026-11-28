@@ -1,24 +1,30 @@
 """Razorpay REST Client with cursor pagination, tenacity backoff, and idempotency."""
 
-from datetime import UTC, datetime
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import (
     AsyncRetrying,
+    retry,
     retry_if_exception,
     stop_after_attempt,
+    wait_exponential,
     wait_exponential_jitter,
 )
 
 from app.core.config import settings
 from app.core.logging import logger
 from app.core.security import resolve_secret
+from app.models.razorpay_settlement import RazorpaySettlement
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
-from app.schemas.razorpay import RazorpaySyncResponse
+from app.schemas.razorpay import RazorpayRefundPayload, RazorpaySyncResponse
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import paise_to_rupees
 
@@ -72,6 +78,19 @@ def _client_error_code(status_code: int) -> str:
     return "RAZORPAY_CLIENT_ERROR"
 
 
+def _is_transient_refund_fetch_error(error: BaseException) -> bool:
+    if isinstance(error, httpx.HTTPStatusError):
+        status = error.response.status_code
+        return status == 429 or 500 <= status < 600
+    return isinstance(error, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
+
+
+def _razorpay_month(timestamp: datetime) -> date:
+    if timestamp.tzinfo is None:  # SQLite returns stored UTC times without an offset.
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return timestamp.astimezone(ZoneInfo("Asia/Kolkata")).date().replace(day=1)
+
+
 class RazorpayClient:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -110,7 +129,34 @@ class RazorpayClient:
                             attempt=attempt.retry_state.attempt_number,
                         )
                     resp.raise_for_status()
-                    return resp.json()
+                    try:
+                        payload = resp.json()
+                    except ValueError as exc:
+                        logger.error(
+                            "razorpay_fetch_invalid_json",
+                            status_code=resp.status_code,
+                            skip=skip,
+                            error=str(exc),
+                        )
+                        raise RazorpayFetchError(
+                            "Invalid JSON response from Razorpay.",
+                            status_code=502,
+                            code="RAZORPAY_INVALID_RESPONSE",
+                        ) from exc
+
+                    items = payload.get("items") if isinstance(payload, dict) else None
+                    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+                        logger.error(
+                            "razorpay_fetch_invalid_payload",
+                            status_code=resp.status_code,
+                            skip=skip,
+                        )
+                        raise RazorpayFetchError(
+                            "Invalid settlements response from Razorpay: missing or malformed 'items' list.",
+                            status_code=502,
+                            code="RAZORPAY_INVALID_RESPONSE",
+                        )
+                    return payload
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             if _is_retryable_razorpay_error(exc):
@@ -153,6 +199,105 @@ class RazorpayClient:
             ) from exc
 
         raise RazorpayFetchError("Unexpected empty retry outcome from Razorpay client.")
+
+    @retry(
+        reraise=True,
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception(_is_transient_refund_fetch_error),
+    )
+    async def _fetch_refunds_page(
+        self, client: httpx.AsyncClient, count: int, skip: int, *, settlement_month: date | None = None,
+    ) -> list[dict[str, Any]]:
+        endpoint = "refunds"
+        params = {"count": count, "skip": skip}
+        if settlement_month is not None:
+            endpoint = "settlements/recon/combined"
+            params.update(year=settlement_month.year, month=settlement_month.month)
+        response = await client.get(
+            f"{self.base_url}/{endpoint}",
+            params=params,
+            auth=(settings.RAZORPAY_KEY_ID, resolve_secret(settings.RAZORPAY_KEY_SECRET)),
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        try:
+            payload = response.json()
+        except ValueError as error:
+            raise RazorpayFetchError("Invalid JSON response from Razorpay") from error
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list) or len(items) > count or any(not isinstance(item, dict) for item in items):
+            raise RazorpayFetchError("Invalid refunds response from Razorpay")
+        return items
+
+    async def fetch_refunds(self, count_limit: int = 100) -> list[dict[str, Any]]:
+        """Read and validate a bounded window of INR refund records before writing any rows."""
+        if not settings.RAZORPAY_KEY_ID or settings.RAZORPAY_KEY_ID.startswith("rzp_test_sample"):
+            return []
+
+        records = []
+        offset = 0
+        async with httpx.AsyncClient() as client:
+            while offset < count_limit:
+                page_size = min(100, count_limit - offset)
+                items = await self._fetch_refunds_page(client, count=page_size, skip=offset)
+                for item in items:
+                    refund = RazorpayRefundPayload.model_validate(item)
+                    if refund.currency == "INR":
+                        records.append(refund.to_record(item))
+                if len(items) < page_size:
+                    break
+                offset += len(items)
+        return records
+
+    async def sync_refunds(
+        self, count_limit: int = 100, *, settlements: Sequence[RazorpaySettlement] | None = None,
+    ) -> int:
+        if not settings.RAZORPAY_KEY_ID or settings.RAZORPAY_KEY_ID.startswith("rzp_test_sample"):
+            return 0
+        refunds = await self.fetch_refunds(count_limit)
+        for refund in refunds:
+            await self.settlement_repo.upsert_refund(refund)
+
+        oldest_unlinked = await self.settlement_repo.oldest_unlinked_processed_refund()
+        if oldest_unlinked is not None:
+            all_settlements = settlements if settlements is not None else await self.settlement_repo.get_all()
+            await self._link_reported_refunds(all_settlements, _razorpay_month(oldest_unlinked))
+        return len(refunds)
+
+    async def _link_reported_refunds(self, settlements: Sequence[RazorpaySettlement], start_month: date) -> None:
+        # Only the settlement report attests which payout absorbed a refund.
+        known_payouts = {
+            item.settlement_id: _razorpay_month(item.settlement_created_at)
+            for item in settlements if item.is_test_mode == settings.IS_TEST_MODE
+        }
+        months = {month for month in known_payouts.values() if month >= start_month}
+        if not months:
+            return
+        links: dict[str, set[str]] = {}
+        async with httpx.AsyncClient() as client:
+            for month in sorted(months):
+                offset = 0
+                while True:
+                    page = await self._fetch_refunds_page(client, 1000, offset, settlement_month=month)
+                    for row in page:
+                        refund_id = row.get("entity_id")
+                        settlement_id = row.get("settlement_id")
+                        if (
+                            row.get("type") == "refund" and row.get("settled") is True
+                            and row.get("currency") == "INR" and isinstance(refund_id, str)
+                            and isinstance(settlement_id, str)
+                        ):
+                            links.setdefault(refund_id, set()).add(settlement_id)
+                    if len(page) < 1000:
+                        break
+                    offset += len(page)
+
+        for refund_id, settlement_ids in links.items():
+            if len(settlement_ids) == 1:
+                settlement_id = next(iter(settlement_ids))
+                if settlement_id in known_payouts:
+                    await self.settlement_repo.link_refund(refund_id, settlement_id)
 
     async def sync_settlements(
         self,
@@ -213,8 +358,11 @@ class RazorpayClient:
             else:
                 updated_count += 1
 
-        # Fetch full list of settlements from DB instead of only using newly fetched data.
         all_settlements = await self.settlement_repo.get_all()
+        try:
+            await self.sync_refunds(count_limit, settlements=all_settlements)
+        except (httpx.HTTPError, RazorpayFetchError, ValidationError) as error:
+            logger.warning("razorpay_refund_sync_failed", error_type=type(error).__name__)
 
         # Trigger reconciliation on active bank batch
         bank_txs = await self.bank_repo.get_all_by_batch(batch_id)

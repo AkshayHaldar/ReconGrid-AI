@@ -2,6 +2,8 @@
 
 import csv
 import io
+import json
+import re
 from dataclasses import asdict
 from datetime import date
 from typing import Literal
@@ -9,6 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
@@ -26,6 +29,7 @@ from app.schemas.reconciliation import (
 )
 from app.services.diagnostics import DiagnosticsService
 from app.services.export_service import XLSX_MEDIA_TYPE, build_reconciliation_workbook
+from app.services.reconciliation import build_audit_certificate, verify_batch_audit_chain
 from app.services.tally_export import (
     BANK_LEDGER,
     CLEARING_LEDGER,
@@ -33,7 +37,7 @@ from app.services.tally_export import (
     INPUT_GST_LEDGER,
     build_tally_xml,
 )
-from app.services.tax_schedule import tax_schedule_csv_rows
+from app.services.tax_schedule import TaxSchedule, tax_schedule_csv_rows
 from app.utils.money import to_decimal
 
 router = APIRouter(prefix="/reconciliation", tags=["Reconciliation Ledger"])
@@ -104,6 +108,32 @@ async def get_batch_scorecard(
     repo = ReconciliationRepository(db)
     scorecard = await repo.get_scorecard_metrics(batch_id)
     return ApiResponse.ok(ScorecardResponse(**scorecard))
+
+
+@router.get("/{batch_id}/verify-audit-chain")
+async def verify_audit_chain(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Recomputes the SHA-256 audit chain of the batch and reports the first tampered or missing row, if any."""
+    result = await verify_batch_audit_chain(ReconciliationRepository(db), batch_id)
+    return ApiResponse.ok(asdict(result))
+
+
+@router.get("/{batch_id}/audit-certificate")
+async def export_audit_certificate(
+    batch_id: str = "default",
+    db: AsyncSession = Depends(get_db),
+):
+    """Downloads a JSON Audit Compliance Certificate for the batch (HMAC-signed when AUDIT_SIGNING_KEY is set)."""
+    result = await verify_batch_audit_chain(ReconciliationRepository(db), batch_id)
+    certificate = build_audit_certificate(batch_id, result, settings.AUDIT_SIGNING_KEY)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", batch_id)
+    return Response(
+        content=json.dumps(certificate, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=recongrid_audit_certificate_{safe_name}.json"},
+    )
 
 
 @router.get("/{batch_id}/records", response_model=ApiResponse[ReconciliationRecordListResponse])
@@ -488,6 +518,15 @@ async def _all_active_logs(repo: ReconciliationRepository, batch_id: str, page_s
         page += 1
 
 
+async def _batch_tax_schedule(db: AsyncSession, batch_id: str, intra_state: bool) -> TaxSchedule:
+    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
+    settlement_ids = {log.rzp_settlement.settlement_id for log in logs if log.rzp_settlement is not None}
+    refund_totals = await SettlementRepository(db).get_processed_refund_totals(settlement_ids)
+    return DiagnosticsService.calculate_batch_tax_schedule(
+        batch_id, logs, intra_state=intra_state, refund_totals=refund_totals,
+    )
+
+
 @router.get("/{batch_id}/tax-schedule")
 async def get_tax_schedule(
     batch_id: str = "default",
@@ -495,8 +534,7 @@ async def get_tax_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """Section 194-O TDS and GST input tax credit totals for the batch, with TDS deviations."""
-    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
-    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    schedule = await _batch_tax_schedule(db, batch_id, intra_state)
     return ApiResponse.ok(asdict(schedule))
 
 
@@ -507,8 +545,7 @@ async def export_tax_schedule(
     db: AsyncSession = Depends(get_db),
 ):
     """CSV of the tax schedule with a CA signature and UDIN attestation block."""
-    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
-    schedule = DiagnosticsService.calculate_batch_tax_schedule(batch_id, logs, intra_state=intra_state)
+    schedule = await _batch_tax_schedule(db, batch_id, intra_state)
     output = io.StringIO()
     csv.writer(output).writerows(tax_schedule_csv_rows(schedule, _csv_text))
     return Response(

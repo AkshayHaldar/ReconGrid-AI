@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
+from tenacity import wait_none
 
 from app.core.config import settings
 from app.main import app
@@ -25,6 +27,71 @@ def _mock_status_response(status_code: int, message: str = "error") -> MagicMock
     req = httpx.Request("GET", "https://api.razorpay.com/v1/settlements")
     resp.raise_for_status.side_effect = httpx.HTTPStatusError(message, request=req, response=resp)
     return resp
+
+
+def refund_payload(number: int) -> dict:
+    return {
+        "id": f"rfnd_{number}",
+        "payment_id": f"pay_{number}",
+        "amount": 12055,
+        "currency": "INR",
+        "status": "processed",
+        "created_at": 1724496000,
+    }
+
+
+async def test_fetch_refunds_limits_each_page_and_converts_paise(monkeypatch):
+    client = RazorpayClient(AsyncMock())
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/refunds"
+        count = int(request.url.params["count"])
+        offset = int(request.url.params["skip"])
+        requests.append((count, offset))
+        return httpx.Response(200, json={"items": [refund_payload(i) for i in range(offset, offset + count)]})
+
+    transport = httpx.MockTransport(respond)
+    http_client = httpx.AsyncClient(transport=transport)
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refunds")
+    with patch("app.services.razorpay_client.httpx.AsyncClient", return_value=http_client):
+        refunds = await client.fetch_refunds(count_limit=102)
+
+    assert requests == [(100, 0), (2, 100)]
+    assert len(refunds) == 102
+    assert refunds[-1]["refund_id"] == "rfnd_101"
+    assert refunds[-1]["amount"] == Decimal("120.55")
+    assert "settlement_id" not in refunds[-1]
+
+
+async def test_fetch_refunds_page_retries_a_throttle_but_not_an_auth_error():
+    client = RazorpayClient(AsyncMock())
+    statuses = iter((429, 401))
+    requests = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(next(statuses))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http_client:
+        fetch = client._fetch_refunds_page.retry_with(wait=wait_none())
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            await fetch(client, http_client, count=20, skip=0)
+
+    assert error.value.response.status_code == 401
+    assert len(requests) == 2
+
+
+async def test_fetch_refunds_rejects_fractional_paise_without_retry(monkeypatch):
+    client = RazorpayClient(AsyncMock())
+    monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refunds")
+    page = AsyncMock(return_value=[{**refund_payload(1), "amount": 120.55}])
+    monkeypatch.setattr(client, "_fetch_refunds_page", page)
+
+    with pytest.raises(ValidationError, match="amount"):
+        await client.fetch_refunds()
+
+    page.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -120,6 +187,7 @@ async def test_fetch_settlements_page_exhausts_retries_on_request_error():
 async def test_sync_settlements_pagination_and_upsert():
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
 
     page1_items = [
         {
@@ -178,6 +246,7 @@ async def test_sync_settlements_pagination_and_upsert():
 async def test_sync_settlements_propagates_fetch_errors_without_swallowing():
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
     client.settlement_repo.upsert_settlement = AsyncMock()
     client.bank_repo.get_all_by_batch = AsyncMock(return_value=[])
     client.settlement_repo.get_all = AsyncMock(return_value=[])
@@ -202,6 +271,7 @@ async def test_sync_settlements_reconciles_existing_db_data_when_api_is_empty():
     """When Razorpay returns 0 new records, existing DB settlements still reconcile."""
     session = AsyncMock()
     client = RazorpayClient(session)
+    client.sync_refunds = AsyncMock(return_value=0)
 
     mock_setl = RazorpaySettlement(
         id="s_hist_1", settlement_id="setl_hist_1", amount=Decimal("10000.00"), settlement_created_at=datetime.now(UTC)
@@ -260,3 +330,74 @@ async def test_razorpay_sync_endpoint_returns_structured_502_when_retries_exhaus
     assert payload["success"] is False
     assert payload["error"]["code"] == "RAZORPAY_FETCH_EXHAUSTED"
     assert "2 attempts" in payload["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_settlements_page_rejects_invalid_json_without_retrying():
+    client = RazorpayClient(AsyncMock())
+    http_client = AsyncMock()
+    bad_resp = MagicMock()
+    bad_resp.status_code = 200
+    bad_resp.raise_for_status = MagicMock()
+    bad_resp.json.side_effect = ValueError("Expecting value")
+    http_client.get.return_value = bad_resp
+
+    with pytest.raises(RazorpayFetchError) as exc_info:
+        await client._fetch_settlements_page(http_client, count=10, skip=0)
+
+    assert not isinstance(exc_info.value, RazorpayFetchExhausted)
+    assert exc_info.value.code == "RAZORPAY_INVALID_RESPONSE"
+    assert exc_info.value.status_code == 502
+    assert http_client.get.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_payload",
+    [
+        {"entity": "collection", "count": 0},
+        {"items": None},
+        {"items": "not-a-list"},
+        {"items": ["invalid-item"]},
+        ["not-a-dict"],
+    ],
+)
+async def test_fetch_settlements_page_rejects_missing_or_malformed_items(bad_payload):
+    client = RazorpayClient(AsyncMock())
+    http_client = AsyncMock()
+    bad_resp = MagicMock()
+    bad_resp.status_code = 200
+    bad_resp.raise_for_status = MagicMock()
+    bad_resp.json.return_value = bad_payload
+    http_client.get.return_value = bad_resp
+
+    with pytest.raises(RazorpayFetchError) as exc_info:
+        await client._fetch_settlements_page(http_client, count=10, skip=0)
+
+    assert not isinstance(exc_info.value, RazorpayFetchExhausted)
+    assert exc_info.value.code == "RAZORPAY_INVALID_RESPONSE"
+    assert exc_info.value.status_code == 502
+    assert http_client.get.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_razorpay_sync_endpoint_returns_structured_502_on_malformed_200_payload(db_session):
+    bad_resp = MagicMock()
+    bad_resp.status_code = 200
+    bad_resp.raise_for_status = MagicMock()
+    bad_resp.json.return_value = {"entity": "collection"}
+    async_get = AsyncMock(return_value=bad_resp)
+
+    with (
+        patch.object(settings, "RAZORPAY_KEY_ID", "rzp_test_livekey"),
+        patch.object(settings, "RAZORPAY_KEY_SECRET", "good_secret"),
+        patch("httpx.AsyncClient.get", new=async_get),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/razorpay/sync?batch_id=b_err", json={"count": 10})
+
+    assert async_get.await_count == 1
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "RAZORPAY_INVALID_RESPONSE"
