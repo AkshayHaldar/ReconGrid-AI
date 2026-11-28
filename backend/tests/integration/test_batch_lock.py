@@ -8,13 +8,17 @@ from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select, text
 
 from app.api.v1 import webhooks
+from app.core.locks import lock_batch
 from app.main import app
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
 from app.models.webhook_event import ProcessedWebhookEvent
+from app.repositories.settlement_repo import SettlementRepository
+from app.schemas.razorpay import RazorpayRefundPayload
 
 CSV = (
     "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
@@ -82,7 +86,7 @@ def snapshots(monkeypatch):
     taken: list[list[str]] = []
     holder_entered, release = asyncio.Event(), asyncio.Event()
 
-    async def fake_reconcile(self, bank_transactions, settlements, batch_id="default"):
+    async def fake_reconcile(self, bank_transactions, settlements, batch_id="default", **kwargs):
         taken.append(sorted(s.settlement_id for s in settlements))
         if len(taken) == 1:
             holder_entered.set()
@@ -138,7 +142,7 @@ async def test_two_uploads_on_one_batch_do_not_interleave(monkeypatch):
     order: list[str] = []
     first_entered, release = asyncio.Event(), asyncio.Event()
 
-    async def fake_reconcile(self, bank_transactions, settlements, batch_id="default"):
+    async def fake_reconcile(self, bank_transactions, settlements, batch_id="default", **kwargs):
         order.append(f"start:{len(bank_transactions)}")
         if len(order) == 1:
             first_entered.set()
@@ -192,3 +196,59 @@ async def test_other_batches_are_not_blocked_on_postgres(snapshots):
     finally:
         release.set()
         await asyncio.wait_for(holder, 10)
+
+
+@pytest.mark.asyncio
+async def test_upload_does_not_hold_the_audit_chain_lock_while_waiting_for_the_batch():
+    """Other writers take the batch lock first and the audit chain lock at flush; upload must match."""
+    if await dialect_name() != "postgresql":
+        pytest.skip("advisory locks are PostgreSQL only")
+    async with webhooks.async_session_factory() as holder:
+        await lock_batch(holder, "default")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            upload = asyncio.create_task(contender_request(client, "bank_upload"))
+            await asyncio.sleep(0.3)
+            assert not upload.done()
+            await holder.execute(text("SET LOCAL lock_timeout = '2s'"))
+            await holder.execute(text("SELECT pg_advisory_xact_lock(hashtext('recon-audit:default'))"))
+            await holder.commit()
+            response = await asyncio.wait_for(upload, 10)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+async def test_refund_webhook_waits_for_every_batch_the_refund_touches():
+    await seed("hdfc")
+    entity = {
+        "id": "rfnd_lock",
+        "payment_id": "pay_lock",
+        "currency": "INR",
+        "amount": 500,
+        "status": "processed",
+        "created_at": 1787200000,
+    }
+    async with webhooks.async_session_factory() as db:
+        log = await db.get(ReconciliationLog, "log-lock")
+        log.rzp_settlement_id = await db.scalar(
+            select(RazorpaySettlement.id).where(RazorpaySettlement.settlement_id == "setl_seed")
+        )
+        repo = SettlementRepository(db)
+        await repo.upsert_refund(RazorpayRefundPayload.model_validate(entity).to_record(entity))
+        await repo.link_refund("rfnd_lock", "setl_seed")
+        db.add(
+            ProcessedWebhookEvent(
+                razorpay_event_id="evt_refund_lock",
+                event_type="refund.processed",
+                processing_status="QUEUED",
+                payload={"payload": {"refund": {"entity": entity}}},
+            )
+        )
+        await db.commit()
+
+    async with webhooks.async_session_factory() as holder:
+        await lock_batch(holder, "hdfc")
+        refund = asyncio.create_task(webhooks.reconcile_webhook_event("evt_refund_lock"))
+        await asyncio.sleep(0.3)
+        assert not refund.done()
+        await holder.commit()
+    assert await asyncio.wait_for(refund, 10) is True

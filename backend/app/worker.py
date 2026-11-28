@@ -1,7 +1,7 @@
 """Outbox worker for Razorpay webhook events. Run it with ``python -m app.worker``.
 
-The webhook route commits every accepted settlement event as a QUEUED ProcessedWebhookEvent before it
-answers, so that table is the outbox. This loop polls it and hands each event to the same
+The webhook route commits every accepted settlement and refund event as a QUEUED ProcessedWebhookEvent
+before it answers, so that table is the outbox. This loop polls it and hands each event to the same
 reconcile_webhook_event the API uses. That function claims the event under the batch lock and checks it
 is still QUEUED, so an event is processed once even when the API and several workers race for it.
 """
