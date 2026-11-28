@@ -186,7 +186,7 @@ class IngestionService:
                 duplicate_count,
                 valid_rows_count,
                 validation_errors,
-                all_batch_txs,
+                uploaded_txs,
             ) = await self._consume_parsed_rows(iter(pdf_rows), batch_id=batch_id)
         else:
             parsed_mappings = _parse_column_mappings(column_mappings)
@@ -220,7 +220,7 @@ class IngestionService:
                         duplicate_count,
                         valid_rows_count,
                         validation_errors,
-                        all_batch_txs,
+                        uploaded_txs,
                     ) = await self._consume_parsed_rows(row_iter, batch_id=batch_id)
                 except CsvRowLimitExceededError:
                     _raise_row_limit_exceeded(max_rows)
@@ -245,14 +245,18 @@ class IngestionService:
                 },
             )
 
+        for tx in await self.bank_repo.get_pending_by_batch(batch_id):
+            uploaded_txs.setdefault(tx.id, tx)
+
         # Fetch available settlements to run deterministic reconciliation
         settlements = await self.settlement_repo.get_all()
 
         # Run reconciliation pipeline
         reconciled_logs = await self.engine.reconcile_batch(
-            bank_transactions=all_batch_txs,
+            bank_transactions=list(uploaded_txs.values()),
             settlements=settlements,
             batch_id=batch_id,
+            incremental=True,
         )
 
         logger.info(
@@ -280,24 +284,30 @@ class IngestionService:
         self,
         row_iter: Iterator[dict[str, Any]],
         batch_id: str,
-    ) -> tuple[int, int, int, int, list[str], list[Any]]:
+    ) -> tuple[int, int, int, int, list[str], dict[Any, Any]]:
         """Stream parsed rows into repository upserts without materializing a full list."""
         parsed_rows_count = 0
         inserted_count = 0
         duplicate_count = 0
         valid_rows_count = 0
         validation_errors: list[str] = []
-        all_batch_txs: list[Any] = []
+        uploaded_txs: dict[Any, Any] = {}
+        batch_locked = False
 
         for row in row_iter:
             parsed_rows_count += 1
             if "validation_error" in row:
                 validation_errors.append(row["validation_error"])
                 continue
+            if not batch_locked:
+                await self.recon_repo.lock_batch_before_upload(batch_id)
+                batch_locked = True
             valid_rows_count += 1
             row["batch_id"] = batch_id
             tx, created = await self.bank_repo.upsert_transaction(row)
-            all_batch_txs.append(tx)
+            # A globally duplicated row belongs only to the batch that first imported it.
+            if tx.batch_id == batch_id:
+                uploaded_txs[tx.id] = tx
             if created:
                 inserted_count += 1
             else:
@@ -309,7 +319,7 @@ class IngestionService:
             duplicate_count,
             valid_rows_count,
             validation_errors,
-            all_batch_txs,
+            uploaded_txs,
         )
 
     # Maintain backward compatibility for any direct call

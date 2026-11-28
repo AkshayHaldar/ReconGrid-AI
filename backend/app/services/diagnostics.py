@@ -7,6 +7,7 @@ Evaluates monetary deltas deterministically against:
 4. Debit Reversals / Chargebacks
 """
 
+from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple
 
@@ -30,9 +31,11 @@ class DiagnosticResult(NamedTuple):
 
 class DiagnosticsService:
     @classmethod
-    def calculate_batch_tax_schedule(cls, batch_id, logs, *, intra_state: bool = True) -> TaxSchedule:
+    def calculate_batch_tax_schedule(
+        cls, batch_id, logs, *, intra_state: bool = True, refund_totals: Mapping[str, Decimal] | None = None
+    ) -> TaxSchedule:
         """Section 194-O TDS and GST input-credit totals across every settlement in `logs`."""
-        return build_tax_schedule(batch_id, logs, intra_state=intra_state)
+        return build_tax_schedule(batch_id, logs, intra_state=intra_state, refund_totals=refund_totals)
 
     @classmethod
     def evaluate_delta(
@@ -40,6 +43,8 @@ class DiagnosticsService:
         bank_tx: BankTransaction,
         rzp_setl: RazorpaySettlement,
         tolerance: Decimal = Decimal("1.00"),
+        *,
+        persisted_refund_total: Decimal = Decimal("0.00"),
     ) -> DiagnosticResult:
         """Deterministically diagnoses why bank credit/debit differs from gross/net settlement."""
         bank_amount = to_decimal(bank_tx.amount)
@@ -48,7 +53,8 @@ class DiagnosticsService:
         fees = to_decimal(rzp_setl.fees)
         tax = to_decimal(rzp_setl.tax)
         raw_payload = rzp_setl.raw_payload or {}
-        refund_total = to_decimal(raw_payload.get("refund_total", Decimal("0.00")))
+        reported_refunds = raw_payload.get("refund_total")
+        refund_total = to_decimal(persisted_refund_total if reported_refunds is None else reported_refunds)
         fx_component = to_decimal(raw_payload.get("fx_fee", Decimal("0.00")))
 
         # If gross amount is unpopulated but net and fees exist, resolve effective gross
