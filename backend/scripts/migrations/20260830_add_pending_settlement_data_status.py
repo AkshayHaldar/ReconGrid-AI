@@ -10,7 +10,6 @@ Description:
   as a valid match_status and 'PENDING_SETTLEMENT' as a valid diagnostic_type.
 """
 
-
 # revision identifiers, used by Alembic.
 revision = "20260830_add_pending_settlement_data"
 down_revision = None

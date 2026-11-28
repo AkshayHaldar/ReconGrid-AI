@@ -84,7 +84,12 @@ class RazorpayClient:
         retry=retry_if_exception(_is_transient_refund_fetch_error),
     )
     async def _fetch_refunds_page(
-        self, client: httpx.AsyncClient, count: int, skip: int, *, settlement_month: date | None = None,
+        self,
+        client: httpx.AsyncClient,
+        count: int,
+        skip: int,
+        *,
+        settlement_month: date | None = None,
     ) -> list[dict[str, Any]]:
         endpoint = "refunds"
         params = {"count": count, "skip": skip}
@@ -128,7 +133,10 @@ class RazorpayClient:
         return records
 
     async def sync_refunds(
-        self, count_limit: int = 100, *, settlements: Sequence[RazorpaySettlement] | None = None,
+        self,
+        count_limit: int = 100,
+        *,
+        settlements: Sequence[RazorpaySettlement] | None = None,
     ) -> int:
         if not settings.RAZORPAY_KEY_ID or settings.RAZORPAY_KEY_ID.startswith("rzp_test_sample"):
             return 0
@@ -146,7 +154,8 @@ class RazorpayClient:
         # Only the settlement report attests which payout absorbed a refund.
         known_payouts = {
             item.settlement_id: _razorpay_month(item.settlement_created_at)
-            for item in settlements if item.is_test_mode == settings.IS_TEST_MODE
+            for item in settlements
+            if item.is_test_mode == settings.IS_TEST_MODE
         }
         months = {month for month in known_payouts.values() if month >= start_month}
         if not months:
@@ -161,8 +170,10 @@ class RazorpayClient:
                         refund_id = row.get("entity_id")
                         settlement_id = row.get("settlement_id")
                         if (
-                            row.get("type") == "refund" and row.get("settled") is True
-                            and row.get("currency") == "INR" and isinstance(refund_id, str)
+                            row.get("type") == "refund"
+                            and row.get("settled") is True
+                            and row.get("currency") == "INR"
+                            and isinstance(refund_id, str)
                             and isinstance(settlement_id, str)
                         ):
                             links.setdefault(refund_id, set()).add(settlement_id)
@@ -207,24 +218,22 @@ class RazorpayClient:
                             gross_inr = amount_inr + fees_inr + tax_inr
 
                             created_ts = item.get("created_at")
-                            dt = (
-                                datetime.fromtimestamp(created_ts, UTC)
-                                if created_ts
-                                else datetime.now(UTC)
-                            )
+                            dt = datetime.fromtimestamp(created_ts, UTC) if created_ts else datetime.now(UTC)
 
-                            settlement_records.append({
-                                "settlement_id": item.get("id"),
-                                "amount": amount_inr,
-                                "gross_amount": gross_inr,
-                                "fees": fees_inr,
-                                "tax": tax_inr,
-                                "utr": item.get("utr"),
-                                "status": item.get("status", "processed"),
-                                "settlement_created_at": dt,
-                                "raw_payload": item,
-                                "is_test_mode": settings.IS_TEST_MODE,
-                            })
+                            settlement_records.append(
+                                {
+                                    "settlement_id": item.get("id"),
+                                    "amount": amount_inr,
+                                    "gross_amount": gross_inr,
+                                    "fees": fees_inr,
+                                    "tax": tax_inr,
+                                    "utr": item.get("utr"),
+                                    "status": item.get("status", "processed"),
+                                    "settlement_created_at": dt,
+                                    "raw_payload": item,
+                                    "is_test_mode": settings.IS_TEST_MODE,
+                                }
+                            )
 
                         if len(items) < page_size or total_fetched >= count_limit:
                             break

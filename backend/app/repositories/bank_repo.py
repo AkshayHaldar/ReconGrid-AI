@@ -46,11 +46,7 @@ class BankRepository:
         return new_tx, True
 
     async def get_all_by_batch(self, batch_id: str = "default") -> Sequence[BankTransaction]:
-        stmt = (
-            select(BankTransaction)
-            .where(BankTransaction.batch_id == batch_id)
-            .order_by(BankTransaction.date.desc())
-        )
+        stmt = select(BankTransaction).where(BankTransaction.batch_id == batch_id).order_by(BankTransaction.date.desc())
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
@@ -69,10 +65,6 @@ class BankRepository:
         return (await self.session.execute(stmt)).scalars().unique().all()
 
     async def get_unreconciled_or_all(self, batch_id: str = "default") -> Sequence[BankTransaction]:
-        stmt = (
-            select(BankTransaction)
-            .where(BankTransaction.batch_id == batch_id)
-            .order_by(BankTransaction.date.asc())
-        )
+        stmt = select(BankTransaction).where(BankTransaction.batch_id == batch_id).order_by(BankTransaction.date.asc())
         result = await self.session.execute(stmt)
         return result.scalars().all()

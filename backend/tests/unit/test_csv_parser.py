@@ -34,6 +34,7 @@ def test_parse_flexible_dates():
 
     # Raises ValueError on completely invalid string
     import pytest
+
     with pytest.raises(ValueError, match="Unable to parse date string"):
         parse_flexible_date("INVALID_DATE_STRING")
 
@@ -142,8 +143,8 @@ def test_parse_utf8_bom_prefixed_csv():
 def test_parse_indian_lakh_crore_comma_amounts():
     csv_lines = [
         "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.",
-        "24/08/2026,CMS002938491820,CMS/002938491820/HDFC,\"1,23,456.78\",0.00",
-        "25/08/2026,CMS002938491821,CMS/002938491821/HDFC,\"12,34,56,789.50\",0.00",
+        '24/08/2026,CMS002938491820,CMS/002938491820/HDFC,"1,23,456.78",0.00',
+        '25/08/2026,CMS002938491821,CMS/002938491821/HDFC,"12,34,56,789.50",0.00',
     ]
     rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
     assert len(rows) == 2
@@ -253,7 +254,7 @@ def test_parse_multiline_quoted_narration():
     """Verify multiline quoted fields with embedded newlines are preserved in description without breaking row count."""
     csv_lines = [
         "Date,Narration,Deposit Amt.,Withdrawal Amt.\n",
-        "24/08/2026,\"Settlement for Order #99102\nClient: ACME Corp Bangalore\",42000.00,0.00\n",
+        '24/08/2026,"Settlement for Order #99102\nClient: ACME Corp Bangalore",42000.00,0.00\n',
         "25/08/2026,Direct Debit Bank Charge,0.00,150.00\n",
     ]
     rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
@@ -303,6 +304,3 @@ def test_parse_preamble_up_to_30_lines():
     assert rows[0]["amount"] == Decimal("75000.00")
     assert rows[0]["direction"] == "CREDIT"
     assert rows[0]["utr"] == "CMS1122334455"
-
-
-

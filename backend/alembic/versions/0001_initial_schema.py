@@ -88,8 +88,18 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("batch_id", sa.String(length=64), nullable=False, server_default="default"),
-        sa.Column("bank_tx_id", sa.String(length=36), sa.ForeignKey("bank_transactions.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("rzp_settlement_id", sa.String(length=36), sa.ForeignKey("razorpay_settlements.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "bank_tx_id",
+            sa.String(length=36),
+            sa.ForeignKey("bank_transactions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column(
+            "rzp_settlement_id",
+            sa.String(length=36),
+            sa.ForeignKey("razorpay_settlements.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("match_status", sa.String(length=32), nullable=False),
         sa.Column("match_tier", sa.String(length=32), nullable=False),
         sa.Column("confidence_score", sa.Float(), nullable=True),
@@ -113,7 +123,12 @@ def upgrade() -> None:
         sa.Column("id", sa.String(length=36), primary_key=True, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("reconciliation_log_id", sa.String(length=36), sa.ForeignKey("reconciliation_logs.id", ondelete="SET NULL"), nullable=True),
+        sa.Column(
+            "reconciliation_log_id",
+            sa.String(length=36),
+            sa.ForeignKey("reconciliation_logs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
         sa.Column("query_text", sa.Text(), nullable=False),
         sa.Column("raw_llm_output", sa.Text(), nullable=False, server_default=""),
         sa.Column("final_response", sa.Text(), nullable=False),
@@ -136,7 +151,9 @@ def upgrade() -> None:
         sa.Column("received_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_processed_webhook_events_id", "processed_webhook_events", ["id"])
-    op.create_index("ix_processed_webhook_events_razorpay_event_id", "processed_webhook_events", ["razorpay_event_id"], unique=True)
+    op.create_index(
+        "ix_processed_webhook_events_razorpay_event_id", "processed_webhook_events", ["razorpay_event_id"], unique=True
+    )
 
 
 def downgrade() -> None:

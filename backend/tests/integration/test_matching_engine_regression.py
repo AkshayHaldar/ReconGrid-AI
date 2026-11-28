@@ -33,52 +33,110 @@ from app.utils.money import calculate_standard_fees
 
 
 @pytest.mark.parametrize("stored_payout", [False, True])
-async def test_sync_links_refund_from_provider_report_and_uses_it_in_diagnostics(db_session, monkeypatch, stored_payout):
+async def test_sync_links_refund_from_provider_report_and_uses_it_in_diagnostics(
+    db_session, monkeypatch, stored_payout
+):
     settled_at = datetime(2026, 10, 25, 10, tzinfo=UTC)
     fees, tax, net = calculate_standard_fees(Decimal("50000.00"))
     refund = Decimal("3820.00")
-    db_session.add(BankTransaction(
-        date=settled_at, amount=net - refund, direction="CREDIT", utr="REF123456789012",
-        description="Razorpay settlement credit", row_hash="refund-report", batch_id="refund_report",
-    ))
+    db_session.add(
+        BankTransaction(
+            date=settled_at,
+            amount=net - refund,
+            direction="CREDIT",
+            utr="REF123456789012",
+            description="Razorpay settlement credit",
+            row_hash="refund-report",
+            batch_id="refund_report",
+        )
+    )
     if stored_payout:
-        db_session.add(RazorpaySettlement(
-            settlement_id="setl_refund_report", amount=net, gross_amount=net + fees + tax,
-            fees=fees, tax=tax, utr="REF123456789012", settlement_created_at=settled_at, is_test_mode=True,
-        ))
+        db_session.add(
+            RazorpaySettlement(
+                settlement_id="setl_refund_report",
+                amount=net,
+                gross_amount=net + fees + tax,
+                fees=fees,
+                tax=tax,
+                utr="REF123456789012",
+                settlement_created_at=settled_at,
+                is_test_mode=True,
+            )
+        )
     await db_session.commit()
 
     def razorpay(request: Request) -> Response:
         if request.url.path == "/v1/settlements":
             if stored_payout:
-                return Response(200, json={"items": [{
-                    "id": "setl_newer", "created_at": int((settled_at + timedelta(days=20)).timestamp()),
-                    "amount": 30000,
-                }]})
-            return Response(200, json={"items": [{
-                "id": "setl_refund_report", "created_at": int(settled_at.timestamp()),
-                "amount": int(net * 100), "fees": int(fees * 100), "tax": int(tax * 100),
-                "utr": "REF123456789012",
-            }]})
+                return Response(
+                    200,
+                    json={
+                        "items": [
+                            {
+                                "id": "setl_newer",
+                                "created_at": int((settled_at + timedelta(days=20)).timestamp()),
+                                "amount": 30000,
+                            }
+                        ]
+                    },
+                )
+            return Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "setl_refund_report",
+                            "created_at": int(settled_at.timestamp()),
+                            "amount": int(net * 100),
+                            "fees": int(fees * 100),
+                            "tax": int(tax * 100),
+                            "utr": "REF123456789012",
+                        }
+                    ]
+                },
+            )
         if request.url.path == "/v1/refunds":
-            return Response(200, json={"items": [{
-                "id": "rfnd_report", "payment_id": "pay_report", "amount": int(refund * 100),
-                "currency": "INR", "created_at": int(settled_at.timestamp()), "status": "processed",
-            }]})
+            return Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "id": "rfnd_report",
+                            "payment_id": "pay_report",
+                            "amount": int(refund * 100),
+                            "currency": "INR",
+                            "created_at": int(settled_at.timestamp()),
+                            "status": "processed",
+                        }
+                    ]
+                },
+            )
         assert request.url.path == "/v1/settlements/recon/combined"
         assert request.url.params["year"] == "2026"
         if stored_payout and request.url.params["month"] == "11":
             return Response(200, json={"items": []})
         assert request.url.params["month"] == "10"
-        return Response(200, json={"items": [{
-            "entity_id": "rfnd_report", "type": "refund", "settled": True,
-            "currency": "INR", "settlement_id": "setl_refund_report",
-        }]})
+        return Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "entity_id": "rfnd_report",
+                        "type": "refund",
+                        "settled": True,
+                        "currency": "INR",
+                        "settlement_id": "setl_refund_report",
+                    }
+                ]
+            },
+        )
 
     monkeypatch.setattr(settings, "RAZORPAY_KEY_ID", "rzp_mock_refund_report")
     transport = MockTransport(razorpay)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as api:
-        with patch("app.services.razorpay_client.httpx.AsyncClient", side_effect=lambda: AsyncClient(transport=transport)):
+        with patch(
+            "app.services.razorpay_client.httpx.AsyncClient", side_effect=lambda: AsyncClient(transport=transport)
+        ):
             response = await api.post("/api/v1/razorpay/sync?batch_id=refund_report", json={"count": 1})
         assert response.status_code == 200
         assert response.json()["data"]["reconciliation_triggered"] is True
@@ -87,10 +145,23 @@ async def test_sync_links_refund_from_provider_report_and_uses_it_in_diagnostics
         assert schedule.status_code == 200
         assert Decimal(str(schedule.json()["data"]["actual_tds"])) == Decimal("0.00")
 
-        body = json.dumps({"event": "refund.processed", "payload": {"refund": {"entity": {
-            "id": "rfnd_report", "payment_id": "pay_report", "amount": int(refund * 100),
-            "currency": "INR", "created_at": int(settled_at.timestamp()), "status": "processed",
-        }}}}).encode()
+        body = json.dumps(
+            {
+                "event": "refund.processed",
+                "payload": {
+                    "refund": {
+                        "entity": {
+                            "id": "rfnd_report",
+                            "payment_id": "pay_report",
+                            "amount": int(refund * 100),
+                            "currency": "INR",
+                            "created_at": int(settled_at.timestamp()),
+                            "status": "processed",
+                        }
+                    }
+                },
+            }
+        ).encode()
         signature = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
         webhook = await api.post("/api/v1/webhooks/razorpay", content=body, headers={"X-Razorpay-Signature": signature})
         assert webhook.json()["data"]["status"] == "queued"

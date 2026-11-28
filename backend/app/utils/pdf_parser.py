@@ -73,7 +73,9 @@ class BankPdfParser:
 
     # Common bank column regex patterns
     DATE_HEADER = re.compile(r"(date|txn\s*date|trans\s*date|value\s*date)", re.IGNORECASE)
-    NARRATION_HEADER = re.compile(r"(narration|description|particulars|remarks|details|transaction\s*details)", re.IGNORECASE)
+    NARRATION_HEADER = re.compile(
+        r"(narration|description|particulars|remarks|details|transaction\s*details)", re.IGNORECASE
+    )
     REF_HEADER = re.compile(r"(chq|ref|cheque|reference|utr|rrn|txn\s*id)", re.IGNORECASE)
     DEBIT_HEADER = re.compile(r"(debit|dr|withdrawal|dr\s*amount|withdrawal\s*amt)", re.IGNORECASE)
     CREDIT_HEADER = re.compile(r"(credit|cr|deposit|cr\s*amount|deposit\s*amt)", re.IGNORECASE)
@@ -256,23 +258,25 @@ class BankPdfParser:
 
                 row_hash = compute_row_hash(parsed_date, amount, direction, utr, description)
 
-                results.append({
-                    "row_index": len(results) + 1,
-                    "row_hash": row_hash,
-                    "date": parsed_date,
-                    "amount": amount,
-                    "direction": direction,
-                    "utr": utr if utr else None,
-                    "description": description,
-                    "raw_csv_row": {
-                        "date": raw_date,
+                results.append(
+                    {
+                        "row_index": len(results) + 1,
+                        "row_hash": row_hash,
+                        "date": parsed_date,
+                        "amount": amount,
+                        "direction": direction,
+                        "utr": utr if utr else None,
                         "description": description,
-                        "ref": raw_ref,
-                        "withdrawal": raw_wdr,
-                        "deposit": raw_dep,
-                        "page": page_idx,
-                    },
-                })
+                        "raw_csv_row": {
+                            "date": raw_date,
+                            "description": description,
+                            "ref": raw_ref,
+                            "withdrawal": raw_wdr,
+                            "deposit": raw_dep,
+                            "page": page_idx,
+                        },
+                    }
+                )
 
         return results
 
@@ -364,19 +368,21 @@ class BankPdfParser:
             utr = extract_utr_from_text(description)
             row_hash = compute_row_hash(parsed_date, amount_val, direction, utr, description)
 
-            results.append({
-                "row_index": len(results) + 1,
-                "row_hash": row_hash,
-                "date": parsed_date,
-                "amount": amount_val,
-                "direction": direction,
-                "utr": utr if utr else None,
-                "description": description,
-                "raw_csv_row": {
-                    "raw_line": line_str,
-                    "page": page_idx,
-                },
-            })
+            results.append(
+                {
+                    "row_index": len(results) + 1,
+                    "row_hash": row_hash,
+                    "date": parsed_date,
+                    "amount": amount_val,
+                    "direction": direction,
+                    "utr": utr if utr else None,
+                    "description": description,
+                    "raw_csv_row": {
+                        "raw_line": line_str,
+                        "page": page_idx,
+                    },
+                }
+            )
 
         return results
 
@@ -433,6 +439,7 @@ class BankPdfParser:
                             clean_json = re.search(r"\[\s*\{.*\}\s*\]", text_out, re.DOTALL)
                             if clean_json:
                                 import json
+
                                 tx_list = json.loads(clean_json.group(0))
                                 for row in tx_list:
                                     dt = parse_flexible_date(str(row.get("date", "")))
@@ -441,16 +448,18 @@ class BankPdfParser:
                                     desc = str(row.get("description", ""))
                                     utr = row.get("utr") or extract_utr_from_text(desc)
                                     h = compute_row_hash(dt, amt, direct, utr, desc)
-                                    results.append({
-                                        "row_index": len(results) + 1,
-                                        "row_hash": h,
-                                        "date": dt,
-                                        "amount": amt,
-                                        "direction": direct,
-                                        "utr": utr,
-                                        "description": desc,
-                                        "raw_csv_row": row,
-                                    })
+                                    results.append(
+                                        {
+                                            "row_index": len(results) + 1,
+                                            "row_hash": h,
+                                            "date": dt,
+                                            "amount": amt,
+                                            "direction": direct,
+                                            "utr": utr,
+                                            "description": desc,
+                                            "raw_csv_row": row,
+                                        }
+                                    )
             except Exception as ocr_err:
                 logger.warning("ocr_page_failed", page=page_idx, error=str(ocr_err))
                 continue

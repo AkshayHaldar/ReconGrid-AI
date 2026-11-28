@@ -40,18 +40,36 @@ SUMMARY = {
 def make_log(diagnostic="FEE_DEDUCTION", utr="ICIC009283"):
     now = datetime.now(UTC)
     bank = BankTransaction(
-        id="b1", amount=Decimal("49100.00"), date=now, direction="CREDIT",
-        utr=utr, description="CMS/PAYOUT", row_hash="h1",
+        id="b1",
+        amount=Decimal("49100.00"),
+        date=now,
+        direction="CREDIT",
+        utr=utr,
+        description="CMS/PAYOUT",
+        row_hash="h1",
     )
     rzp = RazorpaySettlement(
-        id="r1", settlement_id="setl_abc123", amount=Decimal("49100.00"),
-        gross_amount=Decimal("50000.00"), fees=Decimal("762.71"), tax=Decimal("137.29"),
-        utr=utr, settlement_created_at=now,
+        id="r1",
+        settlement_id="setl_abc123",
+        amount=Decimal("49100.00"),
+        gross_amount=Decimal("50000.00"),
+        fees=Decimal("762.71"),
+        tax=Decimal("137.29"),
+        utr=utr,
+        settlement_created_at=now,
     )
     return ReconciliationLog(
-        id="l1", bank_tx_id="b1", rzp_settlement_id="r1", match_status="MATCHED",
-        match_tier="TIER_3", delta_amount=Decimal("0.00"), diagnostic_type=diagnostic,
-        diagnostic_note="note", bank_transaction=bank, rzp_settlement=rzp, matched_at=now,
+        id="l1",
+        bank_tx_id="b1",
+        rzp_settlement_id="r1",
+        match_status="MATCHED",
+        match_tier="TIER_3",
+        delta_amount=Decimal("0.00"),
+        diagnostic_type=diagnostic,
+        diagnostic_note="note",
+        bank_transaction=bank,
+        rzp_settlement=rzp,
+        matched_at=now,
     )
 
 

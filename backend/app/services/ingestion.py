@@ -40,29 +40,23 @@ class IngestionService:
 
         # Validate file type with generous browser & OS MIME type fallback
         content_type = (file.content_type or "").lower().strip()
-        valid_csv = (
-            ext in {"csv", "txt"}
-            or content_type in {
-                "text/csv",
-                "application/vnd.ms-excel",
-                "text/plain",
-                "application/octet-stream",
-                "text/comma-separated-values",
-                "application/csv",
-                "text/x-csv",
-            }
-        )
-        valid_pdf = (
-            ext == "pdf"
-            or content_type in {
-                "application/pdf",
-                "application/x-pdf",
-                "application/acrobat",
-                "applications/vnd.pdf",
-                "text/pdf",
-                "text/x-pdf",
-            }
-        )
+        valid_csv = ext in {"csv", "txt"} or content_type in {
+            "text/csv",
+            "application/vnd.ms-excel",
+            "text/plain",
+            "application/octet-stream",
+            "text/comma-separated-values",
+            "application/csv",
+            "text/x-csv",
+        }
+        valid_pdf = ext == "pdf" or content_type in {
+            "application/pdf",
+            "application/x-pdf",
+            "application/acrobat",
+            "applications/vnd.pdf",
+            "text/pdf",
+            "text/x-pdf",
+        }
 
         if not (valid_csv or valid_pdf):
             raise HTTPException(
@@ -119,13 +113,22 @@ class IngestionService:
                 if isinstance(column_mappings, str):
                     try:
                         import json
+
                         loaded = json.loads(column_mappings)
                         if isinstance(loaded, dict):
-                            parsed_mappings = {str(k).strip(): str(v).strip() for k, v in loaded.items() if v is not None and str(v).strip() != ""}
+                            parsed_mappings = {
+                                str(k).strip(): str(v).strip()
+                                for k, v in loaded.items()
+                                if v is not None and str(v).strip() != ""
+                            }
                     except Exception as ex:
                         logger.warning("invalid_column_mappings_json", error=str(ex))
                 elif isinstance(column_mappings, dict):
-                    parsed_mappings = {str(k).strip(): str(v).strip() for k, v in column_mappings.items() if v is not None and str(v).strip() != ""}
+                    parsed_mappings = {
+                        str(k).strip(): str(v).strip()
+                        for k, v in column_mappings.items()
+                        if v is not None and str(v).strip() != ""
+                    }
 
             lines = text_data.splitlines(keepends=True)
             parsed_rows = list(BankCsvParser.parse_csv_stream(iter(lines), custom_mappings=parsed_mappings))

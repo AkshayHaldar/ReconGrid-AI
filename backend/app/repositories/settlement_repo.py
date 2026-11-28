@@ -55,7 +55,8 @@ class SettlementRepository:
     async def oldest_unlinked_processed_refund(self) -> datetime | None:
         return await self.session.scalar(
             select(func.min(RazorpayRefund.processed_at)).where(
-                RazorpayRefund.settlement_id.is_(None), RazorpayRefund.status == "processed",
+                RazorpayRefund.settlement_id.is_(None),
+                RazorpayRefund.status == "processed",
             )
         )
 
@@ -65,7 +66,7 @@ class SettlementRepository:
         for start in range(0, len(ids), 500):
             rows = await self.session.execute(
                 select(RazorpayRefund.settlement_id, func.sum(RazorpayRefund.amount))
-                .where(RazorpayRefund.settlement_id.in_(ids[start:start + 500]), RazorpayRefund.status == "processed")
+                .where(RazorpayRefund.settlement_id.in_(ids[start : start + 500]), RazorpayRefund.status == "processed")
                 .group_by(RazorpayRefund.settlement_id)
             )
             totals.update((settlement_id, total) for settlement_id, total in rows if settlement_id is not None)

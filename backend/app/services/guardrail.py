@@ -95,7 +95,11 @@ def extract_record_numbers(log: ReconciliationLog) -> set[str]:
     # Explicit GST rate addition ONLY for relevant diagnostic types
     diag_type = getattr(log, "diagnostic_type", None)
     if diag_type in ("FEE_DEDUCTION", "TDS_194O_DEDUCTION"):
-        gst_pct = settings.GST_RATE * Decimal(100) if isinstance(settings.GST_RATE, Decimal) else Decimal(str(settings.GST_RATE)) * Decimal(100)
+        gst_pct = (
+            settings.GST_RATE * Decimal(100)
+            if isinstance(settings.GST_RATE, Decimal)
+            else Decimal(str(settings.GST_RATE)) * Decimal(100)
+        )
         add_num(gst_pct)
 
     return allowed

@@ -105,7 +105,9 @@ async def test_fetch_settlements_page_error_status():
     # 401 Unauthorized response
     err_resp = MagicMock()
     err_resp.status_code = 401
-    err_resp.raise_for_status.side_effect = httpx.HTTPStatusError("401 Unauthorized", request=MagicMock(), response=err_resp)
+    err_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "401 Unauthorized", request=MagicMock(), response=err_resp
+    )
 
     http_client.get.return_value = err_resp
 
@@ -121,22 +123,54 @@ async def test_sync_settlements_pagination_and_upsert():
 
     # Setup 2 pages of mocked responses
     page1_items = [
-        {"id": "setl_1", "amount": 4910000, "fees": 76271, "tax": 13729, "utr": "CMS1", "created_at": 1724496000, "status": "processed"},
-        {"id": "setl_2", "amount": 9820000, "fees": 152542, "tax": 27458, "utr": "CMS2", "created_at": 1724496000, "status": "processed"},
+        {
+            "id": "setl_1",
+            "amount": 4910000,
+            "fees": 76271,
+            "tax": 13729,
+            "utr": "CMS1",
+            "created_at": 1724496000,
+            "status": "processed",
+        },
+        {
+            "id": "setl_2",
+            "amount": 9820000,
+            "fees": 152542,
+            "tax": 27458,
+            "utr": "CMS2",
+            "created_at": 1724496000,
+            "status": "processed",
+        },
     ]
     page2_items = [
-        {"id": "setl_3", "amount": 10000000, "fees": 0, "tax": 0, "utr": "CMS3", "created_at": None, "status": "processed"},
+        {
+            "id": "setl_3",
+            "amount": 10000000,
+            "fees": 0,
+            "tax": 0,
+            "utr": "CMS3",
+            "created_at": None,
+            "status": "processed",
+        },
     ]
 
-    mock_setl1 = RazorpaySettlement(id="s1", settlement_id="setl_1", amount=Decimal("49100.00"), settlement_created_at=datetime.now(UTC))
-    mock_setl2 = RazorpaySettlement(id="s2", settlement_id="setl_2", amount=Decimal("98200.00"), settlement_created_at=datetime.now(UTC))
-    mock_setl3 = RazorpaySettlement(id="s3", settlement_id="setl_3", amount=Decimal("100000.00"), settlement_created_at=datetime.now(UTC))
+    mock_setl1 = RazorpaySettlement(
+        id="s1", settlement_id="setl_1", amount=Decimal("49100.00"), settlement_created_at=datetime.now(UTC)
+    )
+    mock_setl2 = RazorpaySettlement(
+        id="s2", settlement_id="setl_2", amount=Decimal("98200.00"), settlement_created_at=datetime.now(UTC)
+    )
+    mock_setl3 = RazorpaySettlement(
+        id="s3", settlement_id="setl_3", amount=Decimal("100000.00"), settlement_created_at=datetime.now(UTC)
+    )
 
-    client.settlement_repo.upsert_settlement = AsyncMock(side_effect=[
-        (mock_setl1, True),   # newly inserted
-        (mock_setl2, False),  # updated
-        (mock_setl3, True),   # newly inserted
-    ])
+    client.settlement_repo.upsert_settlement = AsyncMock(
+        side_effect=[
+            (mock_setl1, True),  # newly inserted
+            (mock_setl2, False),  # updated
+            (mock_setl3, True),  # newly inserted
+        ]
+    )
 
     # Mock the DB get_all() to simulate returning the full list of historical settlements
     client.settlement_repo.get_all = AsyncMock(return_value=[mock_setl1, mock_setl2, mock_setl3])
@@ -149,13 +183,35 @@ async def test_sync_settlements_pagination_and_upsert():
         # Note: in sync_settlements, page_size = min(count_limit, 100). If count_limit=3, page_size is 3.
         # So page 1 must have 3 items for it not to break on len(items) < page_size.
         page1_items = [
-            {"id": "setl_1", "amount": 4910000, "fees": 76271, "tax": 13729, "utr": "CMS1", "created_at": 1724496000, "status": "processed"},
-            {"id": "setl_2", "amount": 9820000, "fees": 152542, "tax": 27458, "utr": "CMS2", "created_at": 1724496000, "status": "processed"},
+            {
+                "id": "setl_1",
+                "amount": 4910000,
+                "fees": 76271,
+                "tax": 13729,
+                "utr": "CMS1",
+                "created_at": 1724496000,
+                "status": "processed",
+            },
+            {
+                "id": "setl_2",
+                "amount": 9820000,
+                "fees": 152542,
+                "tax": 27458,
+                "utr": "CMS2",
+                "created_at": 1724496000,
+                "status": "processed",
+            },
         ]
-        with patch.object(client, "_fetch_settlements_page", AsyncMock(side_effect=[
-            {"items": page1_items},
-            {"items": []},
-        ])):
+        with patch.object(
+            client,
+            "_fetch_settlements_page",
+            AsyncMock(
+                side_effect=[
+                    {"items": page1_items},
+                    {"items": []},
+                ]
+            ),
+        ):
             res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
             assert res.fetched_count == 2
             assert res.newly_inserted == 1
@@ -178,6 +234,7 @@ async def test_sync_settlements_fetch_exception_handled():
             res = await client.sync_settlements(count_limit=10, batch_id="batch_test")
             assert res.fetched_count == 0
             assert res.reconciliation_triggered is False
+
 
 @pytest.mark.asyncio
 async def test_sync_settlements_reconciles_existing_db_data_when_api_is_empty():

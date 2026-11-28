@@ -62,12 +62,14 @@ async def test_ingestion_service_custom_column_mappings_json(db_session: AsyncSe
         headers={"content-type": "text/csv"},
     )
 
-    mappings_json = json.dumps({
-        "date": "Value Date",
-        "narration": "Particulars",
-        "ref": "Instrument Id",
-        "amount": "Deposit",
-    })
+    mappings_json = json.dumps(
+        {
+            "date": "Value Date",
+            "narration": "Particulars",
+            "ref": "Instrument Id",
+            "amount": "Deposit",
+        }
+    )
 
     resp = await service.ingest_statement(file, batch_id="test_custom_batch", column_mappings=mappings_json)
     assert resp.total_rows_parsed == 1

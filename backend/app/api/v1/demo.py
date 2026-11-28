@@ -278,18 +278,20 @@ async def seed_demo_dataset(
     for i in range(15, count + 1):
         amt = Decimal(f"{(i * 3750) % 85000 + 10000}.00")
         fees, tax, net_amt = calculate_standard_fees(amt)
-        settlements_data.append({
-            "settlement_id": f"setl_Kjs9283jkd{i:03d}",
-            "amount": net_amt,
-            "gross_amount": amt,
-            "fees": fees,
-            "tax": tax,
-            "utr": f"CMS0029384918{i:02d}",
-            "status": "processed",
-            "settlement_created_at": now - timedelta(days=(i % 15) + 1),
-            "raw_payload": {"description": f"Standard automated settlement batch {i}"},
-            "is_test_mode": True,
-        })
+        settlements_data.append(
+            {
+                "settlement_id": f"setl_Kjs9283jkd{i:03d}",
+                "amount": net_amt,
+                "gross_amount": amt,
+                "fees": fees,
+                "tax": tax,
+                "utr": f"CMS0029384918{i:02d}",
+                "status": "processed",
+                "settlement_created_at": now - timedelta(days=(i % 15) + 1),
+                "raw_payload": {"description": f"Standard automated settlement batch {i}"},
+                "is_test_mode": True,
+            }
+        )
 
     saved_settlements = []
     for s in settlements_data:
@@ -443,14 +445,16 @@ async def seed_demo_dataset(
     # Additional standard bank transactions matching the extra settlements
     for i in range(15, count + 1):
         target_s = saved_settlements[i - 1]
-        bank_txs_data.append({
-            "date": target_s.settlement_created_at,
-            "amount": to_decimal(target_s.amount),
-            "direction": "CREDIT",
-            "utr": target_s.utr,
-            "description": f"CMS/{target_s.utr}/HDFC/RAZORPAY PAYOUT {i}",
-            "row_hash": f"hash_demo_{i:03d}",
-        })
+        bank_txs_data.append(
+            {
+                "date": target_s.settlement_created_at,
+                "amount": to_decimal(target_s.amount),
+                "direction": "CREDIT",
+                "utr": target_s.utr,
+                "description": f"CMS/{target_s.utr}/HDFC/RAZORPAY PAYOUT {i}",
+                "row_hash": f"hash_demo_{i:03d}",
+            }
+        )
 
     saved_bank_txs = []
     for b in bank_txs_data:
@@ -475,13 +479,15 @@ async def seed_demo_dataset(
 
     summary = await recon_repo.get_summary_metrics(batch_id)
 
-    return ApiResponse.ok({
-        "status": "seeded",
-        "total_settlements": len(saved_settlements),
-        "total_bank_transactions": len(saved_bank_txs),
-        "reconciled_logs": len(reconciled_logs),
-        "summary": summary,
-    })
+    return ApiResponse.ok(
+        {
+            "status": "seeded",
+            "total_settlements": len(saved_settlements),
+            "total_bank_transactions": len(saved_bank_txs),
+            "reconciled_logs": len(reconciled_logs),
+            "summary": summary,
+        }
+    )
 
 
 @router.get("/sample-statement")
@@ -494,27 +500,131 @@ async def download_sample_csv(
     now = datetime.now(UTC)
 
     if bank.upper() == "ICICI":
-        writer.writerow(["Transaction Date", "Transaction Reference Number", "Transaction Remarks", "Deposit Amount (INR )", "Withdrawal Amount (INR )"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/RAZORPAY", "97640.00", "0.00"])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "48820.00", "0.00"])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/REFUND BATCH", "68230.00", "0.00"])
-        writer.writerow([(now - timedelta(days=4)).strftime("%d/%m/%Y"), "CMS002938491808", "CMS/002938491808/CHARGEBACK", "0.00", "15000.00"])
-        writer.writerow([(now - timedelta(days=5)).strftime("%d/%m/%Y"), "", "RTGS RAZORPAY SOFTWARE PRIVATE LIMITED", "12450.00", "0.00"])
+        writer.writerow(
+            [
+                "Transaction Date",
+                "Transaction Reference Number",
+                "Transaction Remarks",
+                "Deposit Amount (INR )",
+                "Withdrawal Amount (INR )",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=1)).strftime("%d/%m/%Y"),
+                "CMS002938491801",
+                "CMS/002938491801/RAZORPAY",
+                "97640.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=2)).strftime("%d/%m/%Y"),
+                "CMS002938491805",
+                "CMS/002938491805/RAZORPAY ORDER 4521",
+                "48820.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=3)).strftime("%d/%m/%Y"),
+                "CMS002938491806",
+                "CMS/002938491806/REFUND BATCH",
+                "68230.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=4)).strftime("%d/%m/%Y"),
+                "CMS002938491808",
+                "CMS/002938491808/CHARGEBACK",
+                "0.00",
+                "15000.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=5)).strftime("%d/%m/%Y"),
+                "",
+                "RTGS RAZORPAY SOFTWARE PRIVATE LIMITED",
+                "12450.00",
+                "0.00",
+            ]
+        )
     elif bank.upper() == "SBI":
         writer.writerow(["Txn Date", "Ref No./Cheque No.", "Description", "Credit", "Debit"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d-%m-%Y"), "CMS002938491801", "RAZORPAY PAYOUT 901", "97640.00", ""])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d-%m-%Y"), "CMS002938491805", "RAZORPAY ORDER 4521", "48820.00", ""])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d-%m-%Y"), "CMS002938491806", "RAZORPAY SETTLEMENT", "68230.00", ""])
+        writer.writerow(
+            [(now - timedelta(days=1)).strftime("%d-%m-%Y"), "CMS002938491801", "RAZORPAY PAYOUT 901", "97640.00", ""]
+        )
+        writer.writerow(
+            [(now - timedelta(days=2)).strftime("%d-%m-%Y"), "CMS002938491805", "RAZORPAY ORDER 4521", "48820.00", ""]
+        )
+        writer.writerow(
+            [(now - timedelta(days=3)).strftime("%d-%m-%Y"), "CMS002938491806", "RAZORPAY SETTLEMENT", "68230.00", ""]
+        )
         writer.writerow([(now - timedelta(days=4)).strftime("%d-%m-%Y"), "", "DIRECT TRANSFER NO UTR", "78900.00", ""])
     else:  # HDFC format
         writer.writerow(["Date", "Chq/Ref No.", "Narration", "Deposit Amt.", "Withdrawal Amt."])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491801", "CMS/002938491801/HDFC/RAZORPAY", "97640.00", "0.00"])
-        writer.writerow([(now - timedelta(days=1)).strftime("%d/%m/%Y"), "CMS002938491802", "CMS/002938491802/HDFC/RAZORPAY", "44719.12", "0.00"])
-        writer.writerow([(now - timedelta(days=2)).strftime("%d/%m/%Y"), "CMS002938491805", "CMS/002938491805/RAZORPAY ORDER 4521", "48820.00", "0.00"])
-        writer.writerow([(now - timedelta(days=3)).strftime("%d/%m/%Y"), "CMS002938491806", "CMS/002938491806/RAZORPAY REFUND", "68230.00", "0.00"])
-        writer.writerow([(now - timedelta(days=4)).strftime("%d/%m/%Y"), "CMS002938491808", "CMS/002938491808/REVERSAL", "0.00", "15000.00"])
-        writer.writerow([(now - timedelta(days=5)).strftime("%d/%m/%Y"), "", "RTGS RAZORPAY SOFTWARE BANGLORE", "12450.00", "0.00"])
-        writer.writerow([(now - timedelta(days=6)).strftime("%d/%m/%Y"), "ICIC009283921099", "UNKNOWN DIRECT CREDIT", "18450.00", "0.00"])
+        writer.writerow(
+            [
+                (now - timedelta(days=1)).strftime("%d/%m/%Y"),
+                "CMS002938491801",
+                "CMS/002938491801/HDFC/RAZORPAY",
+                "97640.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=1)).strftime("%d/%m/%Y"),
+                "CMS002938491802",
+                "CMS/002938491802/HDFC/RAZORPAY",
+                "44719.12",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=2)).strftime("%d/%m/%Y"),
+                "CMS002938491805",
+                "CMS/002938491805/RAZORPAY ORDER 4521",
+                "48820.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=3)).strftime("%d/%m/%Y"),
+                "CMS002938491806",
+                "CMS/002938491806/RAZORPAY REFUND",
+                "68230.00",
+                "0.00",
+            ]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=4)).strftime("%d/%m/%Y"),
+                "CMS002938491808",
+                "CMS/002938491808/REVERSAL",
+                "0.00",
+                "15000.00",
+            ]
+        )
+        writer.writerow(
+            [(now - timedelta(days=5)).strftime("%d/%m/%Y"), "", "RTGS RAZORPAY SOFTWARE BANGLORE", "12450.00", "0.00"]
+        )
+        writer.writerow(
+            [
+                (now - timedelta(days=6)).strftime("%d/%m/%Y"),
+                "ICIC009283921099",
+                "UNKNOWN DIRECT CREDIT",
+                "18450.00",
+                "0.00",
+            ]
+        )
 
     csv_text = output.getvalue()
     return Response(

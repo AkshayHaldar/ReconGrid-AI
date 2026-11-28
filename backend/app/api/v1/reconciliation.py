@@ -523,7 +523,10 @@ async def _batch_tax_schedule(db: AsyncSession, batch_id: str, intra_state: bool
     settlement_ids = {log.rzp_settlement.settlement_id for log in logs if log.rzp_settlement is not None}
     refund_totals = await SettlementRepository(db).get_processed_refund_totals(settlement_ids)
     return DiagnosticsService.calculate_batch_tax_schedule(
-        batch_id, logs, intra_state=intra_state, refund_totals=refund_totals,
+        batch_id,
+        logs,
+        intra_state=intra_state,
+        refund_totals=refund_totals,
     )
 
 

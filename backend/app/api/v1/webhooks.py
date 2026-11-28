@@ -128,7 +128,9 @@ async def reconcile_webhook_event(event_id: str) -> None:
             batch_ids: Sequence[str] = ["default"]
             if event.event_type == "refund.processed":
                 entity = event.payload["payload"]["refund"]["entity"]
-                refund = await settlement_repo.upsert_refund(RazorpayRefundPayload.model_validate(entity).to_record(entity))
+                refund = await settlement_repo.upsert_refund(
+                    RazorpayRefundPayload.model_validate(entity).to_record(entity)
+                )
                 if not refund.settlement_id:
                     event.processing_status = "PROCESSED"
                     await db.commit()
@@ -141,19 +143,21 @@ async def reconcile_webhook_event(event_id: str) -> None:
                 tax_inr = paise_to_rupees(setl_data.get("tax", 0))
                 created_ts = setl_data.get("created_at")
                 dt = datetime.fromtimestamp(created_ts, UTC) if created_ts else datetime.now(UTC)
-                await settlement_repo.upsert_settlement({
-                    "settlement_id": setl_data.get("id")
-                    or f"setl_{hashlib.sha256(event_id.encode()).hexdigest()[:59]}",
-                    "amount": amount_inr,
-                    "gross_amount": amount_inr + fees_inr + tax_inr,
-                    "fees": fees_inr,
-                    "tax": tax_inr,
-                    "utr": setl_data.get("utr"),
-                    "status": setl_data.get("status", "processed"),
-                    "settlement_created_at": dt,
-                    "raw_payload": setl_data,
-                    "is_test_mode": True,
-                })
+                await settlement_repo.upsert_settlement(
+                    {
+                        "settlement_id": setl_data.get("id")
+                        or f"setl_{hashlib.sha256(event_id.encode()).hexdigest()[:59]}",
+                        "amount": amount_inr,
+                        "gross_amount": amount_inr + fees_inr + tax_inr,
+                        "fees": fees_inr,
+                        "tax": tax_inr,
+                        "utr": setl_data.get("utr"),
+                        "status": setl_data.get("status", "processed"),
+                        "settlement_created_at": dt,
+                        "raw_payload": setl_data,
+                        "is_test_mode": True,
+                    }
+                )
 
             # Trigger immediate reconciliation
             bank_repo = BankRepository(db)

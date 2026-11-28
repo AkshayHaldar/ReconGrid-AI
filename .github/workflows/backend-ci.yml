@@ -37,6 +37,9 @@ jobs:
       - name: Run Ruff linter
         run: ruff check .
 
+      - name: Check Ruff formatting
+        run: ruff format --check .
+
   mypy:
     name: mypy
     runs-on: ubuntu-latest

@@ -152,9 +152,9 @@ def build_tally_xml(
         ET.SubElement(voucher, "DATE").text = log.bank_transaction.date.strftime("%Y%m%d")
         ET.SubElement(voucher, "VOUCHERTYPENAME").text = "Journal"
         ET.SubElement(voucher, "VOUCHERNUMBER").text = setl_id
-        ET.SubElement(voucher, "NARRATION").text = (
-            f"Razorpay settlement {setl_id} UTR {log.bank_transaction.utr or 'N/A'}"
-        )
+        ET.SubElement(
+            voucher, "NARRATION"
+        ).text = f"Razorpay settlement {setl_id} UTR {log.bank_transaction.utr or 'N/A'}"
         for ledger, amount in debits:
             _ledger_entry(voucher, ledger, amount, debit=True)
         _ledger_entry(voucher, credit[0], credit[1], debit=False)

@@ -37,6 +37,7 @@ async def run_single_benchmark(batch_size: int) -> dict:
 
     async with async_session_factory() as session:
         from sqlalchemy import delete
+
         await session.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
         await session.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
         await session.execute(delete(RazorpaySettlement).where(RazorpaySettlement.is_test_mode == True))
@@ -160,10 +161,14 @@ async def main():
         print(f"[*] Benchmarking batch size: {size:5d} records...", end="", flush=True)
         res = await run_single_benchmark(size)
         results.append(res)
-        print(f" Done in {res['wall_time_sec']:.4f}s ({res['rows_per_sec']:,.1f} rows/sec | Peak RAM: {res['peak_memory_mb']} MB)")
+        print(
+            f" Done in {res['wall_time_sec']:.4f}s ({res['rows_per_sec']:,.1f} rows/sec | Peak RAM: {res['peak_memory_mb']} MB)"
+        )
 
     print("\n" + "=" * 90)
-    print(f"{'Batch Size':<12} | {'Wall Time':<12} | {'Throughput':<16} | {'Peak Memory':<12} | {'Match Rate':<12} | {'Exceptions (INR)':<16} | {'Conservation':<12}")
+    print(
+        f"{'Batch Size':<12} | {'Wall Time':<12} | {'Throughput':<16} | {'Peak Memory':<12} | {'Match Rate':<12} | {'Exceptions (INR)':<16} | {'Conservation':<12}"
+    )
     print("-" * 90)
     for r in results:
         status_str = "PASSED (0 lost)" if r["is_fully_accounted"] else "FAILED"

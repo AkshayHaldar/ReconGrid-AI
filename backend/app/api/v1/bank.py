@@ -1,6 +1,5 @@
 """Bank Statement API Routes."""
 
-
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,9 +23,7 @@ async def upload_bank_statement(
 ):
     """Uploads and parses a bank statement (CSV or password-protected PDF)."""
     service = IngestionService(db)
-    result = await service.ingest_statement(
-        file, batch_id=batch_id, password=password, column_mappings=column_mappings
-    )
+    result = await service.ingest_statement(file, batch_id=batch_id, password=password, column_mappings=column_mappings)
     return ApiResponse.ok(result)
 
 
