@@ -24,13 +24,38 @@ class QaRepository:
 
         # Extract search candidates: identifiers with numbers or specific reference codes
         import re
-        stop_words = {"WHY", "DID", "NOT", "SETTLE", "CORRECTLY", "HAVE", "FEE", "DEDUCTION", "WHAT", "HOW", "ABOUT", "THE", "THIS", "TRANSACTION", "RECORD", "SHOW", "WHERE", "ORDER", "TXN"}
+
+        stop_words = {
+            "WHY",
+            "DID",
+            "NOT",
+            "SETTLE",
+            "CORRECTLY",
+            "HAVE",
+            "FEE",
+            "DEDUCTION",
+            "WHAT",
+            "HOW",
+            "ABOUT",
+            "THE",
+            "THIS",
+            "TRANSACTION",
+            "RECORD",
+            "SHOW",
+            "WHERE",
+            "ORDER",
+            "TXN",
+        }
         raw_tokens = re.findall(r"[A-Za-z0-9_\-#]{2,}", clean_term)
 
         # Prioritize tokens that contain digits or specific gateway prefixes
         specific_tokens = [
-            t.lstrip("#") for t in raw_tokens
-            if (any(c.isdigit() for c in t) or t.upper().startswith(("SETL", "CMS", "PAY", "RFND", "RTGS", "NEFT", "ICIC", "SBI", "HDFC")))
+            t.lstrip("#")
+            for t in raw_tokens
+            if (
+                any(c.isdigit() for c in t)
+                or t.upper().startswith(("SETL", "CMS", "PAY", "RFND", "RTGS", "NEFT", "ICIC", "SBI", "HDFC"))
+            )
             and t.upper() not in stop_words
         ]
 

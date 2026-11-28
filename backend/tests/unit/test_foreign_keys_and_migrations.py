@@ -38,9 +38,7 @@ def test_sqlite_foreign_keys_enforced():
         )
 
         with pytest.raises(IntegrityError):
-            conn.execute(
-                text("INSERT INTO child (id, parent_id) VALUES ('c1', 'nonexistent_parent');")
-            )
+            conn.execute(text("INSERT INTO child (id, parent_id) VALUES ('c1', 'nonexistent_parent');"))
 
 
 @pytest.mark.asyncio
@@ -71,6 +69,7 @@ def test_alembic_initial_migration_exists():
 
 if __name__ == "__main__":
     import asyncio
+
     test_sqlite_foreign_keys_enforced()
     print("test_sqlite_foreign_keys_enforced passed!")
     asyncio.run(test_async_sqlite_foreign_keys_enforced())

@@ -113,41 +113,47 @@ async def test_reconciliation_repository_ledger_and_metrics(db_session: AsyncSes
     dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # 1. Create bank tx & settlement
-    bank_tx, _ = await bank_repo.upsert_transaction({
-        "batch_id": "batch_metrics_test",
-        "row_hash": "hash_metrics_test_01",
-        "date": dt,
-        "amount": Decimal("98200.00"),
-        "direction": "CREDIT",
-        "utr": "CMS002938491801",
-        "description": "CMS/002938491801/HDFC",
-    })
+    bank_tx, _ = await bank_repo.upsert_transaction(
+        {
+            "batch_id": "batch_metrics_test",
+            "row_hash": "hash_metrics_test_01",
+            "date": dt,
+            "amount": Decimal("98200.00"),
+            "direction": "CREDIT",
+            "utr": "CMS002938491801",
+            "description": "CMS/002938491801/HDFC",
+        }
+    )
 
-    setl, _ = await setl_repo.upsert_settlement({
-        "settlement_id": "setl_metrics_test_01",
-        "amount": Decimal("98200.00"),
-        "gross_amount": Decimal("98200.00"),
-        "fees": Decimal("0.00"),
-        "tax": Decimal("0.00"),
-        "utr": "CMS002938491801",
-        "status": "processed",
-        "settlement_created_at": dt,
-    })
+    setl, _ = await setl_repo.upsert_settlement(
+        {
+            "settlement_id": "setl_metrics_test_01",
+            "amount": Decimal("98200.00"),
+            "gross_amount": Decimal("98200.00"),
+            "fees": Decimal("0.00"),
+            "tax": Decimal("0.00"),
+            "utr": "CMS002938491801",
+            "status": "processed",
+            "settlement_created_at": dt,
+        }
+    )
 
     # 2. Add log
-    log = await recon_repo.add_log({
-        "batch_id": "batch_metrics_test",
-        "bank_tx_id": bank_tx.id,
-        "rzp_settlement_id": setl.id,
-        "match_status": "MATCHED",
-        "match_tier": "TIER_1",
-        "confidence_score": 1.00,
-        "delta_amount": Decimal("0.00"),
-        "diagnostic_type": "EXACT_MATCH",
-        "diagnostic_note": "Exact match test",
-        "matched_at": dt,
-        "superseded": False,
-    })
+    log = await recon_repo.add_log(
+        {
+            "batch_id": "batch_metrics_test",
+            "bank_tx_id": bank_tx.id,
+            "rzp_settlement_id": setl.id,
+            "match_status": "MATCHED",
+            "match_tier": "TIER_1",
+            "confidence_score": 1.00,
+            "delta_amount": Decimal("0.00"),
+            "diagnostic_type": "EXACT_MATCH",
+            "diagnostic_note": "Exact match test",
+            "matched_at": dt,
+            "superseded": False,
+        }
+    )
     assert log.id is not None
 
     # Lookup by ID
@@ -186,40 +192,46 @@ async def test_qa_repository_and_retrieval(db_session: AsyncSession):
 
     dt = datetime(2026, 8, 24, tzinfo=UTC)
 
-    bank_tx, _ = await bank_repo.upsert_transaction({
-        "batch_id": "batch_qa_test",
-        "row_hash": "hash_qa_test_01",
-        "date": dt,
-        "amount": Decimal("49100.00"),
-        "direction": "CREDIT",
-        "utr": "CMS002938491805",
-        "description": "CMS/002938491805/RAZORPAY order #4521",
-    })
+    bank_tx, _ = await bank_repo.upsert_transaction(
+        {
+            "batch_id": "batch_qa_test",
+            "row_hash": "hash_qa_test_01",
+            "date": dt,
+            "amount": Decimal("49100.00"),
+            "direction": "CREDIT",
+            "utr": "CMS002938491805",
+            "description": "CMS/002938491805/RAZORPAY order #4521",
+        }
+    )
 
-    setl, _ = await setl_repo.upsert_settlement({
-        "settlement_id": "setl_Kjs9283jkd922",
-        "amount": Decimal("49100.00"),
-        "gross_amount": Decimal("50000.00"),
-        "fees": Decimal("762.71"),
-        "tax": Decimal("137.29"),
-        "utr": "CMS002938491805",
-        "status": "processed",
-        "settlement_created_at": dt,
-    })
+    setl, _ = await setl_repo.upsert_settlement(
+        {
+            "settlement_id": "setl_Kjs9283jkd922",
+            "amount": Decimal("49100.00"),
+            "gross_amount": Decimal("50000.00"),
+            "fees": Decimal("762.71"),
+            "tax": Decimal("137.29"),
+            "utr": "CMS002938491805",
+            "status": "processed",
+            "settlement_created_at": dt,
+        }
+    )
 
-    log = await recon_repo.add_log({
-        "batch_id": "batch_qa_test",
-        "bank_tx_id": bank_tx.id,
-        "rzp_settlement_id": setl.id,
-        "match_status": "MATCHED",
-        "match_tier": "TIER_3",
-        "confidence_score": 1.00,
-        "delta_amount": Decimal("900.00"),
-        "diagnostic_type": "FEE_DEDUCTION",
-        "diagnostic_note": "Gateway fee Rs 762.71 + 18% GST Rs 137.29",
-        "matched_at": dt,
-        "superseded": False,
-    })
+    log = await recon_repo.add_log(
+        {
+            "batch_id": "batch_qa_test",
+            "bank_tx_id": bank_tx.id,
+            "rzp_settlement_id": setl.id,
+            "match_status": "MATCHED",
+            "match_tier": "TIER_3",
+            "confidence_score": 1.00,
+            "delta_amount": Decimal("900.00"),
+            "diagnostic_type": "FEE_DEDUCTION",
+            "diagnostic_note": "Gateway fee Rs 762.71 + 18% GST Rs 137.29",
+            "matched_at": dt,
+            "superseded": False,
+        }
+    )
 
     # Search by settlement ID
     rec1 = await qa_repo.find_reconciliation_record("Why did setl_Kjs9283jkd922 have a fee deduction?")
@@ -235,14 +247,16 @@ async def test_qa_repository_and_retrieval(db_session: AsyncSession):
     assert await qa_repo.find_reconciliation_record("nonexistent_token_99999") is None
 
     # Log interaction
-    qa_log = await qa_repo.log_interaction({
-        "reconciliation_log_id": log.id,
-        "query_text": "What happened with CMS002938491805?",
-        "raw_llm_output": "Narration text",
-        "final_response": "Narration text",
-        "guardrail_rejected": False,
-        "asked_at": dt,
-    })
+    qa_log = await qa_repo.log_interaction(
+        {
+            "reconciliation_log_id": log.id,
+            "query_text": "What happened with CMS002938491805?",
+            "raw_llm_output": "Narration text",
+            "final_response": "Narration text",
+            "guardrail_rejected": False,
+            "asked_at": dt,
+        }
+    )
     assert qa_log.id is not None
 
     history = await qa_repo.get_history(limit=10)

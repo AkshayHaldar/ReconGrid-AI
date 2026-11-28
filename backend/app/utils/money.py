@@ -37,8 +37,7 @@ def to_decimal(val: str | float | Decimal | None) -> Decimal:
 
         # Remove currency symbols, INR, Rs., Cr, Dr, commas, spaces, NBSP
         clean_str = (
-            clean_str
-            .replace("₹", "")
+            clean_str.replace("₹", "")
             .replace("INR", "")
             .replace("inr", "")
             .replace("Rs.", "")
@@ -165,8 +164,7 @@ def validate_raw_amount_format(raw_val: Any, col_name: str = "", row_idx: int = 
         return
 
     clean_val = (
-        raw_str
-        .replace(",", "")
+        raw_str.replace(",", "")
         .replace("₹", "")
         .replace("INR", "")
         .replace("inr", "")

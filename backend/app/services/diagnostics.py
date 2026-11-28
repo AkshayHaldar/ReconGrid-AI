@@ -110,9 +110,7 @@ class DiagnosticsService:
             )
 
         # Case 2: Gateway Fees + 18% GST Deduction (Actual values from settlement)
-        if (fees + tax) > Decimal("0.00") and is_amount_matching(
-            rzp_gross - bank_amount, fees + tax, tolerance
-        ):
+        if (fees + tax) > Decimal("0.00") and is_amount_matching(rzp_gross - bank_amount, fees + tax, tolerance):
             return DiagnosticResult(
                 diagnostic_type="FEE_DEDUCTION",
                 match_status="MATCHED",
@@ -139,9 +137,7 @@ class DiagnosticsService:
 
         # Case 2c: Section 194-O E-Commerce 1% TDS + Gateway Fee + 18% GST
         total_tds_deduction = actual_or_est_fees + tds_194o
-        if tds_194o > Decimal("0.00") and is_amount_matching(
-            rzp_gross - bank_amount, total_tds_deduction, tolerance
-        ):
+        if tds_194o > Decimal("0.00") and is_amount_matching(rzp_gross - bank_amount, total_tds_deduction, tolerance):
             fee_part = fees if fees > Decimal("0.00") else estimated_fee
             tax_part = tax if tax > Decimal("0.00") else estimated_tax
             return DiagnosticResult(
@@ -169,9 +165,7 @@ class DiagnosticsService:
                     ),
                 )
             # Compound Fee + TDS + Refund
-            if is_amount_matching(
-                rzp_gross - bank_amount, actual_or_est_fees + tds_194o + refund_total, tolerance
-            ):
+            if is_amount_matching(rzp_gross - bank_amount, actual_or_est_fees + tds_194o + refund_total, tolerance):
                 return DiagnosticResult(
                     diagnostic_type="REFUND_ADJUSTED",
                     match_status="MATCHED",

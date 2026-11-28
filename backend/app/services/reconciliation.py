@@ -128,7 +128,9 @@ class ReconciliationEngine:
 
             def evaluate(bank_tx: BankTransaction, settlement: RazorpaySettlement) -> DiagnosticResult:
                 return DiagnosticsService.evaluate_delta(
-                    bank_tx, settlement, tolerance,
+                    bank_tx,
+                    settlement,
+                    tolerance,
                     persisted_refund_total=refund_totals.get(settlement.settlement_id, Decimal("0.00")),
                 )
 

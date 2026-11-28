@@ -41,6 +41,7 @@ async def run_scorecard_generation():
         from sqlalchemy import delete
 
         from app.models.reconciliation_log import ReconciliationLog
+
         await session.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
         await session.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
         await session.execute(delete(RazorpaySettlement).where(RazorpaySettlement.is_test_mode == True))
@@ -149,7 +150,7 @@ async def run_scorecard_generation():
 
     md_content = f"""# ReconGrid AI — Reconciliation Engine Scorecard & Audit Report
 
-**Executive Summary:** Reconciled **{scorecard['total_rows_processed']} bank transactions** against Razorpay settlements in **{scorecard['processing_time_seconds']}s** ({scorecard['rows_per_second']} rows/sec) with **{scorecard['total_matched_percentage']}% automated match rate**, zero dropped records, and complete diagnostic accountability.
+**Executive Summary:** Reconciled **{scorecard["total_rows_processed"]} bank transactions** against Razorpay settlements in **{scorecard["processing_time_seconds"]}s** ({scorecard["rows_per_second"]} rows/sec) with **{scorecard["total_matched_percentage"]}% automated match rate**, zero dropped records, and complete diagnostic accountability.
 
 ---
 
@@ -157,13 +158,13 @@ async def run_scorecard_generation():
 
 | Metric | Value | Unit / Standard |
 |---|---|---|
-| **Total Rows Processed** | `{scorecard['total_rows_processed']}` | Bank Transactions |
-| **Execution Time** | `{scorecard['processing_time_seconds']}` | Seconds (Measured Wall-Clock) |
-| **Processing Throughput** | `{scorecard['rows_per_second']}` | Rows / Second |
-| **Total ₹ Ingested** | `₹ {scorecard['total_ingested_amount']:,.2f}` | Python Decimal(18,2) |
-| **Total ₹ Reconciled** | `₹ {scorecard['total_reconciled_amount']:,.2f}` | Python Decimal(18,2) |
-| **Total ₹ Exceptions** | `₹ {scorecard['total_exception_amount']:,.2f}` | Python Decimal(18,2) |
-| **Total ₹ Pending Data** | `₹ {scorecard['total_pending_amount']:,.2f}` | Python Decimal(18,2) |
+| **Total Rows Processed** | `{scorecard["total_rows_processed"]}` | Bank Transactions |
+| **Execution Time** | `{scorecard["processing_time_seconds"]}` | Seconds (Measured Wall-Clock) |
+| **Processing Throughput** | `{scorecard["rows_per_second"]}` | Rows / Second |
+| **Total ₹ Ingested** | `₹ {scorecard["total_ingested_amount"]:,.2f}` | Python Decimal(18,2) |
+| **Total ₹ Reconciled** | `₹ {scorecard["total_reconciled_amount"]:,.2f}` | Python Decimal(18,2) |
+| **Total ₹ Exceptions** | `₹ {scorecard["total_exception_amount"]:,.2f}` | Python Decimal(18,2) |
+| **Total ₹ Pending Data** | `₹ {scorecard["total_pending_amount"]:,.2f}` | Python Decimal(18,2) |
 
 ---
 
@@ -174,14 +175,14 @@ async def run_scorecard_generation():
 
 | Tier / Category | Classification Type | Records | Share (%) | Status & Action Required |
 |---|---|---|---|---|
-| **Tier 1** | Exact UTR + Exact Amount Match | `{scorecard['tier_1_count']}` | `{scorecard['tier_1_percentage']}%` | Automated `MATCHED` (100% confidence) |
-| **Tier 2** | Fuzzy Descriptor Similarity | `{scorecard['tier_2_count']}` | `{scorecard['tier_2_percentage']}%` | `SUGGESTED` match (Requires 1-click CA review) |
-| **Tier 0** | Date Window (±3d) + Amount Fallback | `{scorecard['tier_0_count']}` | `{scorecard['tier_0_percentage']}%` | `SUGGESTED` match (Missing UTR fallback) |
-| **Tier 3** | Diagnostic Delta (Fee/TDS/Refund/FX) | `{scorecard['tier_3_count']}` | `{scorecard['tier_3_percentage']}%` | Automated `MATCHED` with diagnostic breakdown |
-| **Conflicts** | Multi-Candidate Competing Claims | `{scorecard['total_conflict_count']}` | `{scorecard['total_conflict_percentage']}%` | `CONFLICT` (Locked pending human merge) |
-| **Exceptions** | Genuine Discrepancies (>5d old) | `{scorecard['total_exception_count']}` | `{scorecard['total_exception_percentage']}%` | `EXCEPTION` (Unresolved discrepancy) |
-| **Pending** | Awaiting Settlement Data (≤5d old) | `{scorecard['total_pending_count']}` | `{scorecard['total_pending_percentage']}%` | `PENDING_SETTLEMENT_DATA` (Auto-retries on next sync) |
-| **TOTAL** | **All Processed Records** | **`{scorecard['total_rows_processed']}`** | **`100.00%`** | **100% Accounted For** |
+| **Tier 1** | Exact UTR + Exact Amount Match | `{scorecard["tier_1_count"]}` | `{scorecard["tier_1_percentage"]}%` | Automated `MATCHED` (100% confidence) |
+| **Tier 2** | Fuzzy Descriptor Similarity | `{scorecard["tier_2_count"]}` | `{scorecard["tier_2_percentage"]}%` | `SUGGESTED` match (Requires 1-click CA review) |
+| **Tier 0** | Date Window (±3d) + Amount Fallback | `{scorecard["tier_0_count"]}` | `{scorecard["tier_0_percentage"]}%` | `SUGGESTED` match (Missing UTR fallback) |
+| **Tier 3** | Diagnostic Delta (Fee/TDS/Refund/FX) | `{scorecard["tier_3_count"]}` | `{scorecard["tier_3_percentage"]}%` | Automated `MATCHED` with diagnostic breakdown |
+| **Conflicts** | Multi-Candidate Competing Claims | `{scorecard["total_conflict_count"]}` | `{scorecard["total_conflict_percentage"]}%` | `CONFLICT` (Locked pending human merge) |
+| **Exceptions** | Genuine Discrepancies (>5d old) | `{scorecard["total_exception_count"]}` | `{scorecard["total_exception_percentage"]}%` | `EXCEPTION` (Unresolved discrepancy) |
+| **Pending** | Awaiting Settlement Data (≤5d old) | `{scorecard["total_pending_count"]}` | `{scorecard["total_pending_percentage"]}%` | `PENDING_SETTLEMENT_DATA` (Auto-retries on next sync) |
+| **TOTAL** | **All Processed Records** | **`{scorecard["total_rows_processed"]}`** | **`100.00%`** | **100% Accounted For** |
 
 ---
 
@@ -189,9 +190,9 @@ async def run_scorecard_generation():
 
 $$\\sum (\\text{{Tier 0}} + \\text{{Tier 1}} + \\text{{Tier 2}} + \\text{{Tier 3 Matches}} + \\text{{Conflicts}} + \\text{{Exceptions}} + \\text{{Pending}}) = \\text{{Total Rows Processed}}$$
 
-* **Records Accounted For:** `{scorecard['records_accounted_for']} / {scorecard['total_rows_processed']}`
-* **Unaccounted / Dropped Records:** `{scorecard['unaccounted_records']}`
-* **Conservation Verified:** `{'PASSED — Zero records dropped or lost' if scorecard['is_fully_accounted'] else 'FAILED'}`
+* **Records Accounted For:** `{scorecard["records_accounted_for"]} / {scorecard["total_rows_processed"]}`
+* **Unaccounted / Dropped Records:** `{scorecard["unaccounted_records"]}`
+* **Conservation Verified:** `{"PASSED — Zero records dropped or lost" if scorecard["is_fully_accounted"] else "FAILED"}`
 
 ---
 

@@ -90,14 +90,15 @@ def test_guardrail_rejects_hallucinated_numbers():
 
 def test_guardrail_rejects_fabricated_gst_claim():
     from types import SimpleNamespace
+
     fake_log = SimpleNamespace(
-        delta_amount=Decimal('900.00'),
+        delta_amount=Decimal("900.00"),
         confidence_score=0.60,
         bank_transaction=None,
         rzp_settlement=None,
-        diagnostic_note='Fee deduction matched within tolerance.',
+        diagnostic_note="Fee deduction matched within tolerance.",
     )
-    narration = 'This is explained by an 18% GST-only adjustment, unrelated to the actual fee.'
+    narration = "This is explained by an 18% GST-only adjustment, unrelated to the actual fee."
     is_valid, invented = validate_qa_narration(narration, fake_log)
     assert is_valid is False, f"Guardrail still lets fabricated GST claims through: {invented}"
 
@@ -167,5 +168,3 @@ def test_guardrail_word_based_number_limitation_documentation():
     is_valid, invented = validate_qa_narration(word_text, log)
     assert is_valid is True
     assert len(invented) == 0
-
-

@@ -29,27 +29,31 @@ async def test_reconciliation_utr_match_with_amount_delta_tier3(db_session: Asyn
     dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Bank row has UTR and received net 49100.00
-    tx, _ = await bank_repo.upsert_transaction({
-        "batch_id": "delta_batch",
-        "row_hash": "hash_delta_utr_1",
-        "date": dt,
-        "amount": Decimal("49100.00"),
-        "direction": "CREDIT",
-        "utr": "CMS002938491855",
-        "description": "CMS/002938491855/RAZORPAY",
-    })
+    tx, _ = await bank_repo.upsert_transaction(
+        {
+            "batch_id": "delta_batch",
+            "row_hash": "hash_delta_utr_1",
+            "date": dt,
+            "amount": Decimal("49100.00"),
+            "direction": "CREDIT",
+            "utr": "CMS002938491855",
+            "description": "CMS/002938491855/RAZORPAY",
+        }
+    )
 
     # Settlement has gross 50000.00, net 50000.00 (before fees deducted at bank)
-    setl, _ = await setl_repo.upsert_settlement({
-        "settlement_id": "setl_delta_001",
-        "amount": Decimal("50000.00"),
-        "gross_amount": Decimal("50000.00"),
-        "fees": Decimal("762.71"),
-        "tax": Decimal("137.29"),
-        "utr": "CMS002938491855",
-        "status": "processed",
-        "settlement_created_at": dt,
-    })
+    setl, _ = await setl_repo.upsert_settlement(
+        {
+            "settlement_id": "setl_delta_001",
+            "amount": Decimal("50000.00"),
+            "gross_amount": Decimal("50000.00"),
+            "fees": Decimal("762.71"),
+            "tax": Decimal("137.29"),
+            "utr": "CMS002938491855",
+            "status": "processed",
+            "settlement_created_at": dt,
+        }
+    )
 
     logs = await engine.reconcile_batch([tx], [setl], batch_id="delta_batch")
     assert len(logs) == 1
@@ -97,52 +101,60 @@ async def test_summary_metrics_human_action_branches(db_session: AsyncSession):
     dt = datetime(2026, 8, 24, tzinfo=UTC)
 
     # Suggested & Approved record
-    tx1, _ = await bank_repo.upsert_transaction({
-        "batch_id": "metrics_action_batch",
-        "row_hash": "hash_act_1",
-        "date": dt,
-        "amount": Decimal("10000.00"),
-        "direction": "CREDIT",
-        "utr": "CMS002938491861",
-        "description": "CMS/002938491861",
-    })
+    tx1, _ = await bank_repo.upsert_transaction(
+        {
+            "batch_id": "metrics_action_batch",
+            "row_hash": "hash_act_1",
+            "date": dt,
+            "amount": Decimal("10000.00"),
+            "direction": "CREDIT",
+            "utr": "CMS002938491861",
+            "description": "CMS/002938491861",
+        }
+    )
 
-    log1 = await recon_repo.add_log({
-        "batch_id": "metrics_action_batch",
-        "bank_tx_id": tx1.id,
-        "match_status": "SUGGESTED",
-        "human_action": "APPROVED",
-        "match_tier": "TIER_2",
-        "delta_amount": Decimal("0.00"),
-        "diagnostic_type": "FUZZY_MATCH",
-        "diagnostic_note": "Fuzzy approved",
-        "matched_at": dt,
-        "superseded": False,
-    })
+    log1 = await recon_repo.add_log(
+        {
+            "batch_id": "metrics_action_batch",
+            "bank_tx_id": tx1.id,
+            "match_status": "SUGGESTED",
+            "human_action": "APPROVED",
+            "match_tier": "TIER_2",
+            "delta_amount": Decimal("0.00"),
+            "diagnostic_type": "FUZZY_MATCH",
+            "diagnostic_note": "Fuzzy approved",
+            "matched_at": dt,
+            "superseded": False,
+        }
+    )
 
     # Conflict & Resolved record
-    tx2, _ = await bank_repo.upsert_transaction({
-        "batch_id": "metrics_action_batch",
-        "row_hash": "hash_act_2",
-        "date": dt,
-        "amount": Decimal("20000.00"),
-        "direction": "CREDIT",
-        "utr": "CMS002938491862",
-        "description": "CMS/002938491862",
-    })
+    tx2, _ = await bank_repo.upsert_transaction(
+        {
+            "batch_id": "metrics_action_batch",
+            "row_hash": "hash_act_2",
+            "date": dt,
+            "amount": Decimal("20000.00"),
+            "direction": "CREDIT",
+            "utr": "CMS002938491862",
+            "description": "CMS/002938491862",
+        }
+    )
 
-    log2 = await recon_repo.add_log({
-        "batch_id": "metrics_action_batch",
-        "bank_tx_id": tx2.id,
-        "match_status": "CONFLICT",
-        "human_action": "RESOLVED",
-        "match_tier": "TIER_1",
-        "delta_amount": Decimal("0.00"),
-        "diagnostic_type": "EXACT_MATCH",
-        "diagnostic_note": "Conflict resolved",
-        "matched_at": dt,
-        "superseded": False,
-    })
+    log2 = await recon_repo.add_log(
+        {
+            "batch_id": "metrics_action_batch",
+            "bank_tx_id": tx2.id,
+            "match_status": "CONFLICT",
+            "human_action": "RESOLVED",
+            "match_tier": "TIER_1",
+            "delta_amount": Decimal("0.00"),
+            "diagnostic_type": "EXACT_MATCH",
+            "diagnostic_note": "Conflict resolved",
+            "matched_at": dt,
+            "superseded": False,
+        }
+    )
 
     metrics = await recon_repo.get_summary_metrics("metrics_action_batch")
     assert metrics["total_records"] == 2
@@ -157,16 +169,18 @@ async def test_settlement_refunds_relation(db_session: AsyncSession):
     repo = SettlementRepository(db_session)
     dt = datetime(2026, 8, 24, tzinfo=UTC)
 
-    setl, _ = await repo.upsert_settlement({
-        "settlement_id": "setl_with_refund_01",
-        "amount": Decimal("45000.00"),
-        "gross_amount": Decimal("50000.00"),
-        "fees": Decimal("0.00"),
-        "tax": Decimal("0.00"),
-        "utr": "CMS002938491870",
-        "status": "processed",
-        "settlement_created_at": dt,
-    })
+    setl, _ = await repo.upsert_settlement(
+        {
+            "settlement_id": "setl_with_refund_01",
+            "amount": Decimal("45000.00"),
+            "gross_amount": Decimal("50000.00"),
+            "fees": Decimal("0.00"),
+            "tax": Decimal("0.00"),
+            "utr": "CMS002938491870",
+            "status": "processed",
+            "settlement_created_at": dt,
+        }
+    )
 
     refund = RazorpayRefund(
         refund_id="rfnd_test_001",

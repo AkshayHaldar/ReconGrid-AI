@@ -165,20 +165,104 @@ BANK_COLUMN_MAPPINGS = {
     "KOTAK": {
         "date": ["Transaction Date", "Date", "Value Date", "Txn Date"],
         "narration": ["Description", "Narration", "Transaction Details", "Particulars"],
-        "ref": ["Ref No.", "Ref No", "Ref / Chq No", "Ref / Chq No.", "Chq / Ref No.", "Chq / Ref No", "Chq No", "Transaction Reference Number"],
+        "ref": [
+            "Ref No.",
+            "Ref No",
+            "Ref / Chq No",
+            "Ref / Chq No.",
+            "Chq / Ref No.",
+            "Chq / Ref No",
+            "Chq No",
+            "Transaction Reference Number",
+        ],
         "amount": ["Amount", "Transaction Amount", "Txn Amount"],
         "direction": ["Dr/Cr", "DR/CR", "Cr/Dr", "Type"],
         "withdrawal": ["Debit (Dr)", "Debit Amount", "Debit", "Dr Amount", "Dr"],
         "deposit": ["Credit (Cr)", "Credit Amount", "Credit", "Cr Amount", "Cr"],
     },
     "GENERIC": {
-        "date": ["date", "txn_date", "transaction_date", "tran_date", "timestamp", "booking_date", "value_date", "txn date", "tran date", "transaction date", "value date"],
-        "narration": ["description", "narration", "remarks", "particulars", "desc", "details", "memo", "transaction_details", "transaction remarks", "transaction description"],
-        "ref": ["utr", "ref", "reference", "utr_number", "rrn", "ref_no", "chq_no", "cheque_no", "ref_no.", "reference_number", "chq/ref no", "chq/ref no.", "chq / ref no.", "chq / ref no", "ref / chq no", "ref / chq no.", "chqno", "instrument id", "doc number"],
+        "date": [
+            "date",
+            "txn_date",
+            "transaction_date",
+            "tran_date",
+            "timestamp",
+            "booking_date",
+            "value_date",
+            "txn date",
+            "tran date",
+            "transaction date",
+            "value date",
+        ],
+        "narration": [
+            "description",
+            "narration",
+            "remarks",
+            "particulars",
+            "desc",
+            "details",
+            "memo",
+            "transaction_details",
+            "transaction remarks",
+            "transaction description",
+        ],
+        "ref": [
+            "utr",
+            "ref",
+            "reference",
+            "utr_number",
+            "rrn",
+            "ref_no",
+            "chq_no",
+            "cheque_no",
+            "ref_no.",
+            "reference_number",
+            "chq/ref no",
+            "chq/ref no.",
+            "chq / ref no.",
+            "chq / ref no",
+            "ref / chq no",
+            "ref / chq no.",
+            "chqno",
+            "instrument id",
+            "doc number",
+        ],
         "amount": ["amount", "net_amount", "txn_amount", "transaction_amount", "total_amount", "tran amt", "tran_amt"],
-        "direction": ["type", "direction", "dr_cr", "cr_dr", "transaction_type", "dr/cr", "cr/dr", "dr / cr", "cr / dr", "cr_dr_flag", "dr_cr_flag"],
-        "withdrawal": ["debit", "withdrawal", "dr", "debit_amount", "dr_amount", "outflow", "withdrawal_amount", "debit (dr)", "paid out"],
-        "deposit": ["credit", "deposit", "cr", "credit_amount", "cr_amount", "inflow", "deposit_amount", "credit (cr)", "paid in"],
+        "direction": [
+            "type",
+            "direction",
+            "dr_cr",
+            "cr_dr",
+            "transaction_type",
+            "dr/cr",
+            "cr/dr",
+            "dr / cr",
+            "cr / dr",
+            "cr_dr_flag",
+            "dr_cr_flag",
+        ],
+        "withdrawal": [
+            "debit",
+            "withdrawal",
+            "dr",
+            "debit_amount",
+            "dr_amount",
+            "outflow",
+            "withdrawal_amount",
+            "debit (dr)",
+            "paid out",
+        ],
+        "deposit": [
+            "credit",
+            "deposit",
+            "cr",
+            "credit_amount",
+            "cr_amount",
+            "inflow",
+            "deposit_amount",
+            "credit (cr)",
+            "paid in",
+        ],
     },
 }
 
@@ -361,9 +445,8 @@ class BankCsvParser:
                     continue
                 mapping = cls.detect_headers(fields)
                 score = len(mapping)
-                has_essential = (
-                    "date" in mapping
-                    and ("deposit" in mapping or "withdrawal" in mapping or "amount" in mapping or "narration" in mapping)
+                has_essential = "date" in mapping and (
+                    "deposit" in mapping or "withdrawal" in mapping or "amount" in mapping or "narration" in mapping
                 )
 
                 if custom_mappings:
@@ -512,6 +595,7 @@ class BankCsvParser:
                 continue
 
             try:
+
                 def get_cell(col_idx: int | None) -> str:
                     if col_idx is not None and 0 <= col_idx < len(row_values):
                         return str(row_values[col_idx]).strip()
@@ -539,7 +623,9 @@ class BankCsvParser:
                 if raw_dep and not is_zero_or_placeholder_amount(raw_dep):
                     val, dep_dir = parse_amount_and_direction(raw_dep)
                     if val > Decimal("0.00"):
-                        dep_name = clean_header_row[target_indices["deposit"]] if "deposit" in target_indices else "Deposit"
+                        dep_name = (
+                            clean_header_row[target_indices["deposit"]] if "deposit" in target_indices else "Deposit"
+                        )
                         validate_raw_amount_format(raw_dep, col_name=dep_name, row_idx=row_idx)
                         amount = val
                         direction = dep_dir if dep_dir == "DEBIT" else "CREDIT"
@@ -548,7 +634,11 @@ class BankCsvParser:
                 if amount == Decimal("0.00") and raw_wdr and not is_zero_or_placeholder_amount(raw_wdr):
                     val, wdr_dir = parse_amount_and_direction(raw_wdr)
                     if val > Decimal("0.00"):
-                        wdr_name = clean_header_row[target_indices["withdrawal"]] if "withdrawal" in target_indices else "Withdrawal"
+                        wdr_name = (
+                            clean_header_row[target_indices["withdrawal"]]
+                            if "withdrawal" in target_indices
+                            else "Withdrawal"
+                        )
                         validate_raw_amount_format(raw_wdr, col_name=wdr_name, row_idx=row_idx)
                         amount = val
                         direction = "DEBIT"
@@ -557,7 +647,9 @@ class BankCsvParser:
                 if amount == Decimal("0.00") and raw_amt and not is_zero_or_placeholder_amount(raw_amt):
                     val, detected_dir = parse_amount_and_direction(raw_amt)
                     if val > Decimal("0.00"):
-                        amt_name = clean_header_row[target_indices["amount"]] if "amount" in target_indices else "Amount"
+                        amt_name = (
+                            clean_header_row[target_indices["amount"]] if "amount" in target_indices else "Amount"
+                        )
                         validate_raw_amount_format(raw_amt, col_name=amt_name, row_idx=row_idx)
                         amount = val
                         if raw_dir:
@@ -573,7 +665,11 @@ class BankCsvParser:
                 seen_keys: dict[str, int] = {}
                 raw_csv_row: dict[str, Any] = {}
                 for idx, val in enumerate(row_values):
-                    h_name = clean_header_row[idx] if idx < len(clean_header_row) and clean_header_row[idx] else f"Column_{idx + 1}"
+                    h_name = (
+                        clean_header_row[idx]
+                        if idx < len(clean_header_row) and clean_header_row[idx]
+                        else f"Column_{idx + 1}"
+                    )
                     if h_name in seen_keys:
                         seen_keys[h_name] += 1
                         key = f"{h_name}_{seen_keys[h_name]}"

@@ -129,7 +129,10 @@ async def test_bank_statement_messy_fixture_e2e(db_session: AsyncSession):
         assert data["inserted_count"] >= 8
         # 2. It isolated the corrupted row without failing the entire batch
         assert len(data["validation_errors"]) >= 1
-        assert any("Row 10" in err or "INVALID_AMOUNT" in err or "NOT_A_VALID_AMOUNT" in err for err in data["validation_errors"])
+        assert any(
+            "Row 10" in err or "INVALID_AMOUNT" in err or "NOT_A_VALID_AMOUNT" in err
+            for err in data["validation_errors"]
+        )
         # 3. Valid rows were reconciled immediately
         assert data["reconciled_immediately"] >= 8
 
@@ -165,11 +168,7 @@ async def test_corrupted_file_all_invalid_rows_returns_actionable_400(db_session
     """Verifies that an upload where every row is corrupted returns an actionable 400 bad request, not 500."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        bad_csv = (
-            "Date,Narration,Amount\n"
-            "01-08-2026,Corrupted 1,BAD_AMOUNT_VAL\n"
-            "02-08-2026,Corrupted 2,NOT_A_NUMBER\n"
-        )
+        bad_csv = "Date,Narration,Amount\n01-08-2026,Corrupted 1,BAD_AMOUNT_VAL\n02-08-2026,Corrupted 2,NOT_A_NUMBER\n"
         files = {"file": ("corrupted.csv", io.BytesIO(bad_csv.encode("utf-8")), "text/csv")}
         resp = await client.post("/api/v1/bank/upload", data={"batch_id": "bad_batch"}, files=files)
 

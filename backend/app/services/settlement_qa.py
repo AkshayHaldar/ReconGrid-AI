@@ -37,9 +37,7 @@ def generate_template_fallback(log: ReconciliationLog, query: str = "") -> str:
                 f"in addition to payment gateway fees + 18% GST: {log.diagnostic_note}"
             )
         elif log.diagnostic_type == "BATCHED_SETTLEMENT":
-            return (
-                f"This bank credit was batched across multiple Razorpay settlements: {log.diagnostic_note}"
-            )
+            return f"This bank credit was batched across multiple Razorpay settlements: {log.diagnostic_note}"
 
         if fees_amt > Decimal("0.00") or tax_amt > Decimal("0.00"):
             fees = format_inr(fees_amt)
@@ -69,9 +67,7 @@ def generate_template_fallback(log: ReconciliationLog, query: str = "") -> str:
                 f"clawbacks in this settlement cycle for settlement {setl_id}."
             )
         elif log.diagnostic_type == "REVERSAL":
-            return (
-                f"This is a bank debit of {bank_amt} reflecting a settlement chargeback or reversal."
-            )
+            return f"This is a bank debit of {bank_amt} reflecting a settlement chargeback or reversal."
 
     elif log.match_status == "SUGGESTED":
         return (
@@ -93,10 +89,7 @@ def generate_template_fallback(log: ReconciliationLog, query: str = "") -> str:
         )
 
     # Exception
-    return (
-        f"This transaction of {bank_amt} is currently an unresolved EXCEPTION. "
-        f"Reason: {log.diagnostic_note}"
-    )
+    return f"This transaction of {bank_amt} is currently an unresolved EXCEPTION. Reason: {log.diagnostic_note}"
 
 
 def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
@@ -104,10 +97,26 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
     q = query.lower().strip()
     setl_id = log.rzp_settlement.settlement_id if log.rzp_settlement else "Unlinked"
     bank_amt = format_inr(to_decimal(log.bank_transaction.amount)) if log.bank_transaction else "N/A"
-    utr = log.bank_transaction.utr if log.bank_transaction else (log.rzp_settlement.utr if log.rzp_settlement else "N/A")
+    utr = (
+        log.bank_transaction.utr if log.bank_transaction else (log.rzp_settlement.utr if log.rzp_settlement else "N/A")
+    )
 
     # 1. Actionable verification & resolution queries ("how i verfie", "how to verify", "how to resolve", "what should I do", "verify")
-    if any(k in q for k in ("verfie", "verif", "resolve", "how do i", "how to", "what should i do", "action", "how can i", "fix", "approve")):
+    if any(
+        k in q
+        for k in (
+            "verfie",
+            "verif",
+            "resolve",
+            "how do i",
+            "how to",
+            "what should i do",
+            "action",
+            "how can i",
+            "fix",
+            "approve",
+        )
+    ):
         if log.match_status == "CONFLICT":
             return (
                 f"**How to Verify & Resolve Conflict for {setl_id}**:\n\n"
@@ -138,7 +147,7 @@ def generate_followup_response(log: ReconciliationLog, query: str = "") -> str:
                 f"• This bank transaction is within the active settlement window (≤5 days old).\n"
                 "• Click **'Sync Gateway & Test Data'** in the top bar to pull the latest settlement batch from Razorpay. Once ingested, it will automatically transition to `OK MATCHED`."
             )
-        else: # MATCHED
+        else:  # MATCHED
             return (
                 f"**Transaction is Already Fully Reconciled**:\n\n"
                 f"• Settlement `{setl_id}` has already been mathematically verified against UTR `{utr}` with zero delta.\n"
@@ -171,7 +180,16 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     q = query.lower().strip()
 
     # Specific Conflict Resolution Guide
-    if any(k in q for k in ("resolve conflict", "resolve conflicts", "how do i resolve conflict", "how to resolve conflict", "conflict resolution")):
+    if any(
+        k in q
+        for k in (
+            "resolve conflict",
+            "resolve conflicts",
+            "how do i resolve conflict",
+            "how to resolve conflict",
+            "conflict resolution",
+        )
+    ):
         return (
             "**How to Resolve Multi-Candidate Conflicts**:\n\n"
             "1. **Locate the Conflict**: Select the **'Conflicts'** tab on the ledger table to view rows in conflict.\n"
@@ -201,7 +219,9 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
     if any(k in q for k in ("auto-reconciled", "auto reconciled", "reconciled net", "match rate", "auto reconcile")):
         matched_txs = summary.get("matched_count", "N/A") if summary else "the matched"
         match_pct = summary.get("match_rate_percentage", "N/A") if summary else "the match"
-        reconciled_amt = format_inr(to_decimal(summary.get("total_reconciled_amount", 0))) if summary else "the reconciled total"
+        reconciled_amt = (
+            format_inr(to_decimal(summary.get("total_reconciled_amount", 0))) if summary else "the reconciled total"
+        )
         return (
             "**Auto-Reconciled Net** is the total value and percentage of bank transactions that were automatically matched against Razorpay settlements with zero delta variance (`OK MATCHED`).\n\n"
             f"• **Current Reconciled Net**: {matched_txs} transactions ({match_pct}%) totaling {reconciled_amt}.\n"
@@ -232,7 +252,9 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         total_var = format_inr(to_decimal(summary.get("total_unresolved_variance", 0))) if summary else exc_amt
         is_bal = summary.get("is_in_balance", False) if summary else False
 
-        status_tag = "**Trial Balance is In-Balance (₹0.00 Variance)**" if is_bal else f"**Active Variance: {total_var}**"
+        status_tag = (
+            "**Trial Balance is In-Balance (₹0.00 Variance)**" if is_bal else f"**Active Variance: {total_var}**"
+        )
 
         return (
             f"**Unresolved Variance & Trial Balance Audit**:\n\n"
@@ -251,7 +273,18 @@ def answer_project_overview_question(query: str, summary: dict | None = None) ->
         )
 
     # 5. About ReconGrid AI / Overview
-    if any(k in q for k in ("what is recongrid", "about project", "about recongrid", "what does this app do", "what is this project", "project overview", "how does this work")):
+    if any(
+        k in q
+        for k in (
+            "what is recongrid",
+            "about project",
+            "about recongrid",
+            "what does this app do",
+            "what is this project",
+            "project overview",
+            "how does this work",
+        )
+    ):
         return (
             "**ReconGrid AI** is an autonomous, audit-grade settlement reconciliation and discrepancy diagnostics engine for Razorpay merchants and Chartered Accountants.\n\n"
             "**Key Capabilities**:\n"
@@ -422,13 +455,52 @@ _DIAGNOSTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "PENDING_SETTLEMENT": ("pending_settlement", "pending settlement", "in transit", "in-transit"),
 }
 
-_INSPECT_WORDS = ("fee", "fees", "gst", "tax", "tds", "breakdown", "break down", "deduction", "deductions",
-                  "charge", "charges", "mdr", "commission", "forensic", "split")
-_BALANCE_WORDS = ("variance", "trial balance", "in balance", "out of balance", "balance sheet", "conservation",
-                  "books tally", "tally", "mismatch", "unreconciled", "difference between bank", "off by",
-                  "shortfall", "discrepancy total")
-_SUMMARY_WORDS = ("batch summary", "summary", "statistics", "stats", "how many", "match count", "matched count",
-                  "number of matched", "totals", "overall status", "reconciliation status")
+_INSPECT_WORDS = (
+    "fee",
+    "fees",
+    "gst",
+    "tax",
+    "tds",
+    "breakdown",
+    "break down",
+    "deduction",
+    "deductions",
+    "charge",
+    "charges",
+    "mdr",
+    "commission",
+    "forensic",
+    "split",
+)
+_BALANCE_WORDS = (
+    "variance",
+    "trial balance",
+    "in balance",
+    "out of balance",
+    "balance sheet",
+    "conservation",
+    "books tally",
+    "tally",
+    "mismatch",
+    "unreconciled",
+    "difference between bank",
+    "off by",
+    "shortfall",
+    "discrepancy total",
+)
+_SUMMARY_WORDS = (
+    "batch summary",
+    "summary",
+    "statistics",
+    "stats",
+    "how many",
+    "match count",
+    "matched count",
+    "number of matched",
+    "totals",
+    "overall status",
+    "reconciliation status",
+)
 
 
 @dataclass(frozen=True)
@@ -460,9 +532,7 @@ def parse_query(query: str) -> ParsedQuery:
     settlement = _SETTLEMENT_RE.search(text)
     utr = next((m.group(0) for m in _UTR_RE.finditer(text) if not m.group(0).lower().startswith("setl")), None)
 
-    diagnostic = next(
-        (name for name, aliases in _DIAGNOSTIC_ALIASES.items() if _contains_any(q, aliases)), None
-    )
+    diagnostic = next((name for name, aliases in _DIAGNOSTIC_ALIASES.items() if _contains_any(q, aliases)), None)
 
     has_entity = bool(settlement or utr)
     if has_entity and _contains_any(q, _INSPECT_WORDS):
@@ -496,14 +566,14 @@ def get_batch_summary_tool(summary: dict | None) -> ToolResult | None:
     variance = format_inr(to_decimal(summary.get("total_unresolved_variance", 0)))
     lines = [f"• **{label}**: {value}" for label, value in rows]
     answer = (
-        "Batch Summary\n\n"
-        + "\n".join(lines)
-        + f"\n• **Match rate**: {summary.get('match_rate_percentage', 'N/A')}%\n"
+        "Batch Summary\n\n" + "\n".join(lines) + f"\n• **Match rate**: {summary.get('match_rate_percentage', 'N/A')}%\n"
         f"• **Total ingested**: {ingested}\n"
         f"• **Auto-reconciled amount**: {reconciled}\n"
         f"• **Unresolved variance**: {variance}"
     )
-    return ToolResult("get_batch_summary_tool", answer, {"type": "tool", "tool": "get_batch_summary_tool", "summary": summary})
+    return ToolResult(
+        "get_batch_summary_tool", answer, {"type": "tool", "tool": "get_batch_summary_tool", "summary": summary}
+    )
 
 
 def inspect_record_tool(log: ReconciliationLog) -> ToolResult:
@@ -577,7 +647,8 @@ def audit_trial_balance_tool(summary: dict | None) -> ToolResult | None:
     ingested = to_decimal(summary.get("total_ingested_amount", 0))
     parts = {
         "Auto-reconciled": to_decimal(summary.get("total_reconciled_amount", 0)),
-        "CA review": to_decimal(summary.get("total_suggested_amount", 0)) + to_decimal(summary.get("total_conflict_amount", 0)),
+        "CA review": to_decimal(summary.get("total_suggested_amount", 0))
+        + to_decimal(summary.get("total_conflict_amount", 0)),
         "In-transit": to_decimal(summary.get("total_pending_amount", 0)),
         "Exceptions": to_decimal(summary.get("total_exception_amount", 0)),
     }
@@ -609,7 +680,11 @@ def explain_diagnostic_tool(diagnostic_type: str | None) -> ToolResult | None:
     if not explanation:
         return None
     answer = f"**{diagnostic_type}**\n\n{explanation}"
-    return ToolResult("explain_diagnostic_tool", answer, {"type": "tool", "tool": "explain_diagnostic_tool", "diagnostic_type": diagnostic_type})
+    return ToolResult(
+        "explain_diagnostic_tool",
+        answer,
+        {"type": "tool", "tool": "explain_diagnostic_tool", "diagnostic_type": diagnostic_type},
+    )
 
 
 TOOL_REGISTRY = {
@@ -646,6 +721,7 @@ class SettlementQaAgent:
         if session is not None and not str(type(session)).endswith("Mock'>"):
             try:
                 from app.repositories.reconciliation_repo import ReconciliationRepository
+
                 recon_repo = ReconciliationRepository(session)
                 summary_metrics = await recon_repo.get_summary_metrics("default")
             except Exception as ex:
@@ -663,19 +739,23 @@ class SettlementQaAgent:
         else:
             tool_result = None
         if tool_result:
-            await self.qa_repo.log_interaction({
-                "reconciliation_log_id": source_log.id if source_log else None,
-                "query_text": clean_query,
-                "raw_llm_output": tool_result.answer,
-                "final_response": tool_result.answer,
-                "guardrail_rejected": False,
-                "asked_at": now,
-            })
+            await self.qa_repo.log_interaction(
+                {
+                    "reconciliation_log_id": source_log.id if source_log else None,
+                    "query_text": clean_query,
+                    "raw_llm_output": tool_result.answer,
+                    "final_response": tool_result.answer,
+                    "guardrail_rejected": False,
+                    "asked_at": now,
+                }
+            )
             return QaAskResponse(
                 query=clean_query,
                 answer=tool_result.answer,
                 source_record_id=source_log.id if source_log else None,
-                source_settlement_id=source_log.rzp_settlement.settlement_id if source_log and source_log.rzp_settlement else None,
+                source_settlement_id=source_log.rzp_settlement.settlement_id
+                if source_log and source_log.rzp_settlement
+                else None,
                 source_bank_utr=source_log.bank_transaction.utr if source_log and source_log.bank_transaction else None,
                 guardrail_rejected=False,
                 retrieved_data=tool_result.data,
@@ -686,14 +766,16 @@ class SettlementQaAgent:
         if not source_log:
             project_ans = answer_project_overview_question(clean_query, summary_metrics)
             if project_ans:
-                await self.qa_repo.log_interaction({
-                    "reconciliation_log_id": None,
-                    "query_text": clean_query,
-                    "raw_llm_output": project_ans,
-                    "final_response": project_ans,
-                    "guardrail_rejected": False,
-                    "asked_at": now,
-                })
+                await self.qa_repo.log_interaction(
+                    {
+                        "reconciliation_log_id": None,
+                        "query_text": clean_query,
+                        "raw_llm_output": project_ans,
+                        "final_response": project_ans,
+                        "guardrail_rejected": False,
+                        "asked_at": now,
+                    }
+                )
                 return QaAskResponse(
                     query=clean_query,
                     answer=project_ans,
@@ -719,20 +801,21 @@ class SettlementQaAgent:
 
         # 4. If still no record and no overview answer matched:
         if not source_log:
-
             # If external LLM is configured, ask LLM with full project context
             if settings.LLM_API_KEY:
                 try:
                     llm_ans = await self._call_llm_general_qa(clean_query, history=history, summary=summary_metrics)
                     if llm_ans:
-                        await self.qa_repo.log_interaction({
-                            "reconciliation_log_id": None,
-                            "query_text": clean_query,
-                            "raw_llm_output": llm_ans,
-                            "final_response": llm_ans,
-                            "guardrail_rejected": False,
-                            "asked_at": now,
-                        })
+                        await self.qa_repo.log_interaction(
+                            {
+                                "reconciliation_log_id": None,
+                                "query_text": clean_query,
+                                "raw_llm_output": llm_ans,
+                                "final_response": llm_ans,
+                                "guardrail_rejected": False,
+                                "asked_at": now,
+                            }
+                        )
                         return QaAskResponse(
                             query=clean_query,
                             answer=llm_ans,
@@ -751,14 +834,16 @@ class SettlementQaAgent:
                 "• **Project Concepts**: *What is ingested ledger?*, *What is auto-reconciled net?*, *How do conflicts work?*\n"
                 "• **Reconciliation Logic**: *Explain 3 tiers of matching*, *What is Section 194-O TDS?*"
             )
-            await self.qa_repo.log_interaction({
-                "reconciliation_log_id": None,
-                "query_text": clean_query,
-                "raw_llm_output": "",
-                "final_response": no_record_msg,
-                "guardrail_rejected": False,
-                "asked_at": now,
-            })
+            await self.qa_repo.log_interaction(
+                {
+                    "reconciliation_log_id": None,
+                    "query_text": clean_query,
+                    "raw_llm_output": "",
+                    "final_response": no_record_msg,
+                    "guardrail_rejected": False,
+                    "asked_at": now,
+                }
+            )
             return QaAskResponse(
                 query=clean_query,
                 answer=no_record_msg,
@@ -797,14 +882,16 @@ class SettlementQaAgent:
             raw_llm_output = final_response
 
         # 3. Log Interaction Audit Record
-        await self.qa_repo.log_interaction({
-            "reconciliation_log_id": source_log.id,
-            "query_text": clean_query,
-            "raw_llm_output": raw_llm_output,
-            "final_response": final_response,
-            "guardrail_rejected": guardrail_rejected,
-            "asked_at": now,
-        })
+        await self.qa_repo.log_interaction(
+            {
+                "reconciliation_log_id": source_log.id,
+                "query_text": clean_query,
+                "raw_llm_output": raw_llm_output,
+                "final_response": final_response,
+                "guardrail_rejected": guardrail_rejected,
+                "asked_at": now,
+            }
+        )
 
         retrieved_data = {
             "match_status": source_log.match_status,
@@ -841,7 +928,8 @@ class SettlementQaAgent:
             f"{summary.get('suggested_count', 0)} suggested for CA review, "
             f"{summary.get('conflict_count', 0)} conflicts, "
             f"{summary.get('exception_count', 0)} exceptions (variance)."
-            if summary else "No live batch loaded."
+            if summary
+            else "No live batch loaded."
         )
 
         system_prompt = (

@@ -66,7 +66,9 @@ async def test_processed_refund_is_persisted_once_across_deliveries(monkeypatch)
             assert await stored_status(event_id) == "PROCESSED"
         foreign = await client.post(
             "/api/v1/webhooks/razorpay",
-            **signed_event("evt_foreign_refund", "refund.processed", {**refund, "id": "rfnd_foreign", "currency": "USD"}),
+            **signed_event(
+                "evt_foreign_refund", "refund.processed", {**refund, "id": "rfnd_foreign", "currency": "USD"}
+            ),
         )
         assert foreign.json()["data"]["action_taken"] == "EVENT_RECORDED"
 
