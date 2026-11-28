@@ -228,6 +228,12 @@ async def _get_log_for_update(repo: ReconciliationRepository, record_id: str) ->
     log = await repo.get_by_id(record_id)
     if not log:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    if log.superseded:
+        # A reconcile run replaced the row, possibly while this request waited for the lock.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This record was replaced by a newer reconciliation run. Refresh the ledger and retry.",
+        )
     return log
 
 

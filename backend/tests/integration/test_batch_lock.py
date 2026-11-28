@@ -19,6 +19,7 @@ from app.models.reconciliation_log import ReconciliationLog
 from app.models.webhook_event import ProcessedWebhookEvent
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.razorpay import RazorpayRefundPayload
+from app.services.razorpay_client import RazorpayClient
 
 CSV = (
     "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
@@ -252,3 +253,45 @@ async def test_refund_webhook_waits_for_every_batch_the_refund_touches():
         assert not refund.done()
         await holder.commit()
     assert await asyncio.wait_for(refund, 10) is True
+
+
+@pytest.mark.asyncio
+async def test_sync_does_not_hold_the_batch_lock_while_fetching_refunds(monkeypatch):
+    await seed()
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow_refunds(self, count_limit=100, *, settlements=None):
+        entered.set()
+        await release.wait()
+        return 0
+
+    monkeypatch.setattr(RazorpayClient, "sync_refunds", slow_refunds)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        sync = asyncio.create_task(contender_request(client, "razorpay_sync"))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            approve = await asyncio.wait_for(contender_request(client, "approve"), 3)
+            assert approve.status_code == 200, approve.text
+        finally:
+            release.set()
+        response = await asyncio.wait_for(sync, 10)
+    assert response.status_code == 200, response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["approve", "deny", "revert"])
+async def test_editing_a_replaced_row_is_refused(kind):
+    await seed()
+    async with webhooks.async_session_factory() as db:
+        log = await db.get(ReconciliationLog, "log-lock")
+        log.superseded = True
+        await db.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await contender_request(client, kind)
+
+    assert response.status_code == 409, response.text
+    assert "newer reconciliation run" in response.text
+    async with webhooks.async_session_factory() as db:
+        assert (await db.get(ReconciliationLog, "log-lock")).match_status == "SUGGESTED"
+

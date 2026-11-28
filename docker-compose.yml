@@ -58,7 +58,6 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: recongrid-worker
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-recongrid}:${POSTGRES_PASSWORD:-recongrid}@postgres:5432/${POSTGRES_DB:-recongrid}}
