@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from app.utils.csv_parser import (
     BankCsvParser,
+    CsvRowLimitExceededError,
     compute_row_hash,
     extract_utr_from_text,
     parse_flexible_date,
@@ -34,6 +35,7 @@ def test_parse_flexible_dates():
 
     # Raises ValueError on completely invalid string
     import pytest
+
     with pytest.raises(ValueError, match="Unable to parse date string"):
         parse_flexible_date("INVALID_DATE_STRING")
 
@@ -142,8 +144,8 @@ def test_parse_utf8_bom_prefixed_csv():
 def test_parse_indian_lakh_crore_comma_amounts():
     csv_lines = [
         "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.",
-        "24/08/2026,CMS002938491820,CMS/002938491820/HDFC,\"1,23,456.78\",0.00",
-        "25/08/2026,CMS002938491821,CMS/002938491821/HDFC,\"12,34,56,789.50\",0.00",
+        '24/08/2026,CMS002938491820,CMS/002938491820/HDFC,"1,23,456.78",0.00',
+        '25/08/2026,CMS002938491821,CMS/002938491821/HDFC,"12,34,56,789.50",0.00',
     ]
     rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
     assert len(rows) == 2
@@ -253,7 +255,7 @@ def test_parse_multiline_quoted_narration():
     """Verify multiline quoted fields with embedded newlines are preserved in description without breaking row count."""
     csv_lines = [
         "Date,Narration,Deposit Amt.,Withdrawal Amt.\n",
-        "24/08/2026,\"Settlement for Order #99102\nClient: ACME Corp Bangalore\",42000.00,0.00\n",
+        '24/08/2026,"Settlement for Order #99102\nClient: ACME Corp Bangalore",42000.00,0.00\n',
         "25/08/2026,Direct Debit Bank Charge,0.00,150.00\n",
     ]
     rows = list(BankCsvParser.parse_csv_stream(iter(csv_lines)))
@@ -305,4 +307,71 @@ def test_parse_preamble_up_to_30_lines():
     assert rows[0]["utr"] == "CMS1122334455"
 
 
+def test_parse_csv_stream_streams_lazily_beyond_peek_window():
+    """Verify parse_csv_stream only buffers the ~50-line header peek window, not the full file."""
+    consumed = 0
 
+    def line_gen():
+        nonlocal consumed
+        consumed += 1
+        yield "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.\n"
+        for idx in range(1, 201):
+            consumed += 1
+            yield f"24/08/2026,CMS{idx:012d},CMS/{idx:012d}/HDFC,100.00,0.00\n"
+
+    stream = BankCsvParser.parse_csv_stream(line_gen())
+    first_row = next(stream)
+    assert first_row["utr"] == "CMS000000000001"
+    # Header peek window (50 lines) should satisfy initialization without draining all 201 lines.
+    assert consumed <= BankCsvParser.HEADER_PEEK_LINES + 2
+
+    remaining = list(stream)
+    assert len(remaining) == 199
+    assert consumed == 201
+
+
+def test_parse_csv_stream_enforces_max_rows_and_stops_early():
+    """Verify max_rows allows exact ceiling and raises CsvRowLimitExceededError immediately above it."""
+    exact_lines = ["Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt."] + [
+        f"24/08/2026,CMS{i:012d},CMS/{i}/HDFC,100.00,0.00" for i in range(1, 6)
+    ]
+    assert len(list(BankCsvParser.parse_csv_stream(iter(exact_lines), max_rows=5))) == 5
+
+    consumed = 0
+
+    def huge_gen():
+        nonlocal consumed
+        consumed += 1
+        yield "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt."
+        for i in range(1, 501):
+            consumed += 1
+            yield f"24/08/2026,CMS{i:012d},CMS/{i}/HDFC,100.00,0.00"
+
+    import pytest
+
+    with pytest.raises(CsvRowLimitExceededError) as exc_info:
+        list(BankCsvParser.parse_csv_stream(huge_gen(), max_rows=60))
+
+    assert exc_info.value.max_rows == 60
+    assert exc_info.value.row_count == 61
+    # Should halt right when row 61 is seen, never draining the 500-line source.
+    assert consumed < 70
+
+
+def test_count_data_rows_ignores_preamble_and_blanks():
+    """Verify count_data_rows counts only non-empty post-header data rows."""
+    lines = [
+        "HDFC Bank Statement",
+        "Account: 1234",
+        "",
+        "Date,Chq/Ref No.,Narration,Deposit Amt.,Withdrawal Amt.",
+        "24/08/2026,CMS001,TX 1,500.00,0.00",
+        "   ,   ,   ,   ,   ",
+        "24/08/2026,CMS002,TX 2,750.00,0.00",
+    ]
+    assert BankCsvParser.count_data_rows(iter(lines), max_rows=2) == 2
+
+    import pytest
+
+    with pytest.raises(CsvRowLimitExceededError):
+        BankCsvParser.count_data_rows(iter(lines), max_rows=1)
