@@ -298,3 +298,5 @@ class ReconciliationBatch(Base, TimestampMixin):
     lock_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Totals frozen at sign-off time (amounts stored as decimal strings, never floats).
     closing_totals: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Refund total per settlement_id at sign-off; a locked batch's tax schedule reads these.
+    refund_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)

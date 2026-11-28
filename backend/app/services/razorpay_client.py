@@ -238,7 +238,7 @@ class RazorpayClient:
             setl, created = await self.settlement_repo.upsert_settlement(s_data)
             if created:
                 newly_inserted += 1
-            else:
+            elif created is not None:
                 updated_count += 1
 
         all_settlements = await self.settlement_repo.get_all()

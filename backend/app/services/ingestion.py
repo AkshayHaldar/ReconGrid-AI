@@ -36,8 +36,6 @@ class IngestionService:
         column_mappings: str | dict | None = None,
     ) -> BankUploadResponse:
         """Parses bank statement (CSV or PDF), records transactions, and runs reconciliation."""
-        # A signed-off period takes no new rows, so an upload cannot overwrite approved decisions.
-        await ensure_batch_unlocked(self.recon_repo, batch_id)
         filename = file.filename or "statement.csv"
         ext = filename.lower().split(".")[-1] if "." in filename else ""
 
@@ -139,6 +137,8 @@ class IngestionService:
                 detail="No valid bank transaction rows could be parsed from the uploaded file.",
             )
 
+        # A signed-off period takes no new rows, so an upload cannot overwrite approved decisions.
+        await ensure_batch_unlocked(self.recon_repo, batch_id)
         await self.recon_repo.lock_batch_before_upload(batch_id)
         inserted_count = 0
         duplicate_count = 0

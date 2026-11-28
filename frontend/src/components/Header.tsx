@@ -179,7 +179,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Action Buttons: quiet helpers first, the main action (Upload) last */}
-            <div className="flex items-center gap-1.5 w-full sm:w-auto shrink-0 sm:ml-auto xl:ml-0">
+            <div className="flex flex-wrap xl:flex-nowrap items-center gap-1.5 w-full sm:w-auto min-w-0 sm:ml-auto xl:ml-0">
               {/* Keyboard Shortcuts Trigger */}
               <button
                 onClick={() => setShowShortcuts(true)}
@@ -254,7 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-label="Close & Sign Off Period"
                 >
                   <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
-                  <span className="hidden sm:inline">Close &amp; Sign Off Period</span>
+                  <span className="hidden lg:inline">Close &amp; Sign Off Period</span>
                 </button>
               )}
 

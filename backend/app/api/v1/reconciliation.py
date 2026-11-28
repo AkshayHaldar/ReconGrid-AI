@@ -6,6 +6,7 @@ import json
 import re
 from dataclasses import asdict
 from datetime import date
+from decimal import Decimal
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -590,9 +591,15 @@ async def _all_active_logs(repo: ReconciliationRepository, batch_id: str, page_s
 
 
 async def _batch_tax_schedule(db: AsyncSession, batch_id: str, intra_state: bool) -> TaxSchedule:
-    logs = await _all_active_logs(ReconciliationRepository(db), batch_id)
+    repo = ReconciliationRepository(db)
+    logs = await _all_active_logs(repo, batch_id)
     settlement_ids = {log.rzp_settlement.settlement_id for log in logs if log.rzp_settlement is not None}
-    refund_totals = await SettlementRepository(db).get_processed_refund_totals(settlement_ids)
+    locked = await repo.get_locked_batch(batch_id)
+    if locked is not None:
+        # A refund that arrives after sign-off must not change the signed-off schedule.
+        refund_totals = {key: Decimal(value) for key, value in (locked.refund_snapshot or {}).items()}
+    else:
+        refund_totals = await SettlementRepository(db).get_processed_refund_totals(settlement_ids)
     return DiagnosticsService.calculate_batch_tax_schedule(
         batch_id, logs, intra_state=intra_state, refund_totals=refund_totals,
     )

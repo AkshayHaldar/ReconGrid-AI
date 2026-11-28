@@ -1,5 +1,6 @@
 """Month-end close: pre-flight checks, sign-off record and the HTTP 423 ledger freeze."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -8,9 +9,10 @@ from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1 import webhooks
 from app.core.config import settings
@@ -22,7 +24,7 @@ from app.models.webhook_event import ProcessedWebhookEvent
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.razorpay import RazorpayRefundPayload
-from app.services.batch_lock import BatchLockedError
+from app.services.batch_lock import BatchLockedError, ensure_batch_unlocked, lock_batch
 from app.services.reconciliation import ReconciliationEngine
 
 API = "/api/v1/reconciliation"
@@ -254,8 +256,6 @@ async def test_statement_upload_to_locked_batch_is_rejected(db_session, client):
 async def test_reconciliation_engine_refuses_locked_batch(db_session):
     await add_log(db_session, "aug", "ok", "MATCHED")
     repo = ReconciliationRepository(db_session)
-    from app.services.batch_lock import lock_batch
-
     await lock_batch(repo, "aug", "CA Ramesh", None)
     await db_session.commit()
 
@@ -269,8 +269,6 @@ async def test_reconciliation_engine_refuses_locked_batch(db_session):
 @pytest.mark.asyncio
 async def test_late_webhook_stores_settlement_but_does_not_rematch_locked_batch(db_session, monkeypatch):
     await add_log(db_session, "default", "ok", "MATCHED")
-    from app.services.batch_lock import lock_batch
-
     await lock_batch(ReconciliationRepository(db_session), "default", "CA Ramesh", None)
     await db_session.commit()
     monkeypatch.setattr(webhooks.BankRepository, "get_all_by_batch", AsyncMock(return_value=[object()]))
@@ -355,6 +353,126 @@ async def test_refund_webhook_skips_locked_batch_and_still_rematches_open_one(db
     assert [log.id for log in reopened if log.superseded] == ["log-open"]
 
 
+async def add_settled_log(db: AsyncSession, batch_id: str, name: str, settlement_id: str):
+    settlement = RazorpaySettlement(
+        id=f"db-{settlement_id}",
+        settlement_id=settlement_id,
+        amount=Decimal("100.00"),
+        gross_amount=Decimal("100.00"),
+        utr=f"UTR-{name}",
+        is_test_mode=True,
+    )
+    db.add(settlement)
+    log = await add_log(db, batch_id, name, "MATCHED")
+    log.rzp_settlement_id = settlement.id
+    await db.commit()
+    return settlement
+
+
+def settlement_update(settlement_id: str) -> dict:
+    return {"settlement_id": settlement_id, "amount": Decimal("999.00"), "utr": "CHANGED"}
+
+
+@pytest.mark.asyncio
+async def test_settlement_shown_by_a_locked_batch_is_not_updated(db_session, client):
+    await add_settled_log(db_session, "aug", "closed", "setl_closed")
+    await add_settled_log(db_session, "sep", "open", "setl_open")
+    assert (await client.post(f"{API}/aug/lock", json=SIGN_OFF)).status_code == 200
+    repo = SettlementRepository(db_session)
+
+    closed, closed_flag = await repo.upsert_settlement(settlement_update("setl_closed"))
+    opened, opened_flag = await repo.upsert_settlement(settlement_update("setl_open"))
+
+    assert (closed_flag, closed.amount, closed.utr) == (None, Decimal("100.00"), "UTR-closed")
+    assert (opened_flag, opened.amount, opened.utr) == (False, Decimal("999.00"), "CHANGED")
+
+
+@pytest.mark.asyncio
+async def test_demo_reset_keeps_settlements_of_a_locked_batch(db_session, client):
+    await add_settled_log(db_session, "aug", "closed", "setl_closed")
+    await add_settled_log(db_session, "sep", "open", "setl_open")
+    assert (await client.post(f"{API}/aug/lock", json=SIGN_OFF)).status_code == 200
+
+    assert (await client.post("/api/v1/demo/reset", params={"batch_id": "sep"})).status_code == 200
+
+    db_session.expire_all()
+    assert (await db_session.scalars(select(RazorpaySettlement.settlement_id))).all() == ["setl_closed"]
+
+
+@pytest.mark.asyncio
+async def test_refund_after_sign_off_leaves_the_locked_tax_schedule_alone(db_session, client):
+    await add_settled_log(db_session, "aug", "closed", "setl_closed")
+    assert (await client.post(f"{API}/aug/lock", json=SIGN_OFF)).status_code == 200
+    before = (await client.get(f"{API}/aug/tax-schedule")).json()["data"]
+
+    entity = {
+        "id": "rfnd_after",
+        "payment_id": "pay_after",
+        "currency": "INR",
+        "amount": 2500,
+        "status": "processed",
+        "created_at": 1787200000,
+    }
+    repo = SettlementRepository(db_session)
+    await repo.upsert_refund(RazorpayRefundPayload.model_validate(entity).to_record(entity))
+    await repo.link_refund("rfnd_after", "setl_closed")
+    await db_session.commit()
+
+    assert (await client.get(f"{API}/aug/tax-schedule")).json()["data"] == before
+    # The refund itself is still stored.
+    assert await repo.get_processed_refund_totals({"setl_closed"}) == {"setl_closed": Decimal("25.00")}
+
+
+@pytest.mark.asyncio
+async def test_postgres_sign_off_waits_for_an_in_flight_ledger_write(db_session):
+    if db_session.get_bind().dialect.name != "postgresql":
+        pytest.skip("needs real concurrent transactions")
+    await add_log(db_session, "aug", "ok", "MATCHED")
+    sessions = async_sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    async with sessions() as writer, sessions() as signer:
+        await ensure_batch_unlocked(ReconciliationRepository(writer), "aug")
+        sign_off = asyncio.create_task(lock_batch(ReconciliationRepository(signer), "aug", "CA Ramesh", None))
+        await asyncio.sleep(0.5)
+        assert not sign_off.done()
+        # The writer commits a conflict while the sign-off is queued; the sign-off must see it.
+        await add_log(writer, "aug", "conflict", "CONFLICT")
+        with pytest.raises(HTTPException) as exc:
+            await asyncio.wait_for(sign_off, 5)
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_postgres_writer_queued_behind_a_sign_off_is_refused(db_session):
+    if db_session.get_bind().dialect.name != "postgresql":
+        pytest.skip("needs real concurrent transactions")
+    await add_log(db_session, "aug", "ok", "MATCHED")
+    sessions = async_sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    async with sessions() as writer, sessions() as signer:
+        await lock_batch(ReconciliationRepository(signer), "aug", "CA Ramesh", None)
+        write = asyncio.create_task(ensure_batch_unlocked(ReconciliationRepository(writer), "aug"))
+        await asyncio.sleep(0.5)
+        assert not write.done()
+        await signer.commit()
+        with pytest.raises(BatchLockedError):
+            await asyncio.wait_for(write, 5)
+
+
+@pytest.mark.asyncio
+async def test_postgres_sign_off_waits_for_an_in_flight_settlement_write(db_session):
+    if db_session.get_bind().dialect.name != "postgresql":
+        pytest.skip("needs real concurrent transactions")
+    await add_settled_log(db_session, "aug", "closed", "setl_closed")
+    sessions = async_sessionmaker(bind=db_session.bind, expire_on_commit=False)
+    async with sessions() as writer, sessions() as signer:
+        await SettlementRepository(writer).upsert_settlement(settlement_update("setl_closed"))
+        sign_off = asyncio.create_task(lock_batch(ReconciliationRepository(signer), "aug", "CA Ramesh", None))
+        await asyncio.sleep(0.5)
+        assert not sign_off.done()
+        await writer.commit()
+        await asyncio.wait_for(sign_off, 5)
+        await signer.commit()
+
+
 def test_alembic_0003_creates_and_drops_reconciliation_batches(tmp_path):
     import os
     import sqlite3
@@ -384,6 +502,7 @@ def test_alembic_0003_creates_and_drops_reconciliation_batches(tmp_path):
         "locked_by",
         "lock_note",
         "closing_totals",
+        "refund_snapshot",
     ]
     alembic("downgrade", "0002")
     assert columns() == []

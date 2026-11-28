@@ -85,6 +85,8 @@ export default function DashboardPage() {
     setAnchorId(undefined);
     setHighlightedId(null);
     setToast(null);
+    setStatus(null);
+    setIsSignOffOpen(false);
     setSelectedBankState(value);
   };
   const handleDateRangeChange = (from?: string, to?: string) => {
@@ -105,8 +107,12 @@ export default function DashboardPage() {
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
+  // Only the newest status request may write: a slow reply for another bank must not set this one's lock state.
+  const statusRequest = useRef(0);
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchStatus(activeBatchId));
+    const request = ++statusRequest.current;
+    const next = await fetchStatus(activeBatchId);
+    if (request === statusRequest.current) setStatus(next);
   }, [activeBatchId]);
   // Month-end close: a signed-off batch is read-only (the API answers 423 to writes).
   const isLocked = Boolean(status?.is_locked);
@@ -353,7 +359,8 @@ export default function DashboardPage() {
     chosenSettlementId: string,
     note?: string
   ) => {
-    if (isLocked) return;
+    // Throw, so the drawer shows the reason and stays open instead of closing as if it had resolved.
+    if (isLocked) throw new Error("This period was signed off. The ledger is read-only.");
     try {
       await resolveConflict(recordId, chosenSettlementId, note);
       await loadData();

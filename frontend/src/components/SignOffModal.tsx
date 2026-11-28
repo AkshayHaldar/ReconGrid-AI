@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Lock, CheckCircle2, XCircle, Loader2, ShieldCheck } from "lucide-react";
 import { fetchLockStatus, lockBatch } from "@/lib/api";
 import { formatINR, formatPeriodLabel } from "@/lib/formatters";
@@ -28,6 +28,35 @@ export const SignOffModal: React.FC<SignOffModalProps> = ({ isOpen, onClose, bat
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus moves into the dialog on open and goes back to the opener on close.
+  useEffect(() => {
+    if (!isOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => opener?.focus();
+  }, [isOpen]);
+
+  // Tab and Shift+Tab stay inside the dialog.
+  const trapFocus = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab" || !dialogRef.current) return;
+    const items = dialogRef.current.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), input:not([disabled]), textarea:not([disabled])"
+    );
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (!first) {
+      e.preventDefault();
+    } else if (e.shiftKey && (active === first || active === dialogRef.current)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -79,6 +108,12 @@ export const SignOffModal: React.FC<SignOffModalProps> = ({ isOpen, onClose, bat
       onLocked();
       onClose();
     } catch (err: any) {
+      if (err?.code === "BATCH_ALREADY_LOCKED") {
+        // Someone else signed it off first: show the locked ledger.
+        onLocked();
+        onClose();
+        return;
+      }
       setSubmitError(err?.message || "Failed to sign off the period.");
     } finally {
       setSubmitting(false);
@@ -87,6 +122,9 @@ export const SignOffModal: React.FC<SignOffModalProps> = ({ isOpen, onClose, bat
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
+      onKeyDown={trapFocus}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-3 sm:p-4"
       role="dialog"
       aria-modal="true"

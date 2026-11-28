@@ -136,7 +136,8 @@ test("handlers send no write requests while the batch is locked", async () => {
   await table.onDeny("r1");
   await table.onOpenConflict({ id: "r1", rzp_settlement_db_id: "s1" });
   await find("FilterBar").onBatchApprove();
-  await find("ConflictDrawer").onResolve("r1", "setl_1");
+  // The drawer closes on success, so a refused resolve has to reject.
+  await assert.rejects(find("ConflictDrawer").onResolve("r1", "setl_1"), /signed off/);
   assert.deepEqual(calls, []);
 });
 

@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("locked_by", sa.String(length=255), nullable=True),
         sa.Column("lock_note", sa.Text(), nullable=True),
         sa.Column("closing_totals", sa.JSON(), nullable=True),
+        sa.Column("refund_snapshot", sa.JSON(), nullable=True),
     )
 
 

@@ -8,8 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.locks import lock_batch as lock_batch_writes
+from app.core.locks import lock_ledger_freeze
 from app.models.reconciliation_log import ReconciliationBatch
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.reconciliation import PreflightCheck, PreflightResult
 
 BATCH_LOCKED_CODE = "BATCH_LOCKED"
@@ -45,7 +48,11 @@ class BatchLockedError(HTTPException):
 
 
 async def ensure_batch_unlocked(repo: ReconciliationRepository, batch_id: str) -> None:
-    """Raise BatchLockedError (423) if the batch has been signed off."""
+    """Take the batch's write lock, then raise BatchLockedError (423) if it has been signed off.
+
+    The lock lasts until commit, so a sign-off cannot slip in between this check and the caller's writes.
+    """
+    await lock_batch_writes(repo.session, batch_id)
     batch = await repo.get_locked_batch(batch_id)
     if batch is not None:
         raise BatchLockedError(batch_id, batch.locked_by, batch.locked_at)
@@ -53,6 +60,12 @@ async def ensure_batch_unlocked(repo: ReconciliationRepository, batch_id: str) -
 
 async def guard_batch_unlocked(batch_id: str = "default", db: AsyncSession = Depends(get_db)) -> None:
     """Route dependency for endpoints that carry the batch id in the path."""
+    await ensure_batch_unlocked(ReconciliationRepository(db), batch_id)
+
+
+async def guard_demo_write(batch_id: str = "default", db: AsyncSession = Depends(get_db)) -> None:
+    """guard_batch_unlocked for routes that also rewrite settlements: freeze lock first, then batch lock."""
+    await lock_ledger_freeze(db)
     await ensure_batch_unlocked(ReconciliationRepository(db), batch_id)
 
 
@@ -123,6 +136,9 @@ async def lock_batch(
     repo: ReconciliationRepository, batch_id: str, locked_by: str, lock_note: str | None
 ) -> ReconciliationBatch:
     """Validate the pre-flight checks, then freeze the batch with the auditor's sign-off."""
+    # Wait for in-flight writers, so the checks and closing totals see their committed rows.
+    await lock_ledger_freeze(repo.session, exclusive=True)
+    await lock_batch_writes(repo.session, batch_id)
     existing = await repo.get_batch(batch_id)
     if existing is not None and existing.is_locked:
         raise HTTPException(
@@ -152,6 +168,7 @@ async def lock_batch(
     batch.locked_by = locked_by
     batch.lock_note = lock_note
     batch.closing_totals = build_closing_totals(summary)
+    batch.refund_snapshot = await SettlementRepository(repo.session).get_batch_refund_totals(batch_id)
     repo.session.add(batch)
     try:
         await repo.session.flush()
