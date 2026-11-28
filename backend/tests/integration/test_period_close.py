@@ -18,7 +18,10 @@ from app.main import app
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationBatch, ReconciliationLog
+from app.models.webhook_event import ProcessedWebhookEvent
 from app.repositories.reconciliation_repo import ReconciliationRepository
+from app.repositories.settlement_repo import SettlementRepository
+from app.schemas.razorpay import RazorpayRefundPayload
 from app.services.batch_lock import BatchLockedError
 from app.services.reconciliation import ReconciliationEngine
 
@@ -289,8 +292,6 @@ async def test_late_webhook_stores_settlement_but_does_not_rematch_locked_batch(
     assert resp.status_code == 200
     db_session.expire_all()
     assert await db_session.scalar(select(func.count()).select_from(RazorpaySettlement)) == 1
-    from app.models.webhook_event import ProcessedWebhookEvent
-
     status = await db_session.scalar(
         select(ProcessedWebhookEvent.processing_status).where(ProcessedWebhookEvent.razorpay_event_id == "evt_late")
     )
@@ -298,6 +299,60 @@ async def test_late_webhook_stores_settlement_but_does_not_rematch_locked_batch(
     # The ledger rows of the locked batch were not superseded or rewritten.
     logs = (await db_session.scalars(select(ReconciliationLog))).all()
     assert [(l.id, l.superseded) for l in logs] == [("log-ok", False)]
+
+
+@pytest.mark.asyncio
+async def test_refund_webhook_skips_locked_batch_and_still_rematches_open_one(db_session, client):
+    settlement = RazorpaySettlement(id="setl-db", settlement_id="setl_shared", amount=Decimal("100.00"))
+    db_session.add(settlement)
+    for batch_id, name in (("aug", "closed"), ("sep", "open")):
+        log = await add_log(db_session, batch_id, name, "MATCHED")
+        log.rzp_settlement_id = settlement.id
+    db_session.add(ReconciliationBatch(batch_id="aug", is_locked=True, locked_by="CA Ramesh"))
+    await db_session.commit()
+    payload = {
+        "id": "evt_refund_late",
+        "event": "refund.processed",
+        "payload": {
+            "refund": {
+                "entity": {
+                    "id": "rfnd_late",
+                    "payment_id": "pay_late",
+                    "currency": "INR",
+                    "amount": 500,
+                    "status": "processed",
+                    "created_at": 1787200000,
+                }
+            }
+        },
+    }
+    await SettlementRepository(db_session).upsert_refund(
+        RazorpayRefundPayload.model_validate(payload["payload"]["refund"]["entity"]).to_record({})
+    )
+    await SettlementRepository(db_session).link_refund("rfnd_late", "setl_shared")
+    await db_session.commit()
+    body = json.dumps(payload).encode()
+    sig = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+
+    resp = await client.post(
+        "/api/v1/webhooks/razorpay",
+        content=body,
+        headers={"X-Razorpay-Signature": sig, "Content-Type": "application/json"},
+    )
+
+    assert resp.status_code == 200
+    db_session.expire_all()
+    status = await db_session.scalar(
+        select(ProcessedWebhookEvent.processing_status).where(
+            ProcessedWebhookEvent.razorpay_event_id == "evt_refund_late"
+        )
+    )
+    assert status == "PROCESSED"
+    closed = (await db_session.scalars(select(ReconciliationLog).where(ReconciliationLog.batch_id == "aug"))).all()
+    assert [(log.id, log.superseded) for log in closed] == [("log-closed", False)]
+    reopened = (await db_session.scalars(select(ReconciliationLog).where(ReconciliationLog.batch_id == "sep"))).all()
+    assert len(reopened) == 2
+    assert [log.id for log in reopened if log.superseded] == ["log-open"]
 
 
 def test_alembic_0003_creates_and_drops_reconciliation_batches(tmp_path):
