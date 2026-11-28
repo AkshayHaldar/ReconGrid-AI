@@ -293,12 +293,24 @@ export async function fetchBankPasswordHints(): Promise<Array<{ bank: string; pa
 }
 
 export async function triggerRazorpaySync(count: number = 100, batchId: string = "default"): Promise<any> {
-  const res = await fetch(`${getApiBase()}/razorpay/sync?batch_id=${batchId}`, {
+  const res = await fetch(`${getApiBase()}/razorpay/sync?batch_id=${encodeURIComponent(batchId)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ count }),
   });
-  if (!res.ok) throw new Error("Failed to sync Razorpay settlements");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const errorObj = new Error(
+      err?.error?.message ||
+        err?.detail?.message ||
+        (typeof err?.detail === "string" ? err.detail : null) ||
+        "Failed to sync Razorpay settlements"
+    );
+    (errorObj as any).code = err?.error?.code || err?.detail?.code;
+    (errorObj as any).status = res.status;
+    (errorObj as any).details = err?.error?.details || err?.detail?.details;
+    throw errorObj;
+  }
   const json = await res.json();
   return json.data;
 }

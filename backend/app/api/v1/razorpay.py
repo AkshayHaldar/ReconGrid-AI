@@ -1,6 +1,6 @@
 """Razorpay Settlements and Manual Sync API Routes."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -11,7 +11,11 @@ from app.schemas.razorpay import (
     RazorpaySyncRequest,
     RazorpaySyncResponse,
 )
-from app.services.razorpay_client import RazorpayClient
+from app.services.razorpay_client import (
+    RazorpayClient,
+    RazorpayFetchError,
+    RazorpayFetchExhausted,
+)
 
 router = APIRouter(prefix="/razorpay", tags=["Razorpay"])
 
@@ -24,7 +28,27 @@ async def sync_razorpay_settlements(
 ):
     """Triggers an automated paginated fetch of Razorpay settlements with exponential backoff."""
     client = RazorpayClient(db)
-    result = await client.sync_settlements(count_limit=payload.count, batch_id=batch_id)
+    try:
+        result = await client.sync_settlements(count_limit=payload.count, batch_id=batch_id)
+    except RazorpayFetchExhausted as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "details": {"upstream_status": exc.status_code},
+            },
+        ) from exc
+    except RazorpayFetchError as exc:
+        http_status = exc.status_code if exc.status_code in (400, 401, 403, 404) else status.HTTP_502_BAD_GATEWAY
+        raise HTTPException(
+            status_code=http_status,
+            detail={
+                "code": exc.code,
+                "message": exc.message,
+                "details": {"upstream_status": exc.status_code},
+            },
+        ) from exc
     return ApiResponse.ok(result)
 
 
