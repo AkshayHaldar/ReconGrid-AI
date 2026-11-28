@@ -21,6 +21,7 @@ from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
 from app.schemas.razorpay import RazorpayRefundPayload
 from app.schemas.webhook import WebhookAckResponse, WebhookEventItem, WebhookHealth
+from app.services.batch_lock import BatchLockedError
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import paise_to_rupees
 
@@ -163,8 +164,15 @@ async def reconcile_webhook_event(event_id: str) -> None:
             all_setls = await settlement_repo.get_all()
             for batch_id in batch_ids:
                 bank_txs = await bank_repo.get_all_by_batch(batch_id)
-                if bank_txs:
+                if not bank_txs:
+                    continue
+                try:
                     await engine.reconcile_batch(bank_txs, all_setls, batch_id=batch_id)
+                except BatchLockedError:
+                    # The settlement or refund is stored, but a signed-off period is never re-matched.
+                    logger.warning(
+                        "webhook_reconciliation_skipped_batch_locked", event_id=event_id, batch_id=batch_id
+                    )
             event.processing_status = "PROCESSED"
             await db.commit()
         except Exception:

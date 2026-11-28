@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
-from app.models.reconciliation_log import ReconciliationLog, audit_columns, row_matches_seal
+from app.models.reconciliation_log import ReconciliationBatch, ReconciliationLog, audit_columns, row_matches_seal
 from app.utils.ledger_cursor import decode_cursor, encode_cursor, query_scope
 from app.utils.money import to_decimal
 
@@ -67,6 +67,20 @@ class ReconciliationRepository:
         )
         await self.session.execute(stmt)
         await self.session.flush()
+
+    async def get_batch(self, batch_id: str) -> ReconciliationBatch | None:
+        """Period-close metadata for a batch, or None when it was never signed off."""
+        result = await self.session.execute(select(ReconciliationBatch).where(ReconciliationBatch.batch_id == batch_id))
+        return result.scalar_one_or_none()
+
+    async def get_locked_batch(self, batch_id: str) -> ReconciliationBatch | None:
+        """The batch row if (and only if) the batch is locked."""
+        batch = await self.get_batch(batch_id)
+        return batch if batch is not None and batch.is_locked else None
+
+    async def get_batch_id_for_log(self, log_id: str) -> str | None:
+        result = await self.session.execute(select(ReconciliationLog.batch_id).where(ReconciliationLog.id == log_id))
+        return result.scalar_one_or_none()
 
     async def get_by_id(self, log_id: str) -> ReconciliationLog | None:
         stmt = (

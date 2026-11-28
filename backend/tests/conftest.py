@@ -85,7 +85,7 @@ async def setup_test_database(pytestconfig: pytest.Config, monkeypatch: pytest.M
                 text(
                     "TRUNCATE TABLE bank_transactions, razorpay_settlements, "
                     "razorpay_refunds, reconciliation_logs, qa_interaction_logs, "
-                    "processed_webhook_events CASCADE;"
+                    "processed_webhook_events, reconciliation_batches CASCADE;"
                 )
             )
 

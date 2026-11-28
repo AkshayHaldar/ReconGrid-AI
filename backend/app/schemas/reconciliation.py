@@ -29,6 +29,12 @@ class ReconciliationStatusResponse(BaseModel):
     is_in_balance: bool = False
     last_reconciled_at: datetime | None = None
 
+    # Period close sign-off (see POST /{batch_id}/lock)
+    is_locked: bool = False
+    locked_at: datetime | None = None
+    locked_by: str | None = None
+    lock_note: str | None = None
+
     @field_validator(
         "total_ingested_amount",
         "total_reconciled_amount",
@@ -129,6 +135,51 @@ class BatchApproveRequest(BaseModel):
 class BatchApproveResponse(BaseModel):
     approved_count: int
     batch_id: str
+
+
+class LockBatchRequest(BaseModel):
+    """Sign-off details entered by the Finance Controller / CA when closing a period."""
+
+    locked_by: str = Field(
+        ..., min_length=2, max_length=255, description="Auditor name and firm, e.g. 'CA Ramesh, ABC & Co.'"
+    )
+    lock_note: str | None = Field(default=None, max_length=2000, description="Optional sign-off statement")
+
+    @field_validator("locked_by", mode="before")
+    @classmethod
+    def strip_locked_by(cls, v: Any) -> Any:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("lock_note", mode="before")
+    @classmethod
+    def blank_note_is_none(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip() or None
+        return v
+
+
+class PreflightCheck(BaseModel):
+    id: str
+    label: str
+    passed: bool
+    detail: str
+
+
+class PreflightResult(BaseModel):
+    can_lock: bool
+    checks: list[PreflightCheck]
+    unresolved_variance: Decimal = Field(..., decimal_places=2)
+
+
+class BatchLockStatus(BaseModel):
+    batch_id: str
+    is_locked: bool
+    locked_at: datetime | None = None
+    locked_by: str | None = None
+    lock_note: str | None = None
+    closing_totals: dict[str, Any] | None = None
+    # Live pre-flight result; omitted once the batch is locked
+    preflight: PreflightResult | None = None
 
 
 class ConflictResolveRequest(BaseModel):

@@ -72,6 +72,35 @@ export interface ReconciliationStatus {
   total_unresolved_variance?: string;
   is_in_balance?: boolean;
   last_reconciled_at?: string | null;
+  /** Month-end close sign-off. A locked batch is read-only (the API answers 423 to writes). */
+  is_locked?: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
+  lock_note?: string | null;
+}
+
+export interface PreflightCheck {
+  id: string;
+  label: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface PreflightResult {
+  can_lock: boolean;
+  checks: PreflightCheck[];
+  unresolved_variance: string;
+}
+
+export interface BatchLockStatus {
+  batch_id: string;
+  is_locked: boolean;
+  locked_at?: string | null;
+  locked_by?: string | null;
+  lock_note?: string | null;
+  closing_totals?: Record<string, string | number> | null;
+  /** Live pre-flight checklist; null once the batch is locked. */
+  preflight?: PreflightResult | null;
 }
 
 export interface QaAskResponse {

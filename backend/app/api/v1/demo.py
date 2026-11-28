@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.locks import lock_ledger_freeze
 from app.models.bank_transaction import BankTransaction
 from app.models.razorpay_settlement import RazorpaySettlement
 from app.models.reconciliation_log import ReconciliationLog
@@ -18,6 +19,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.common import ApiResponse
+from app.services.batch_lock import guard_demo_write
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.money import calculate_standard_fees, to_decimal
 
@@ -49,7 +51,7 @@ router = APIRouter(
 )
 
 
-@router.post("/reset", response_model=ApiResponse[dict])
+@router.post("/reset", response_model=ApiResponse[dict], dependencies=[Depends(guard_demo_write)])
 async def reset_demo_dataset(
     batch_id: str = "default",
     db: AsyncSession = Depends(get_db),
@@ -57,12 +59,19 @@ async def reset_demo_dataset(
     """Clears all bank transactions and reconciliation logs for clean testing."""
     await db.execute(delete(ReconciliationLog).where(ReconciliationLog.batch_id == batch_id))
     await db.execute(delete(BankTransaction).where(BankTransaction.batch_id == batch_id))
-    await db.execute(delete(RazorpaySettlement).where(RazorpaySettlement.is_test_mode == True))
+    # Settlements are shared between batches: keep the ones a signed-off batch still shows.
+    await lock_ledger_freeze(db)
+    await db.execute(
+        delete(RazorpaySettlement).where(
+            RazorpaySettlement.is_test_mode == True,
+            RazorpaySettlement.id.not_in(SettlementRepository.frozen_settlement_ids()),
+        )
+    )
     await db.commit()
     return ApiResponse.ok({"status": "reset", "batch_id": batch_id})
 
 
-@router.post("/seed", response_model=ApiResponse[dict])
+@router.post("/seed", response_model=ApiResponse[dict], dependencies=[Depends(guard_demo_write)])
 async def seed_demo_dataset(
     count: int = 60,
     batch_id: str = "default",

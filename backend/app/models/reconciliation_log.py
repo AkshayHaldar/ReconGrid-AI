@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Numeric, String, Text, event, select, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Numeric, String, Text, event, select, text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
@@ -279,3 +279,24 @@ def _chain_reconciliation_logs(session: Session, flush_context: Any, instances: 
             log.previous_hash = previous_link
             log.seal()
             previous_link = log.compute_link_hash()
+
+
+class ReconciliationBatch(Base, TimestampMixin):
+    """Per-batch period close state.
+
+    A batch is just a ``batch_id`` string on the log rows, so this table holds the metadata that
+    belongs to the batch as a whole. A row only exists once a batch has been signed off.
+    Once ``is_locked`` is set the ledger for that batch is read-only (HTTP 423 on writes).
+    """
+
+    __tablename__ = "reconciliation_batches"
+
+    batch_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    is_locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    lock_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Totals frozen at sign-off time (amounts stored as decimal strings, never floats).
+    closing_totals: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Refund total per settlement_id at sign-off; a locked batch's tax schedule reads these.
+    refund_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)

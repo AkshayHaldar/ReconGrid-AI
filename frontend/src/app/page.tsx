@@ -12,6 +12,7 @@ import { ConflictDrawer } from "@/components/ConflictDrawer";
 import { ExceptionDrawer } from "@/components/ExceptionDrawer";
 import { SettlementQaPanel } from "@/components/SettlementQaPanel";
 import { TallyExportModal } from "@/components/TallyExportModal";
+import { SignOffModal } from "@/components/SignOffModal";
 import { CheckCircle2, RotateCcw, X, AlertTriangle } from "lucide-react";
 import {
   ReconciliationRecordItem,
@@ -64,6 +65,7 @@ export default function DashboardPage() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isQaOpen, setIsQaOpen] = useState(false);
   const [isTallyConfirmOpen, setIsTallyConfirmOpen] = useState(false);
+  const [isSignOffOpen, setIsSignOffOpen] = useState(false);
   const [conflictTarget, setConflictTarget] = useState<ReconciliationRecordItem | null>(null);
   const [exceptionTarget, setExceptionTarget] = useState<ReconciliationRecordItem | null>(null);
 
@@ -83,6 +85,8 @@ export default function DashboardPage() {
     setAnchorId(undefined);
     setHighlightedId(null);
     setToast(null);
+    setStatus(null);
+    setIsSignOffOpen(false);
     setSelectedBankState(value);
   };
   const handleDateRangeChange = (from?: string, to?: string) => {
@@ -103,9 +107,16 @@ export default function DashboardPage() {
   const ledger = useLedgerRecords(query, anchorId);
   const { records, loading, pager } = ledger;
   const setRecords = pager.setRecords;
+  // Only the newest status request may write: a slow reply for another bank must not set this one's lock state.
+  const statusRequest = useRef(0);
   const loadStatus = useCallback(async () => {
-    setStatus(await fetchStatus(activeBatchId));
+    const request = ++statusRequest.current;
+    const next = await fetchStatus(activeBatchId);
+    if (request === statusRequest.current) setStatus(next);
   }, [activeBatchId]);
+  // Month-end close: a signed-off batch is read-only (the API answers 423 to writes).
+  const isLocked = Boolean(status?.is_locked);
+  const isBatchLockedError = (err: unknown) => (err as { code?: string } | null)?.code === "BATCH_LOCKED";
   const loadData = useCallback(async () => {
     setActionError(null);
     try {
@@ -119,6 +130,7 @@ export default function DashboardPage() {
   useEffect(() => { void loadStatus().catch(() => setActionError("Unable to load dashboard status.")); }, [loadStatus]);
 
   const openConflict = async (record: ReconciliationRecordItem) => {
+    if (isLocked) return;
     const request = ++conflictRequest.current;
     setConflictLoading(true);
     setActionError(null);
@@ -194,6 +206,7 @@ export default function DashboardPage() {
 
   // Handle single-click Approve with Optimistic UI & Undo Toast
   const handleApprove = async (recordId: string) => {
+    if (isLocked) return;
     const targetRecord = records.find((r) => r.id === recordId);
     if (!targetRecord) return;
 
@@ -226,9 +239,12 @@ export default function DashboardPage() {
       console.error("Approve failed:", err);
       // Revert on error
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
+      if (isBatchLockedError(err)) void loadData();
       setToast({
         id: `toast-err-${Date.now()}`,
-        message: "Failed to save approval. Reverted changes.",
+        message: isBatchLockedError(err)
+          ? "This period was signed off. The ledger is read-only."
+          : "Failed to save approval. Reverted changes.",
         type: "deny",
         recordId,
         previousRecord: targetRecord,
@@ -238,6 +254,7 @@ export default function DashboardPage() {
 
   // Handle single-click Deny with Optimistic UI & Undo Toast
   const handleDeny = async (recordId: string) => {
+    if (isLocked) return;
     const targetRecord = records.find((r) => r.id === recordId);
     if (!targetRecord) return;
 
@@ -270,9 +287,12 @@ export default function DashboardPage() {
     } catch (err) {
       console.error("Deny failed:", err);
       setRecords((prev) => prev.map((r) => (r.id === recordId ? targetRecord : r)));
+      if (isBatchLockedError(err)) void loadData();
       setToast({
         id: `toast-err-${Date.now()}`,
-        message: "Failed to save denial. Reverted changes.",
+        message: isBatchLockedError(err)
+          ? "This period was signed off. The ledger is read-only."
+          : "Failed to save denial. Reverted changes.",
         type: "deny",
         recordId,
       });
@@ -281,7 +301,7 @@ export default function DashboardPage() {
 
   // Handle Undo from Toast
   const handleUndo = async () => {
-    if (!toast?.previousRecord) return;
+    if (isLocked || !toast?.previousRecord) return;
     const { previousRecord } = toast;
     setRecords((prev) => prev.map((r) => (r.id === previousRecord.id ? previousRecord : r)));
     setToast(null);
@@ -302,6 +322,7 @@ export default function DashboardPage() {
 
   // Handle Batch Approve High-Confidence (≥90%)
   const handleBatchApprove = async () => {
+    if (isLocked) return;
     if (activeTab !== "ALL" && activeTab !== "SUGGESTED") return;
     setActionError(null);
     setBatchApproveLoading(true);
@@ -338,11 +359,14 @@ export default function DashboardPage() {
     chosenSettlementId: string,
     note?: string
   ) => {
+    // Throw, so the drawer shows the reason and stays open instead of closing as if it had resolved.
+    if (isLocked) throw new Error("This period was signed off. The ledger is read-only.");
     try {
       await resolveConflict(recordId, chosenSettlementId, note);
       await loadData();
     } catch (err) {
       console.error("Resolve conflict failed:", err);
+      if (isBatchLockedError(err)) void loadData();
       throw err;
     }
   };
@@ -399,6 +423,11 @@ export default function DashboardPage() {
         onExportTally={handleExportTally}
         onExportXlsx={handleExportXlsx}
         periodDate={status?.last_reconciled_at}
+        onOpenSignOff={() => setIsSignOffOpen(true)}
+        isLocked={isLocked}
+        lockedBy={status?.locked_by}
+        lockedAt={status?.locked_at}
+        lockNote={status?.lock_note}
       />
 
       <TallyExportModal
@@ -453,6 +482,7 @@ export default function DashboardPage() {
               toDate={toDate}
               onDateRangeChange={handleDateRangeChange}
               periodDate={status?.last_reconciled_at}
+              isLocked={isLocked}
             />
 
              <ReconciliationTable
@@ -472,6 +502,7 @@ export default function DashboardPage() {
                 onDeny={handleDeny}
                 onOpenConflict={openConflict}
                 onOpenException={(r) => setExceptionTarget(r)}
+                isLocked={isLocked}
                 loading={loading}
               />
             </>
@@ -490,6 +521,15 @@ export default function DashboardPage() {
         batchId={activeBatchId}
         onClose={() => setIsUploadOpen(false)}
         onUploadSuccess={loadData}
+      />
+
+      {/* Month-end Close & Sign Off */}
+      <SignOffModal
+        isOpen={isSignOffOpen}
+        onClose={() => setIsSignOffOpen(false)}
+        batchId={activeBatchId}
+        periodDate={status?.last_reconciled_at}
+        onLocked={loadData}
       />
 
       {/* Demo Sync / Synthetic Seeder Modal */}

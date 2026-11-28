@@ -9,6 +9,7 @@ from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
 from app.schemas.bank import BankUploadResponse
+from app.services.batch_lock import ensure_batch_unlocked
 from app.services.reconciliation import ReconciliationEngine
 from app.utils.csv_parser import BankCsvParser
 from app.utils.pdf_parser import (
@@ -136,6 +137,8 @@ class IngestionService:
                 detail="No valid bank transaction rows could be parsed from the uploaded file.",
             )
 
+        # A signed-off period takes no new rows, so an upload cannot overwrite approved decisions.
+        await ensure_batch_unlocked(self.recon_repo, batch_id)
         await self.recon_repo.lock_batch_before_upload(batch_id)
         inserted_count = 0
         duplicate_count = 0
