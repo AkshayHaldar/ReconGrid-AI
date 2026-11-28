@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import retry, retry_if_exception, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
+from app.core.locks import lock_batch
 from app.core.logging import logger
 from app.core.security import resolve_secret
 from app.models.razorpay_settlement import RazorpaySettlement
@@ -232,6 +233,9 @@ class RazorpayClient:
             except Exception as ex:
                 logger.error("razorpay_fetch_failed_using_cached_or_test", error=str(ex))
 
+        # The settlement fetch is done; serialize the upserts with other writers of the batch.
+        await lock_batch(self.session, batch_id)
+
         # Save to database
         for s_data in settlement_records:
             setl, created = await self.settlement_repo.upsert_settlement(s_data)
@@ -240,11 +244,18 @@ class RazorpayClient:
             else:
                 updated_count += 1
 
+        # sync_refunds calls Razorpay with retries, so commit first and do not hold the lock while it waits.
+        await self.session.commit()
         all_settlements = await self.settlement_repo.get_all()
         try:
             await self.sync_refunds(count_limit, settlements=all_settlements)
         except (httpx.HTTPError, RazorpayFetchError, ValidationError) as error:
             logger.warning("razorpay_refund_sync_failed", error_type=type(error).__name__)
+
+        # Take the lock again and re-read, so the reconcile sees whatever other writers committed meanwhile.
+        await self.session.commit()
+        await lock_batch(self.session, batch_id)
+        all_settlements = await self.settlement_repo.get_all()
 
         # Trigger reconciliation on active bank batch
         bank_txs = await self.bank_repo.get_all_by_batch(batch_id)

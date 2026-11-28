@@ -9,10 +9,12 @@ from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.locks import lock_batch
 from app.models.reconciliation_log import ReconciliationLog
 from app.repositories.reconciliation_repo import ReconciliationRepository
 from app.repositories.settlement_repo import SettlementRepository
@@ -217,6 +219,24 @@ async def get_reconciliation_records(
     )
 
 
+async def _get_log_for_update(repo: ReconciliationRepository, record_id: str) -> ReconciliationLog:
+    """Take the record's batch lock before loading it, so a reconcile run cannot interleave with the edit."""
+    batch_id = await repo.session.scalar(select(ReconciliationLog.batch_id).where(ReconciliationLog.id == record_id))
+    if batch_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    await lock_batch(repo.session, batch_id)
+    log = await repo.get_by_id(record_id)
+    if not log:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    if log.superseded:
+        # A reconcile run replaced the row, possibly while this request waited for the lock.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This record was replaced by a newer reconciliation run. Refresh the ledger and retry.",
+        )
+    return log
+
+
 @router.post("/records/{record_id}/approve", response_model=ApiResponse[ReconciliationRecordItem])
 async def approve_suggested_match(
     record_id: str,
@@ -225,9 +245,7 @@ async def approve_suggested_match(
 ):
     """Single-click human approval for a SUGGESTED match."""
     repo = ReconciliationRepository(db)
-    log = await repo.get_by_id(record_id)
-    if not log:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    log = await _get_log_for_update(repo, record_id)
 
     log.match_status = "MATCHED"
     log.human_action = "APPROVED"
@@ -244,6 +262,7 @@ async def batch_approve_suggested_matches(
     db: AsyncSession = Depends(get_db),
 ):
     """Approve high-confidence active suggestions with one database update."""
+    await lock_batch(db, batch_id)
     repo = ReconciliationRepository(db)
     count = await repo.batch_approve_suggestions(batch_id, request.min_confidence)
     return ApiResponse.ok(BatchApproveResponse(approved_count=count, batch_id=batch_id))
@@ -257,9 +276,7 @@ async def deny_suggested_match(
 ):
     """Single-click human dismissal of a SUGGESTED match -> moves to EXCEPTION."""
     repo = ReconciliationRepository(db)
-    log = await repo.get_by_id(record_id)
-    if not log:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    log = await _get_log_for_update(repo, record_id)
 
     log.match_status = "EXCEPTION"
     log.human_action = "DENIED"
@@ -278,9 +295,7 @@ async def revert_human_action(
 ):
     """Reverts a human APPROVED or DENIED action back to SUGGESTED."""
     repo = ReconciliationRepository(db)
-    log = await repo.get_by_id(record_id)
-    if not log:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    log = await _get_log_for_update(repo, record_id)
     if log.human_action not in ("APPROVED", "DENIED"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -312,9 +327,7 @@ async def resolve_conflict(
     repo = ReconciliationRepository(db)
     setl_repo = SettlementRepository(db)
 
-    log = await repo.get_by_id(record_id)
-    if not log:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+    log = await _get_log_for_update(repo, record_id)
 
     chosen_setl_id = resolve_req.chosen_settlement_id.strip() if resolve_req.chosen_settlement_id else ""
 

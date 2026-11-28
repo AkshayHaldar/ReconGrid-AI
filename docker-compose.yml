@@ -38,12 +38,45 @@ services:
       - ENV=${ENV:-development}
       - IS_TEST_MODE=${IS_TEST_MODE:-false}
       - ENABLE_DEMO=${ENABLE_DEMO:-false}
+      # The worker service below reconciles webhook events, so the API only enqueues them.
+      - WEBHOOK_INLINE_RECONCILE=${WEBHOOK_INLINE_RECONCILE:-false}
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
+
+  worker:
+    # Same image as the backend: drains QUEUED webhook events and recovers ones a crash left behind.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-recongrid}:${POSTGRES_PASSWORD:-recongrid}@postgres:5432/${POSTGRES_DB:-recongrid}}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - ENV=${ENV:-development}
+      - IS_TEST_MODE=${IS_TEST_MODE:-false}
+      - ENABLE_DEMO=${ENABLE_DEMO:-false}
+      - WEBHOOK_INLINE_RECONCILE=${WEBHOOK_INLINE_RECONCILE:-false}
+      - WEBHOOK_STALE_AFTER_SECONDS=${WEBHOOK_STALE_AFTER_SECONDS:-60}
+      - WEBHOOK_WORKER_POLL_SECONDS=${WEBHOOK_WORKER_POLL_SECONDS:-5}
+    command: python -m app.worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      # Healthy backend means "alembic upgrade head" has finished, so the worker never races migrations.
+      backend:
+        condition: service_healthy
 
   frontend:
     build:

@@ -42,6 +42,7 @@ backend/
 │   ├── core/
 │   │   ├── config.py       # Pydantic Settings management (.env)
 │   │   ├── database.py     # Async engine & session factory (SQLite / PostgreSQL)
+│   │   ├── locks.py        # Per-batch write lock (advisory lock / BEGIN IMMEDIATE)
 │   │   └── logging.py      # Structured JSON logging with structlog
 │   ├── models/             # SQLAlchemy async ORM models
 │   │   ├── bank_transaction.py
@@ -58,11 +59,12 @@ backend/
 │   │   ├── reconciliation.py # 4-tier matching engine & subset-sum scan
 │   │   ├── settlement_qa.py  # LLM narration with fact retrieval
 │   │   └── tally_export.py   # Accounting ERP XML export generator
-│   └── utils/
-│       ├── csv_parser.py   # Dialect sniffing, preamble skip, UTR extraction
-│       ├── fuzzy.py        # Levenshtein distance & token sort ratios
-│       ├── money.py        # Decimal money arithmetic and INR currency formatters
-│       └── pdf_parser.py   # Encrypted PDF text & table extractor
+│   ├── utils/
+│   │   ├── csv_parser.py   # Dialect sniffing, preamble skip, UTR extraction
+│   │   ├── fuzzy.py        # Levenshtein distance & token sort ratios
+│   │   ├── money.py        # Decimal money arithmetic and INR currency formatters
+│   │   └── pdf_parser.py   # Encrypted PDF text & table extractor
+│   └── worker.py           # Webhook outbox worker (python -m app.worker)
 ├── scripts/                # Benchmarking and synthetic data generators
 │   ├── benchmark_throughput.py
 │   ├── generate_scorecard_report.py
@@ -122,6 +124,16 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Open **[http://localhost:8000/docs](http://localhost:8000/docs)** for interactive Swagger API testing.
+
+### 5. Run the Webhook Worker
+
+In a second terminal (same virtual environment and `.env`):
+
+```bash
+python -m app.worker
+```
+
+It reconciles webhook events that are still `QUEUED`; see [Webhook acknowledgement and background work](#webhook-acknowledgement-and-background-work). Stop it with Ctrl+C or SIGTERM; an event in progress finishes first.
 
 ---
 
@@ -228,12 +240,24 @@ alembic downgrade -1
 
 ### Webhook acknowledgement and background work
 
-`POST /api/v1/webhooks/razorpay` verifies the HMAC and commits a deduplicated event before responding. Settlement events return HTTP 200 with `data.status = "queued"`, the event ID and `action_taken = "RECONCILIATION_QUEUED"` in the existing API envelope. Settlement upsert and reconciliation then run in a FastAPI background task with its own database session; the request session is never passed to the worker. Unsupported events are recorded without scheduling reconciliation.
+`POST /api/v1/webhooks/razorpay` verifies the HMAC and commits a deduplicated event before responding. Settlement events return HTTP 200 with `data.status = "queued"`, the event ID and `action_taken = "RECONCILIATION_QUEUED"` in the existing API envelope. Settlement upsert and reconciliation then run in a FastAPI background task with its own database session (unless `WEBHOOK_INLINE_RECONCILE=false`, see below); the request session is never passed to the worker. Unsupported events are recorded without scheduling reconciliation.
 
 The stored event status progresses from `QUEUED` to `PROCESSED`. A worker exception rolls back settlement/reconciliation writes, logs `webhook_reconciliation_failed` with the event ID, and records `FAILED`. A redelivery of that same signed event can atomically requeue a failed attempt. Completed or already queued duplicate deliveries are acknowledged without creating another task.
 
-BackgroundTasks runs inside the API process: the event record is durable, but the task queue is not. A process crash can leave a queued event requiring operator recovery; an automatic restart-safe worker/outbox is a separate enhancement. The provider has already received HTTP 200, so do not rely on it automatically retrying a later background failure. No production latency guarantee is implied by local tests.
+#### Outbox worker and crash recovery
 
-Default-batch webhook workers acquire a transaction-scoped PostgreSQL advisory lock (key `1380405828`, reserved for this worker) before reading reconciliation inputs. SQLite uses `BEGIN IMMEDIATE` before its reads. This prevents distinct webhook workers from committing an older reconciliation snapshot after a newer one; the lock is released on commit/rollback. Other code paths do not participate in this worker lock. SQLite serializes writers database-wide, so queued work can delay another write there; production latency must be measured with the intended database.
+The `QUEUED` row is the outbox entry: it is committed before the provider gets HTTP 200, so it survives an API crash or restart. `python -m app.worker` (the `worker` service in `docker-compose.yml`) polls `processed_webhook_events` and hands each `QUEUED` event to the same `reconcile_webhook_event` the API uses. That call claims the event inside one transaction: it takes the batch lock, re-reads the row only if it is still `QUEUED` (`FOR UPDATE SKIP LOCKED` on PostgreSQL), upserts the settlement, reconciles and marks it `PROCESSED`. There is no separate in-progress status. A crash or kill mid reconcile rolls the whole attempt back, so the row is simply `QUEUED` again, and two callers racing for the same event (API task and worker, or two workers) end with one reconciliation and one no-op.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `WEBHOOK_INLINE_RECONCILE` | `true` | `true`: the API still reconciles right after acknowledging (FastAPI background task) and the worker only takes events still `QUEUED` after `WEBHOOK_STALE_AFTER_SECONDS`. `false`: the API only enqueues and the worker reconciles every event on its next poll. `docker-compose.yml` sets `false`. |
+| `WEBHOOK_STALE_AFTER_SECONDS` | `60` | How long, measured from the row's `updated_at`, a `QUEUED` event belongs to the in-process task before the worker recovers it. Ignored when inline reconcile is off. |
+| `WEBHOOK_WORKER_POLL_SECONDS` | `5` | Sleep between polls when the outbox is empty. |
+
+Without a running worker, inline reconcile still works as before, but an event left `QUEUED` by a crash waits until a worker starts. `FAILED` events are not retried by the worker; a redelivery requeues them as before. The provider has already received HTTP 200, so do not rely on it automatically retrying a later background failure. No production latency guarantee is implied by local tests. The worker does not use Redis yet: the outbox is the PostgreSQL table, so no extra dependency is needed.
+
+#### Per-batch write lock
+
+Every path that rewrites a batch's reconciliation snapshot takes the same lock first, through `app.core.locks.lock_batch`: the webhook reconcile (batch `default`), `POST /bank/upload` (before its first insert), `POST /razorpay/sync` (after the settlement fetch, before its upserts; it commits and releases the lock while refunds are fetched from Razorpay, then takes it again and re-reads before reconciling) and the human mutations (`records/{id}/approve`, `deny`, `revert`, `resolve-conflict` and `{batch_id}/batch-approve`). On PostgreSQL it is `pg_advisory_xact_lock(1380405828, <32-bit key from sha256(batch_id)>)`, so writers of the same batch queue up while other batches are not blocked. SQLite uses `BEGIN IMMEDIATE` before the reads; it has a single writer per database, so there every batch shares the lock and queued work can delay another write. The lock is released on commit/rollback. This keeps a webhook, an upload, a sync or a review action from committing an older snapshot over a newer one. Production latency must be measured with the intended database.
 
 A `settlement.processed` event without a nonempty settlement entity is rejected before an event is recorded, allowing a corrected redelivery. If a provider settlement ID is absent, the fallback uses `setl_` plus a 59-character event-ID digest, keeping the identifier within its 64-character column without truncating common event-ID prefixes.

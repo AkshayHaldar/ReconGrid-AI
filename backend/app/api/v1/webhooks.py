@@ -7,13 +7,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, status
-from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import async_session_factory, get_db
+from app.core.locks import lock_batch
 from app.core.logging import logger
 from app.core.security import razorpay_webhook_guard
+from app.models.razorpay_settlement import RazorpayRefund
 from app.models.webhook_event import ProcessedWebhookEvent
 from app.repositories.bank_repo import BankRepository
 from app.repositories.reconciliation_repo import ReconciliationRepository
@@ -34,6 +37,7 @@ MAX_REJECTED_ROWS = 50  # unauthenticated callers can create these, so only the 
 MAX_STORED_BODY_CHARS = 4096
 IDLE_AFTER = timedelta(hours=24)
 RECENT_EVENTS_DEFAULT = 15
+WEBHOOK_BATCH_ID = "default"  # settlement webhooks are reconciled against the default bank batch
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -110,30 +114,61 @@ async def recording_webhook_guard(
         raise
 
 
-async def reconcile_webhook_event(event_id: str) -> None:
-    """Process a committed event with a session owned by this background task."""
+async def _lock_batches(db: AsyncSession, batch_ids: Sequence[str]) -> None:
+    """Take the extra batch locks of a refund event. The caller already holds WEBHOOK_BATCH_ID.
+
+    Only webhook reconciliation holds more than one batch lock, always the default one first and the
+    rest in sorted order, so two writers can never wait on each other in a cycle.
+    """
+    for batch_id in sorted(set(batch_ids) - {WEBHOOK_BATCH_ID}):
+        await lock_batch(db, batch_id)
+
+
+async def reconcile_webhook_event(event_id: str) -> bool:
+    """Claim a QUEUED event and reconcile it in one transaction. True when this call processed it.
+
+    The in-process fast path and the outbox worker (python -m app.worker) both come through here. The
+    batch lock plus the QUEUED re-check (FOR UPDATE SKIP LOCKED on PostgreSQL) mean only one caller
+    processes an event. There is no separate in-progress status: a crash rolls the attempt back and
+    the row stays QUEUED until the worker picks it up again.
+    """
     async with async_session_factory() as db:
         try:
-            # Serialize default-batch snapshots across API processes, not just coroutines.
-            if db.get_bind().dialect.name == "postgresql":
-                await db.execute(text("SELECT pg_advisory_xact_lock(1380405828)"))
-            elif db.get_bind().dialect.name == "sqlite":
-                await db.execute(text("BEGIN IMMEDIATE"))
+            # Serialize snapshots of the batch across API and worker processes, not just coroutines.
+            await lock_batch(db, WEBHOOK_BATCH_ID)
             event = await db.scalar(
-                select(ProcessedWebhookEvent).where(ProcessedWebhookEvent.razorpay_event_id == event_id)
+                select(ProcessedWebhookEvent)
+                .where(
+                    ProcessedWebhookEvent.razorpay_event_id == event_id,
+                    ProcessedWebhookEvent.processing_status == "QUEUED",
+                )
+                .with_for_update(skip_locked=True)
             )
-            if event is None or event.processing_status != "QUEUED":
-                return
+        except OperationalError as exc:
+            # e.g. SQLite gave up waiting for the write lock. Nothing was written; the event stays QUEUED.
+            logger.warning("webhook_reconciliation_busy", event_id=event_id, error=str(exc))
+            return False
+        if event is None:
+            return False  # already processed or failed, or another transaction holds it
+        try:
             settlement_repo = SettlementRepository(db)
-            batch_ids: Sequence[str] = ["default"]
+            batch_ids: Sequence[str] = [WEBHOOK_BATCH_ID]
             if event.event_type == "refund.processed":
                 entity = event.payload["payload"]["refund"]["entity"]
-                refund = await settlement_repo.upsert_refund(RazorpayRefundPayload.model_validate(entity).to_record(entity))
+                record = RazorpayRefundPayload.model_validate(entity).to_record(entity)
+                # Lock before writing: a sync of one of these batches may be about to update the same rows.
+                linked = await db.scalar(
+                    select(RazorpayRefund.settlement_id).where(RazorpayRefund.refund_id == record["refund_id"])
+                )
+                if linked:
+                    await _lock_batches(db, await settlement_repo.get_active_batches_for_settlement(linked))
+                refund = await settlement_repo.upsert_refund(record)
                 if not refund.settlement_id:
                     event.processing_status = "PROCESSED"
                     await db.commit()
-                    return
+                    return True
                 batch_ids = await settlement_repo.get_active_batches_for_settlement(refund.settlement_id) or batch_ids
+                await _lock_batches(db, batch_ids)
             else:
                 setl_data = event.payload["payload"]["settlement"]["entity"]
                 amount_inr = paise_to_rupees(setl_data.get("amount", 0))
@@ -167,16 +202,22 @@ async def reconcile_webhook_event(event_id: str) -> None:
                     await engine.reconcile_batch(bank_txs, all_setls, batch_id=batch_id)
             event.processing_status = "PROCESSED"
             await db.commit()
+            return True
         except Exception:
             await db.rollback()
             logger.exception("webhook_reconciliation_failed", event_id=event_id)
-            # Roll back partial settlement/reconciliation writes before marking failure.
+            # Roll back partial settlement/reconciliation writes before marking failure, and never
+            # overwrite an outcome another worker committed in the meantime.
             await db.execute(
                 update(ProcessedWebhookEvent)
-                .where(ProcessedWebhookEvent.razorpay_event_id == event_id)
+                .where(
+                    ProcessedWebhookEvent.razorpay_event_id == event_id,
+                    ProcessedWebhookEvent.processing_status == "QUEUED",
+                )
                 .values(processing_status="FAILED")
             )
             await db.commit()
+            return False
 
 
 @router.post("/razorpay", response_model=ApiResponse[WebhookAckResponse])
@@ -228,7 +269,8 @@ async def handle_razorpay_webhook(
         )
         await db.commit()
         if claimed is not None:
-            background_tasks.add_task(reconcile_webhook_event, event_id)
+            if settings.WEBHOOK_INLINE_RECONCILE:
+                background_tasks.add_task(reconcile_webhook_event, event_id)
             return ApiResponse.ok(
                 WebhookAckResponse(status="queued", event_id=event_id, action_taken="RECONCILIATION_QUEUED")
             )
@@ -255,7 +297,8 @@ async def handle_razorpay_webhook(
             raise
         return ApiResponse.ok(WebhookAckResponse(status="ok", event_id=event_id, action_taken="DUPLICATE_IGNORED"))
 
-    if should_queue:
+    # The QUEUED row is the outbox entry; the worker recovers it if this in-process task never finishes.
+    if should_queue and settings.WEBHOOK_INLINE_RECONCILE:
         background_tasks.add_task(reconcile_webhook_event, event_id)
     return ApiResponse.ok(
         WebhookAckResponse(
